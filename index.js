@@ -467,4 +467,52 @@ async function handleCommand(sock, jid, command, args, msg, isAdmin) {
       await sock.sendMessage(
         jid,
         { text: `🟢 Bot läuft seit ${uptimeMin} Minuten.` },
-    
+        { quoted: msg }
+      );
+      break;
+    }
+
+    case 'id':
+      await sock.sendMessage(
+        jid,
+        { text: `📋 Diese Chat-ID lautet:\n${jid}` },
+        { quoted: msg }
+      );
+      break;
+
+    case 'gruppen': {
+      try {
+        const groups = await sock.groupFetchAllParticipating();
+        const list = Object.values(groups)
+          .map((g) => `• ${g.subject}\n  ${g.id}`)
+          .join('\n\n');
+        await sock.sendMessage(
+          jid,
+          { text: `📋 *Gruppen, in denen der Bot Mitglied ist:*\n\n${list || 'Keine Gruppen gefunden.'}` },
+          { quoted: msg }
+        );
+      } catch (err) {
+        await sock.sendMessage(jid, { text: `Fehler beim Abrufen der Gruppen: ${err.message}` });
+      }
+      break;
+    }
+
+    case 'neustart':
+      if (!isAdmin) {
+        await sock.sendMessage(jid, { text: '⛔ Nur Admins dürfen den Bot neu starten.' }, { quoted: msg });
+        return;
+      }
+      await sock.sendMessage(jid, { text: '🔄 Bot wird neu gestartet...' }, { quoted: msg });
+      setTimeout(() => process.exit(0), 1000);
+      break;
+
+    default:
+      // Unbekannte Befehle werden bewusst ignoriert, um Spam zu vermeiden.
+      break;
+  }
+}
+
+startBot().catch((err) => {
+  logger.error({ err }, 'Bot konnte nicht gestartet werden');
+  process.exit(1);
+});
