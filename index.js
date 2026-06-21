@@ -8,6 +8,8 @@
 
 const express = require('express');
 const pino = require('pino');
+const os = require('os');
+const fs = require('fs');
 const qrcode = require('qrcode-terminal');
 const QRCode = require('qrcode');
 const {
@@ -57,9 +59,42 @@ const COMMUNITY_ID = process.env.COMMUNITY_ID || '';
 // Wird beim Start und danach periodisch aktualisiert.
 let communityGroupIds = new Set();
 
+// Optional: Passwort zum Schutz von /qr, /dashboard und /restart.
+// Ohne dieses Passwort kann JEDER im Internet, der die URL kennt, deinen Bot-Status
+// sehen und neu starten lassen. Stark empfohlen, ein sicheres Passwort zu setzen!
+// Aufruf dann z. B. so: https://deine-url.onrender.com/dashboard?key=DEIN_PASSWORT
+const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD || '';
+
 const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
 
-// ---------- HTTP-Server für Health-Checks (UptimeRobot etc.) ----------
+// Verhindert XSS, wenn Werte aus der URL (z. B. ?key=...) in HTML eingebettet werden.
+function escapeHtml(str) {
+  return String(str ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
+// Middleware: schützt /qr, /dashboard und /restart mit einem Passwort,
+// falls DASHBOARD_PASSWORD gesetzt ist. Ohne gesetztes Passwort bleibt es offen
+// (mit einer deutlichen Warnung im Log, damit das nicht versehentlich passiert).
+function requireDashboardAuth(req, res, next) {
+  if (!DASHBOARD_PASSWORD) return next();
+  const providedKey = req.query.key || req.body?.key;
+  if (providedKey === DASHBOARD_PASSWORD) return next();
+  res.status(401).send(`
+    <html><body style="font-family:sans-serif; text-align:center; padding-top:60px;">
+      <h3>🔒 Zugriff verweigert</h3>
+      <p>Bitte URL mit <code>?key=DEIN_PASSWORT</code> aufrufen.</p>
+    </body></html>
+  `);
+}
+
+if (!DASHBOARD_PASSWORD) {
+  logger.warn(
+    'DASHBOARD_PASSWORD ist nicht gesetzt. /qr, /dashboard und /restart sind ' +
+    'für JEDEN im Internet ohne Passwort erreichbar. Setze DASHBOARD_PASSWORD in den Render-Umgebungsvariablen!'
+  );
+}
 
 const app = express();
 app.use(express.urlencoded({ extended: true }));
@@ -76,14 +111,34 @@ app.get('/ping', (req, res) => {
   res.status(200).send('OK');
 });
 
-app.get('/qr', async (req, res) => {
+// Liefert Festplattenspeicher-Infos, falls verfügbar (Node 19+, manche Hosts unterstützen es nicht)
+function getDiskInfo() {
+  return new Promise((resolve) => {
+    if (!fs.statfs) return resolve(null);
+    fs.statfs('.', (err, stats) => {
+      if (err) return resolve(null);
+      const totalBytes = stats.blocks * stats.bsize;
+      const freeBytes = stats.bavail * stats.bsize;
+      resolve({
+        totalGb: (totalBytes / 1024 / 1024 / 1024).toFixed(2),
+        freeGb: (freeBytes / 1024 / 1024 / 1024).toFixed(2),
+        usedGb: ((totalBytes - freeBytes) / 1024 / 1024 / 1024).toFixed(2),
+      });
+    });
+  });
+}
+
+app.get('/qr', requireDashboardAuth, async (req, res) => {
+  const keyParam = DASHBOARD_PASSWORD ? `?key=${encodeURIComponent(req.query.key)}` : '';
+  const safeKeyParam = escapeHtml(keyParam);
+
   if (botStatus === 'connected') {
-    return res.redirect('/dashboard');
+    return res.redirect(`/dashboard${keyParam}`);
   }
   if (!currentQr) {
     return res.send(`
       <html>
-        <head><meta http-equiv="refresh" content="10"></head>
+        <head><meta http-equiv="refresh" content="10;url=/qr${safeKeyParam}"></head>
         <body style="text-align:center; font-family: sans-serif; padding-top: 40px;">
           <h2>⏳ Noch kein QR-Code verfügbar</h2>
           <p>Seite lädt automatisch neu...</p>
@@ -95,7 +150,7 @@ app.get('/qr', async (req, res) => {
     const qrImage = await QRCode.toDataURL(currentQr, { width: 400, margin: 2 });
     res.send(`
       <html>
-        <head><meta http-equiv="refresh" content="20"></head>
+        <head><meta http-equiv="refresh" content="20;url=/qr${safeKeyParam}"></head>
         <body style="text-align:center; font-family: sans-serif; padding-top: 40px;">
           <h2>WhatsApp QR-Code scannen</h2>
           <img src="${qrImage}" alt="QR Code" />
@@ -109,22 +164,35 @@ app.get('/qr', async (req, res) => {
   }
 });
 
-app.get('/dashboard', (req, res) => {
+app.get('/dashboard', requireDashboardAuth, async (req, res) => {
+  const keyParam = DASHBOARD_PASSWORD ? `?key=${encodeURIComponent(req.query.key)}` : '';
+  const safeKeyParam = escapeHtml(keyParam);
+  const safeKeyValue = escapeHtml(DASHBOARD_PASSWORD ? req.query.key : '');
+
   if (botStatus !== 'connected') {
-    return res.redirect('/qr');
+    return res.redirect(`/qr${keyParam}`);
   }
 
-  const usedMb = (process.memoryUsage().heapUsed / 1024 / 1024).toFixed(1);
-  const totalMb = (process.memoryUsage().rss / 1024 / 1024).toFixed(1);
+  const mem = process.memoryUsage();
+  const usedMb = (mem.heapUsed / 1024 / 1024).toFixed(1);
+  const heapTotalMb = (mem.heapTotal / 1024 / 1024).toFixed(1);
+  const rssMb = (mem.rss / 1024 / 1024).toFixed(1);
   const uptimeMin = Math.floor(process.uptime() / 60);
   const uptimeStr = uptimeMin >= 60
     ? `${Math.floor(uptimeMin / 60)}h ${uptimeMin % 60}min`
     : `${uptimeMin} min`;
 
+  const sysTotalMb = (os.totalmem() / 1024 / 1024).toFixed(0);
+  const sysFreeMb = (os.freemem() / 1024 / 1024).toFixed(0);
+  const sysUsedMb = (sysTotalMb - sysFreeMb).toFixed(0);
+  const cpuLoad = os.loadavg()[0].toFixed(2);
+
+  const disk = await getDiskInfo();
+
   res.send(`
     <html>
       <head>
-        <meta http-equiv="refresh" content="15">
+        <meta http-equiv="refresh" content="15;url=/dashboard${safeKeyParam}">
         <style>
           body { font-family: sans-serif; background:#111; color:#eee; padding: 24px; max-width: 480px; margin: auto; }
           h2 { color:#4ade80; }
@@ -148,16 +216,28 @@ app.get('/dashboard', (req, res) => {
         </div>
         <div class="card">
           <div class="row"><span class="label">Uptime</span><span class="value">${uptimeStr}</span></div>
-          <div class="row"><span class="label">RAM (Heap)</span><span class="value">${usedMb} MB</span></div>
-          <div class="row"><span class="label">RAM (Gesamt)</span><span class="value">${totalMb} MB</span></div>
           <div class="row"><span class="label">Befehle verarbeitet</span><span class="value">${messagesProcessed}</span></div>
           <div class="row"><span class="label">Letzter Befehl</span><span class="value">${lastCommand || '–'}</span></div>
+        </div>
+        <div class="card">
+          <div class="row"><span class="label">RAM Bot (Heap genutzt)</span><span class="value">${usedMb} MB</span></div>
+          <div class="row"><span class="label">RAM Bot (Heap gesamt)</span><span class="value">${heapTotalMb} MB</span></div>
+          <div class="row"><span class="label">RAM Bot (Prozess gesamt)</span><span class="value">${rssMb} MB</span></div>
+          <div class="row"><span class="label">RAM Server gesamt</span><span class="value">${sysUsedMb} / ${sysTotalMb} MB</span></div>
+          <div class="row"><span class="label">CPU-Last (1 Min)</span><span class="value">${cpuLoad}</span></div>
+        </div>
+        <div class="card">
+          ${disk
+            ? `<div class="row"><span class="label">Speicherplatz</span><span class="value">${disk.usedGb} / ${disk.totalGb} GB</span></div>
+               <div class="row"><span class="label">Frei</span><span class="value">${disk.freeGb} GB</span></div>`
+            : `<div class="row"><span class="label">Speicherplatz</span><span class="value">nicht verfügbar</span></div>`}
         </div>
         <div class="card">
           <div class="row"><span class="label">Erlaubte Community</span><span class="value">${COMMUNITY_ID ? '✅ aktiv' : '❌ nicht gesetzt'}</span></div>
           <div class="row"><span class="label">Bekannte Gruppen</span><span class="value">${communityGroupIds.size}</span></div>
         </div>
         <form method="POST" action="/restart" style="margin-top:16px;">
+          <input type="hidden" name="key" value="${safeKeyValue}" />
           <button class="restart" onclick="return confirm('Bot wirklich neu starten?')">🔄 Bot neu starten</button>
         </form>
         <p style="color:#555; font-size:12px; margin-top:16px;">Seite aktualisiert sich automatisch alle 15 Sekunden.</p>
@@ -166,7 +246,7 @@ app.get('/dashboard', (req, res) => {
   `);
 });
 
-app.post('/restart', (req, res) => {
+app.post('/restart', requireDashboardAuth, (req, res) => {
   res.send('<p>Neustart wird eingeleitet... Render startet den Service neu.</p>');
   logger.warn('Neustart über Dashboard angefordert.');
   setTimeout(() => process.exit(0), 500); // Render startet den Prozess automatisch neu
@@ -282,8 +362,11 @@ async function startBot() {
     const [command, ...args] = text.slice(COMMAND_PREFIX.length).trim().split(/\s+/);
     const commandLower = command.toLowerCase();
 
-    // '!id' und '!gruppen' funktionieren überall, damit man Gruppen-IDs herausfinden kann.
-    const isSetupCommand = commandLower === 'id' || commandLower === 'gruppen';
+    // '!id' funktioniert überall, damit man neue Gruppen-IDs herausfinden kann
+    // (z. B. beim Hinzufügen einer neuen Gruppe zur Community).
+    // '!gruppen' NICHT überall erlauben: es würde sonst alle Community-Gruppennamen
+    // und IDs an jeden ausgeben, der den Bot in einen fremden Chat einlädt.
+    const isSetupCommand = commandLower === 'id';
 
     // Sicherheitsprüfung: Bot antwortet NUR in Gruppen, NIE in privaten Chats
     // (außer bei Setup-Befehlen, die du selbst zum Einrichten brauchst).
@@ -384,52 +467,4 @@ async function handleCommand(sock, jid, command, args, msg, isAdmin) {
       await sock.sendMessage(
         jid,
         { text: `🟢 Bot läuft seit ${uptimeMin} Minuten.` },
-        { quoted: msg }
-      );
-      break;
-    }
-
-    case 'id':
-      await sock.sendMessage(
-        jid,
-        { text: `📋 Diese Chat-ID lautet:\n${jid}` },
-        { quoted: msg }
-      );
-      break;
-
-    case 'gruppen': {
-      try {
-        const groups = await sock.groupFetchAllParticipating();
-        const list = Object.values(groups)
-          .map((g) => `• ${g.subject}\n  ${g.id}`)
-          .join('\n\n');
-        await sock.sendMessage(
-          jid,
-          { text: `📋 *Gruppen, in denen der Bot Mitglied ist:*\n\n${list || 'Keine Gruppen gefunden.'}` },
-          { quoted: msg }
-        );
-      } catch (err) {
-        await sock.sendMessage(jid, { text: `Fehler beim Abrufen der Gruppen: ${err.message}` });
-      }
-      break;
-    }
-
-    case 'neustart':
-      if (!isAdmin) {
-        await sock.sendMessage(jid, { text: '⛔ Nur Admins dürfen den Bot neu starten.' }, { quoted: msg });
-        return;
-      }
-      await sock.sendMessage(jid, { text: '🔄 Bot wird neu gestartet...' }, { quoted: msg });
-      setTimeout(() => process.exit(0), 1000);
-      break;
-
-    default:
-      // Unbekannte Befehle werden bewusst ignoriert, um Spam zu vermeiden.
-      break;
-  }
-}
-
-startBot().catch((err) => {
-  logger.error({ err }, 'Bot konnte nicht gestartet werden');
-  process.exit(1);
-});
+    
