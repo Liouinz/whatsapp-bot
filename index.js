@@ -33,6 +33,11 @@ const PORT = process.env.PORT || 3000;
 // Präfix für Bot-Befehle, z. B. "!hilfe"
 const COMMAND_PREFIX = process.env.COMMAND_PREFIX || '!';
 
+// Optional: Die eigene Render-URL, damit sich der Server selbst wach halten kann.
+// Beispiel: https://whatsapp-bot-vbnp.onrender.com
+// Falls leer, macht der Bot keinen Self-Ping (empfohlen: stattdessen UptimeRobot nutzen).
+const SELF_URL = process.env.SELF_URL || '';
+
 const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
 
 // ---------- HTTP-Server für Health-Checks (UptimeRobot etc.) ----------
@@ -47,10 +52,27 @@ app.get('/ping', (req, res) => {
 
 app.get('/qr', async (req, res) => {
   if (botStatus === 'connected') {
-    return res.send('<h2>✅ Bot ist bereits verbunden. Kein QR-Code nötig.</h2>');
+    return res.send(`
+      <html>
+        <head><meta http-equiv="refresh" content="60"></head>
+        <body style="text-align:center; font-family: sans-serif; padding-top: 40px;">
+          <h2>✅ Bot ist verbunden</h2>
+          <p>Kein QR-Code nötig – die WhatsApp-Session ist aktiv.</p>
+          <p style="color:gray; font-size: 12px;">Uptime: ${Math.floor(process.uptime() / 60)} Minuten</p>
+        </body>
+      </html>
+    `);
   }
   if (!currentQr) {
-    return res.send('<h2>⏳ Noch kein QR-Code verfügbar. Seite in ein paar Sekunden neu laden.</h2>');
+    return res.send(`
+      <html>
+        <head><meta http-equiv="refresh" content="10"></head>
+        <body style="text-align:center; font-family: sans-serif; padding-top: 40px;">
+          <h2>⏳ Noch kein QR-Code verfügbar</h2>
+          <p>Seite lädt automatisch neu...</p>
+        </body>
+      </html>
+    `);
   }
   try {
     const qrImage = await QRCode.toDataURL(currentQr, { width: 400, margin: 2 });
@@ -80,6 +102,20 @@ app.get('/', (req, res) => {
 app.listen(PORT, () => {
   logger.info(`HTTP-Server läuft auf Port ${PORT}`);
 });
+
+// ---------- Optionaler Self-Ping ----------
+// Hält den Render-Free-Service wach, indem der Bot regelmäßig seine eigene URL aufruft.
+// HINWEIS: UptimeRobot (externer Dienst) ist die zuverlässigere Lösung, weil er auch
+// funktioniert, falls der Prozess selbst mal abstürzt. Self-Ping ist nur ein Fallback.
+if (SELF_URL) {
+  const SELF_PING_INTERVAL_MS = 4 * 60 * 1000; // alle 4 Minuten (unter dem 15-Min-Sleep-Limit)
+  setInterval(() => {
+    fetch(`${SELF_URL}/ping`)
+      .then(() => logger.info('Self-Ping erfolgreich'))
+      .catch((err) => logger.warn({ err }, 'Self-Ping fehlgeschlagen'));
+  }, SELF_PING_INTERVAL_MS);
+  logger.info(`Self-Ping aktiviert: alle ${SELF_PING_INTERVAL_MS / 60000} Minuten an ${SELF_URL}/ping`);
+}
 
 // ---------- WhatsApp-Bot ----------
 
