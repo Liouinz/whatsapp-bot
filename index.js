@@ -9,6 +9,7 @@
 const express = require('express');
 const pino = require('pino');
 const qrcode = require('qrcode-terminal');
+const QRCode = require('qrcode');
 const {
   default: makeWASocket,
   DisconnectReason,
@@ -38,9 +39,35 @@ const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
 
 const app = express();
 let botStatus = 'starting'; // starting | connected | disconnected
+let currentQr = null; // speichert den aktuellsten QR-Code-String
 
 app.get('/ping', (req, res) => {
   res.status(200).send('OK');
+});
+
+app.get('/qr', async (req, res) => {
+  if (botStatus === 'connected') {
+    return res.send('<h2>✅ Bot ist bereits verbunden. Kein QR-Code nötig.</h2>');
+  }
+  if (!currentQr) {
+    return res.send('<h2>⏳ Noch kein QR-Code verfügbar. Seite in ein paar Sekunden neu laden.</h2>');
+  }
+  try {
+    const qrImage = await QRCode.toDataURL(currentQr, { width: 400, margin: 2 });
+    res.send(`
+      <html>
+        <head><meta http-equiv="refresh" content="20"></head>
+        <body style="text-align:center; font-family: sans-serif; padding-top: 40px;">
+          <h2>WhatsApp QR-Code scannen</h2>
+          <img src="${qrImage}" alt="QR Code" />
+          <p>Einstellungen → Verknüpfte Geräte → Gerät verknüpfen</p>
+          <p style="color:gray; font-size: 12px;">Seite aktualisiert sich automatisch alle 20 Sekunden.</p>
+        </body>
+      </html>
+    `);
+  } catch (err) {
+    res.status(500).send('Fehler beim Erzeugen des QR-Codes: ' + err.message);
+  }
 });
 
 app.get('/', (req, res) => {
@@ -74,8 +101,10 @@ async function startBot() {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
+      currentQr = qr;
       logger.info('QR-Code zum Einloggen (im Logs-Tab von Render sichtbar):');
       qrcode.generate(qr, { small: true });
+      logger.info('Alternativ als Bild öffnen: [DEINE-RENDER-URL]/qr');
     }
 
     if (connection === 'open') {
