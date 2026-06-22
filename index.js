@@ -11,7 +11,7 @@
  * - HTTP-Sicherheits-Header über Helmet (CSP, etc.)
  * - Begrenzte Body-Größe für POST-Requests (gegen Payload-Floods)
  * - "trust proxy" korrekt gesetzt, damit Rate-Limiting & Logging echte
- *   Client-IPs sehen (Render läuft hinter einem Reverse-Proxy)
+ * Client-IPs sehen (Render läuft hinter einem Reverse-Proxy)
  * - Rate-Limiting für WhatsApp-Befehle pro Absender (gegen Spam/Missbrauch)
  * - "!gruppen" und "!neustart" sind nur noch für Gruppen-Admins erlaubt
  * - Cooldown für Neustarts (verhindert Neustart-Spam über Chat & Dashboard)
@@ -62,28 +62,12 @@ const ALLOWED_CHATS = (process.env.ALLOWED_CHATS || '')
 // Format: "123456789@g.us"
 const COMMUNITY_ID = process.env.COMMUNITY_ID || '';
 
-// Passwort zum Schutz von /qr, /dashboard und /restart.
-// Ohne dieses Passwort kann JEDER im Internet, der die URL kennt, den Bot-Status
-// sehen und neu starten lassen. Unbedingt ein langes, zufälliges Passwort setzen!
-const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD || '';
-
 const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
 
 // ---------- Konfiguration validieren ----------
 // Prüft beim Start die wichtigsten Einstellungen und warnt bei Problemen,
 // statt erst später mit unklaren Fehlern zu scheitern.
 function validateConfig() {
-  if (!DASHBOARD_PASSWORD) {
-    logger.warn(
-      'DASHBOARD_PASSWORD ist nicht gesetzt. /qr, /dashboard und /restart sind ' +
-      'für JEDEN im Internet ohne Passwort erreichbar. Setze DASHBOARD_PASSWORD in den Render-Umgebungsvariablen!'
-    );
-  } else if (DASHBOARD_PASSWORD.length < 12) {
-    logger.warn(
-      'DASHBOARD_PASSWORD ist kürzer als 12 Zeichen. Für mehr Sicherheit ein längeres, zufälliges Passwort verwenden.'
-    );
-  }
-
   if (!HEARTBEAT_GROUP_ID) {
     logger.warn('HEARTBEAT_GROUP_ID nicht gesetzt – Heartbeat ist deaktiviert.');
   } else if (!HEARTBEAT_GROUP_ID.endsWith('@g.us')) {
@@ -164,7 +148,7 @@ app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 app.use(
   createDashboardRouter({
     botState,
-    dashboardPassword: DASHBOARD_PASSWORD,
+    dashboardPassword: '', // Passwortschutz entfernt, leerer String übergeben
     triggerRestart,
     logger,
   })
