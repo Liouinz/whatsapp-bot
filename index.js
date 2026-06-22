@@ -48,7 +48,10 @@ const botState = {
   me: null, // { id, name }
   sock: null,
   groups: [], // [{ id, subject, size, isCommunity, community }]
+  groupPics: {}, // jid -> Profilbild-URL (gecacht)
   groupsFetchedAt: 0,
+  commandCount: 0,
+  lastCommand: null, // { cmd, at }
 };
 
 // Persistente Konfiguration: in welchen Gruppen der Bot aktiv sein soll
@@ -103,10 +106,17 @@ const STYLE = `
   .status{display:inline-block;padding:4px 12px;border-radius:999px;font-size:.85rem;font-weight:600}
   .on{background:#10391f;color:#4ade80} .off{background:#3a1010;color:#f87171}
   .grp{display:flex;align-items:center;gap:12px;padding:12px;border:1px solid #2a2f3a;
-       border-radius:10px;margin:8px 0;background:#141821}
-  .grp input{width:20px;height:20px;accent-color:#4f9cf9;flex-shrink:0}
-  .grp .name{font-weight:600} .badge{font-size:.7rem;background:#2a3550;color:#9db8ff;
-       padding:2px 8px;border-radius:999px;margin-left:6px}
+       border-radius:10px;margin:8px 0;background:#141821;cursor:pointer}
+  .grp:hover{border-color:#4f9cf9}
+  .grp input{width:22px;height:22px;accent-color:#4f9cf9;flex-shrink:0}
+  .grp .avatar{width:46px;height:46px;border-radius:50%;flex-shrink:0;object-fit:cover;
+       background:#2a2f3a}
+  .grp .meta{flex:1;min-width:0}
+  .grp .name{font-weight:600;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .badge{font-size:.7rem;background:#2a3550;color:#9db8ff;padding:2px 8px;border-radius:999px;margin-left:6px}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px}
+  .stat{background:#141821;border:1px solid #2a2f3a;border-radius:10px;padding:14px}
+  .stat .k{color:#8b93a3;font-size:.8rem} .stat .v{font-size:1.3rem;font-weight:700;margin-top:2px}
   button{background:#4f9cf9;color:#06122a;border:0;border-radius:10px;padding:12px 20px;
          font-size:1rem;font-weight:700;cursor:pointer;width:100%;margin-top:12px}
   button:hover{background:#6fb0ff}
@@ -259,11 +269,16 @@ app.get('/settings', async (req, res) => {
       const badge = g.isCommunity
         ? '<span class="badge">🏘️ Community</span>'
         : g.community ? '<span class="badge">in Community</span>' : '';
+      const pic = botState.groupPics[g.id];
+      const avatar = pic
+        ? `<img class="avatar" src="${escapeHtml(pic)}" alt="" loading="lazy">`
+        : `<div class="avatar" style="display:flex;align-items:center;justify-content:center;font-size:1.2rem">👥</div>`;
       groupsHtml += `
         <label class="grp">
+          ${avatar}
+          <span class="meta"><span class="name">${escapeHtml(g.subject || 'Unbenannt')}${badge}</span>
+            <span class="muted">${g.size || 0} Mitglieder</span></span>
           <input type="checkbox" name="active" value="${escapeHtml(g.id)}" ${checked}>
-          <span><span class="name">${escapeHtml(g.subject || 'Unbenannt')}</span>${badge}
-            <br><span class="muted">${g.size || 0} Mitglieder</span></span>
         </label>`;
     }
   }
@@ -284,8 +299,50 @@ app.get('/settings', async (req, res) => {
     </form>
     <div class="card row">
       <a href="/settings${keyParam}">🔄 Gruppen neu laden</a>
+      <a href="/dashboard${keyParam}">📊 Dashboard</a>
       <a href="/qr${keyParam}">QR-Code</a>
     </div>`));
+});
+
+// Live-Dashboard: liest Server-/Bot-Daten aus (passwortgeschützt)
+app.get('/dashboard', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!requireAuth(req, res)) return;
+  const keyParam = `?key=${encodeURIComponent(req.query.key)}`;
+
+  const mem = process.memoryUsage();
+  const mb = (n) => (n / 1024 / 1024).toFixed(0) + ' MB';
+  const upS = Math.round((Date.now() - botState.startedAt) / 1000);
+  const uptime = `${Math.floor(upS / 3600)}h ${Math.floor((upS % 3600) / 60)}m ${upS % 60}s`;
+  const nummer = botState.me ? botState.me.id.split(':')[0] : '–';
+  const last = botState.lastCommand
+    ? `${escapeHtml(botState.lastCommand.cmd)} (${new Date(botState.lastCommand.at).toLocaleTimeString('de-DE')})`
+    : '–';
+  const statusBadge = botState.connected
+    ? '<span class="status on">✅ verbunden</span>'
+    : '<span class="status off">⭕ getrennt</span>';
+
+  res.send(page('Dashboard', `
+    <div class="card">
+      <div class="row"><h1>📊 Dashboard</h1>${statusBadge}</div>
+      <p class="muted">Live-Daten vom Server · aktualisiert alle 10 s</p>
+    </div>
+    <div class="card">
+      <div class="stats">
+        <div class="stat"><div class="k">Nummer</div><div class="v">${escapeHtml(nummer)}</div></div>
+        <div class="stat"><div class="k">Laufzeit</div><div class="v">${uptime}</div></div>
+        <div class="stat"><div class="k">Aktive Gruppen</div><div class="v">${config.activeGroups.length}</div></div>
+        <div class="stat"><div class="k">Gruppen gesamt</div><div class="v">${botState.groups.length}</div></div>
+        <div class="stat"><div class="k">Befehle verarbeitet</div><div class="v">${botState.commandCount}</div></div>
+        <div class="stat"><div class="k">Letzter Befehl</div><div class="v" style="font-size:1rem">${last}</div></div>
+        <div class="stat"><div class="k">RAM (Heap)</div><div class="v">${mb(mem.heapUsed)}</div></div>
+        <div class="stat"><div class="k">RAM (gesamt)</div><div class="v">${mb(mem.rss)}</div></div>
+      </div>
+    </div>
+    <div class="card row">
+      <a href="/settings${keyParam}">⚙️ Einstellungen</a>
+      <a href="/qr${keyParam}">QR-Code</a>
+    </div>`, { refresh: 10, refreshUrl: `/dashboard${keyParam}` }));
 });
 
 // Auswahl speichern
@@ -335,9 +392,26 @@ async function refreshGroups(force = false) {
       .sort((a, b) => (a.subject || '').localeCompare(b.subject || ''));
     botState.groupsFetchedAt = Date.now();
     logger.info({ anzahl: botState.groups.length }, 'Gruppen geladen');
+    fetchGroupPictures(); // Profilbilder im Hintergrund nachladen
   } catch (err) {
     logger.warn({ err }, 'Gruppen konnten nicht geladen werden');
   }
+}
+
+// Profilbilder der Gruppen laden (gecacht, im Hintergrund)
+async function fetchGroupPictures() {
+  if (!botState.sock) return;
+  await Promise.allSettled(
+    botState.groups
+      .filter((g) => !(g.id in botState.groupPics))
+      .map(async (g) => {
+        try {
+          botState.groupPics[g.id] = await botState.sock.profilePictureUrl(g.id, 'image');
+        } catch {
+          botState.groupPics[g.id] = null; // kein Bild vorhanden
+        }
+      })
+  );
 }
 
 // ---------- WhatsApp-Verbindung ----------
@@ -395,11 +469,69 @@ async function startBot() {
           '';
         if (!text.startsWith(COMMAND_PREFIX)) continue;
 
-        const cmd = text.slice(COMMAND_PREFIX.length).trim().split(/\s+/)[0].toLowerCase();
-        if (cmd === 'ping') {
-          await sock.sendMessage(jid, { text: 'pong 🏓' });
-        } else if (cmd === 'id') {
-          await sock.sendMessage(jid, { text: `Gruppen-ID: ${jid}` });
+        const parts = text.slice(COMMAND_PREFIX.length).trim().split(/\s+/);
+        const cmd = parts[0].toLowerCase();
+        const args = parts.slice(1);
+
+        const reply = (t) => sock.sendMessage(jid, { text: t }, { quoted: msg });
+        let handled = true;
+
+        switch (cmd) {
+          case 'hilfe':
+          case 'help':
+          case 'menu':
+            await reply(
+              `🤖 *Bot-Befehle*\n\n` +
+              `${COMMAND_PREFIX}hilfe – zeigt diese Hilfe\n` +
+              `${COMMAND_PREFIX}ping – testet, ob der Bot reagiert\n` +
+              `${COMMAND_PREFIX}info – Bot-Status & Laufzeit\n` +
+              `${COMMAND_PREFIX}id – zeigt die Gruppen-ID\n` +
+              `${COMMAND_PREFIX}regeln – zeigt die Gruppenregeln\n` +
+              `${COMMAND_PREFIX}sag <Text> – Bot wiederholt deinen Text`
+            );
+            break;
+          case 'ping': {
+            const ms = Date.now() - (Number(msg.messageTimestamp) * 1000 || Date.now());
+            await reply(`pong 🏓${ms > 0 ? ` (${ms} ms)` : ''}`);
+            break;
+          }
+          case 'info':
+          case 'status': {
+            const upS = Math.round((Date.now() - botState.startedAt) / 1000);
+            const uptime = `${Math.floor(upS / 3600)}h ${Math.floor((upS % 3600) / 60)}m`;
+            await reply(
+              `🤖 *Bot-Info*\n` +
+              `Status: online ✅\n` +
+              `Laufzeit: ${uptime}\n` +
+              `Aktive Gruppen: ${config.activeGroups.length}\n` +
+              `Befehle verarbeitet: ${botState.commandCount + 1}`
+            );
+            break;
+          }
+          case 'id':
+            await reply(`Gruppen-ID: ${jid}`);
+            break;
+          case 'regeln':
+            await reply(
+              `📋 *Gruppenregeln*\n\n` +
+              `1. Sei respektvoll 🤝\n` +
+              `2. Kein Spam 🚫\n` +
+              `3. Bleib beim Thema 💬\n\n` +
+              `_(Regeln später anpassbar)_`
+            );
+            break;
+          case 'sag':
+          case 'echo':
+            if (args.length) await reply(args.join(' '));
+            else await reply(`Nutzung: ${COMMAND_PREFIX}sag <Text>`);
+            break;
+          default:
+            handled = false;
+        }
+
+        if (handled) {
+          botState.commandCount++;
+          botState.lastCommand = { cmd: COMMAND_PREFIX + cmd, at: Date.now() };
         }
       } catch (err) {
         logger.warn({ err }, 'Fehler beim Verarbeiten einer Nachricht');
