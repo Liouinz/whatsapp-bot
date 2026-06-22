@@ -37,20 +37,32 @@ const COMMAND_PREFIX = process.env.COMMAND_PREFIX || '!';
 const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
 
 // Verfügbare Befehle (für Hilfe-Text und Pro-Gruppen-Schalter)
+// adminDefault: true → Standard "nur Admins" für neue Gruppen
 const COMMANDS = [
-  { key: 'hilfe', desc: 'zeigt die Hilfe' },
-  { key: 'ping', desc: 'testet, ob der Bot reagiert' },
-  { key: 'info', desc: 'Bot-Status & Laufzeit' },
-  { key: 'id', desc: 'zeigt die Gruppen-ID' },
+  { key: 'hilfe',  desc: 'zeigt die Hilfe' },
+  { key: 'ping',   desc: 'testet, ob der Bot reagiert' },
+  { key: 'info',   desc: 'Bot-Status & Laufzeit' },
+  { key: 'id',     desc: 'zeigt die Gruppen-ID' },
   { key: 'regeln', desc: 'zeigt die Gruppenregeln' },
-  { key: 'sag', desc: 'Bot wiederholt deinen Text' },
-  { key: 'alle', desc: 'markiert alle Mitglieder (nur Admins)' },
-  { key: 'zeit', desc: 'aktuelle Uhrzeit' },
+  { key: 'sag',    desc: 'Bot wiederholt deinen Text', adminDefault: true },
+  { key: 'alle',   desc: 'markiert alle Mitglieder', adminDefault: true },
+  { key: 'zeit',   desc: 'aktuelle Uhrzeit' },
   { key: 'würfel', desc: 'würfelt eine Zahl' },
   { key: 'gruppe', desc: 'Infos zur Gruppe' },
+  { key: 'marry',  desc: 'heiraten oder Ehestatus anzeigen' },
+  { key: '8ball',  desc: 'Magic 8-Ball – Antwort auf deine Frage' },
+  { key: 'münze',  desc: 'wirft eine Münze – Kopf oder Zahl' },
+  { key: 'rps',    desc: 'Schere-Stein-Papier gegen den Bot' },
+  { key: 'melden', desc: 'Meldung an die Admins schicken' },
 ];
 // Alias -> kanonischer Befehl
-const ALIAS = { help: 'hilfe', menu: 'hilfe', status: 'info', echo: 'sag', tagall: 'alle', dice: 'würfel', wuerfel: 'würfel' };
+const ALIAS = {
+  help: 'hilfe', menu: 'hilfe', status: 'info', echo: 'sag', tagall: 'alle',
+  dice: 'würfel', wuerfel: 'würfel',
+  heiraten: 'marry',
+  coin: 'münze', muenze: 'münze',
+  report: 'melden',
+};
 
 // Gemeinsamer Zustand
 const botState = {
@@ -68,15 +80,31 @@ const botState = {
   moderation: { actionsTotal: 0, lastAction: null, lastActionAt: null },
 };
 
-const moderation = createModeration({ logger, botState });
+const moderation = createModeration({
+  logger,
+  botState,
+  loadWarn: (gid) => config.groups[gid]?.moderation?._state,
+  saveWarn: (gid, data) => {
+    if (!config.groups[gid]) config.groups[gid] = defaultGroupConfig();
+    config.groups[gid].moderation._state = data;
+    persist();
+  },
+});
 
 // ---------- Konfiguration (pro Gruppe) ----------
 let config = { groups: {} };
 
 function defaultGroupConfig() {
   const commands = {};
-  for (const c of COMMANDS) commands[c.key] = true;
+  for (const c of COMMANDS) commands[c.key] = c.adminDefault ? 'admin' : 'all';
   return { active: true, commands, moderation: { badwords: false, links: false, warnLimit: 3, extraBadwords: [] } };
+}
+// Migriert legacy-boolean-Werte auf neue String-Werte ('all'|'admin'|false).
+function migrateCmdValue(val, adminDefault) {
+  if (val === false) return false;
+  if (val === true) return 'all';
+  if (val === 'admin' || val === 'all') return val;
+  return adminDefault ? 'admin' : 'all';
 }
 // Effektive Konfiguration einer Gruppe (mit Defaults). Nicht konfigurierte
 // Gruppen gelten als inaktiv.
@@ -84,10 +112,15 @@ function effectiveGroupConfig(jid) {
   const d = defaultGroupConfig();
   const g = config.groups[jid];
   if (!g) return { ...d, active: false };
+  const commands = {};
+  for (const c of COMMANDS) {
+    commands[c.key] = migrateCmdValue((g.commands || {})[c.key], c.adminDefault);
+  }
   return {
     active: g.active !== false,
-    commands: { ...d.commands, ...(g.commands || {}) },
+    commands,
     moderation: { ...d.moderation, ...(g.moderation || {}) },
+    marriages: g.marriages || {},
   };
 }
 function activeGroupCount() {
@@ -95,6 +128,32 @@ function activeGroupCount() {
 }
 async function persist() {
   await store.saveConfig(config, logger);
+}
+
+// ---------- Ehe-Helfer ----------
+const proposals = new Map(); // `${groupJid}:${targetJid}` → { proposerJid, expiresAt }
+
+function marriageKey(jid1, jid2) {
+  return [jid1, jid2].map((j) => j.split('@')[0]).sort().join('-');
+}
+function findMarriage(groupJid, personJid) {
+  const marriages = config.groups[groupJid]?.marriages || {};
+  for (const [key, m] of Object.entries(marriages)) {
+    if (m.p1 === personJid || m.p2 === personJid) return { key, ...m };
+  }
+  return null;
+}
+function happinessStatus(since) {
+  const days = (Date.now() - since) / (1000 * 60 * 60 * 24);
+  const seed = since % 100;
+  const base = Math.min(100, 60 + days * 0.5 + (seed % 20));
+  const wobble = ((seed * 7 + Math.floor(days) * 3) % 20) - 10;
+  const pct = Math.round(Math.max(20, Math.min(100, base + wobble)));
+  if (pct >= 90) return `${pct}% 💍 unzertrennlich`;
+  if (pct >= 70) return `${pct}% 😍 sehr glücklich`;
+  if (pct >= 50) return `${pct}% 🙂 ganz gut`;
+  if (pct >= 35) return `${pct}% 😐 läuft so`;
+  return `${pct}% 😤 angespannt`;
 }
 
 // ---------- Hilfsfunktionen ----------
@@ -160,6 +219,10 @@ const STYLE = `
   .eye{position:absolute;right:6px;bottom:6px;width:auto;margin:0;padding:6px 9px;background:rgba(255,255,255,.08);
     font-size:1.15rem;border-radius:8px}
   .row{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+  select.input{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%237fd1ff' stroke-width='2' fill='none'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;padding-right:36px;cursor:pointer}
+  table{width:100%;border-collapse:collapse;font-size:.9rem}
+  th,td{padding:8px 10px;text-align:left;border-bottom:1px solid rgba(255,255,255,.08)}
+  th{color:#aeb8c6;font-weight:600} tr:hover td{background:rgba(255,255,255,.03)}
   @media(max-width:600px){body{padding:14px} .card{padding:18px}}
 `;
 
@@ -332,6 +395,7 @@ app.get('/settings', async (req, res) => {
     <div class="card row">
       <a href="/settings${keyParam}">🔄 Neu laden</a>
       <a href="/dashboard${keyParam}">📊 Dashboard</a>
+      <a href="/reports${keyParam}">📋 Meldungen</a>
       <a href="/qr${keyParam}">QR-Code</a>
     </div>`));
 });
@@ -353,17 +417,27 @@ app.get('/group', async (req, res) => {
   const saved = req.query.saved ? '<p class="muted">✅ Gespeichert.</p>' : '';
   const chk = (b) => (b ? 'checked' : '');
 
+  function cmdSelect(key) {
+    const val = gc.commands[key];
+    const sel = (v) => val === v ? 'selected' : '';
+    return `<select class="input" name="cmd_${key}" style="width:auto;min-width:160px">
+      <option value="all" ${sel('all')}>Alle</option>
+      <option value="admin" ${sel('admin')}>Nur Admins</option>
+      <option value="off" ${sel(false)}>Deaktiviert</option>
+    </select>`;
+  }
+
   const commandsHtml = COMMANDS.map((c) => `
-    <label class="opt">
+    <div class="opt">
       <span>${COMMAND_PREFIX}${c.key}<br><span class="muted">${c.desc}</span></span>
-      <input type="checkbox" name="cmd_${c.key}" ${chk(gc.commands[c.key] !== false)}>
-    </label>`).join('');
+      ${cmdSelect(c.key)}
+    </div>`).join('');
 
   res.send(page('Gruppe konfigurieren', `
     <div class="card">
       <div class="row"><h1>⚙️ ${escapeHtml(group.subject || 'Gruppe')}</h1>
         <a href="/settings${keyParam}">← zurück</a></div>
-      <p class="muted">${group.size || 0} Mitglieder</p>
+      <p class="muted">${group.size || 0} Mitglieder · <a href="/group/members?id=${encodeURIComponent(id)}&key=${encodeURIComponent(req.query.key)}">👥 Mitglieder anzeigen</a></p>
       ${saved}
     </div>
     <form method="POST" action="/group/save?id=${encodeURIComponent(id)}&key=${keyVal}">
@@ -401,14 +475,21 @@ app.post('/group/save', async (req, res) => {
   if (!id) return res.status(400).send('Fehlende Gruppen-ID.');
 
   const commands = {};
-  for (const c of COMMANDS) commands[c.key] = req.body[`cmd_${c.key}`] !== undefined;
+  for (const c of COMMANDS) {
+    const raw = req.body[`cmd_${c.key}`];
+    commands[c.key] = raw === 'admin' ? 'admin' : raw === 'off' ? false : 'all';
+  }
   const extra = String(req.body.extraBadwords || '')
     .split(',').map((s) => s.trim()).filter(Boolean);
 
+  // Bestehende Felder bewahren (marriages, moderation._state)
+  const existing = config.groups[id] || {};
   config.groups[id] = {
+    ...existing,
     active: req.body.active !== undefined,
     commands,
     moderation: {
+      ...(existing.moderation || {}),
       badwords: req.body.mod_badwords !== undefined,
       links: req.body.mod_links !== undefined,
       warnLimit: Math.min(10, Math.max(1, Number(req.body.warnLimit) || 3)),
@@ -418,6 +499,88 @@ app.post('/group/save', async (req, res) => {
   await persist();
   logger.info({ group: id, active: config.groups[id].active }, 'Gruppen-Konfiguration gespeichert');
   res.redirect(`/group?id=${encodeURIComponent(id)}&key=${keyVal}&saved=1`);
+});
+
+// Mitglieder einer Gruppe
+app.get('/group/members', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!requireAuth(req, res)) return;
+  const id = String(req.query.id || '');
+  const keyParam = keyOf(req);
+  const group = botState.groups.find((g) => g.id === id);
+  if (!id || !group) {
+    return res.status(404).send(page('Nicht gefunden',
+      `<div class="card"><h1>Gruppe nicht gefunden</h1><a href="/settings${keyParam}"><button>Zurück</button></a></div>`));
+  }
+  if (!botState.connected) {
+    return res.status(503).send(page('Nicht verbunden',
+      `<div class="card"><h1>⚠️ Nicht verbunden</h1><a href="/settings${keyParam}"><button>Zurück</button></a></div>`));
+  }
+
+  const meta = await getGroupMeta(id);
+  const participants = meta?.participants || [];
+  const botJid = jidNormalizedUser(botState.me?.id || '');
+
+  let rows = '';
+  for (const p of participants) {
+    const num = p.id.split('@')[0];
+    const adminBadge = p.admin ? `<span class="badge">${p.admin === 'superadmin' ? '👑 Ersteller' : '🛡️ Admin'}</span>` : '';
+    const isSelf = jidNormalizedUser(p.id) === botJid ? '<span class="badge">🤖 Bot</span>' : '';
+    rows += `<tr><td>${escapeHtml(num)}</td><td>${adminBadge}${isSelf}</td></tr>`;
+  }
+
+  res.send(page(`Mitglieder – ${group.subject}`, `
+    <div class="card">
+      <div class="row">
+        <h1>👥 ${escapeHtml(group.subject || 'Gruppe')}</h1>
+        <a href="/group?id=${encodeURIComponent(id)}&key=${encodeURIComponent(req.query.key)}">← zurück</a>
+      </div>
+      <p class="muted">${participants.length} Mitglieder</p>
+    </div>
+    <div class="card">
+      <table>
+        <thead><tr><th>Nummer</th><th>Rolle</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="2" class="muted">Keine Mitglieder geladen.</td></tr>'}</tbody>
+      </table>
+    </div>`));
+});
+
+// Meldungen
+app.get('/reports', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!requireAuth(req, res)) return;
+  const keyParam = keyOf(req);
+  const reports = (config.reports || []).slice().reverse();
+
+  let rows = '';
+  for (const r of reports) {
+    const date = new Date(r.at).toLocaleString('de-DE');
+    rows += `<tr>
+      <td>${escapeHtml(date)}</td>
+      <td>${escapeHtml(r.groupName || r.groupJid)}</td>
+      <td>${escapeHtml(r.senderNum)}</td>
+      <td>${escapeHtml(r.text)}</td>
+    </tr>`;
+  }
+
+  res.send(page('Meldungen', `
+    <div class="card">
+      <div class="row">
+        <h1>📋 Meldungen</h1>
+        <a href="/settings${keyParam}">← zurück</a>
+      </div>
+      <p class="muted">${reports.length} Meldung(en) gesamt</p>
+    </div>
+    <div class="card" style="overflow-x:auto">
+      <table>
+        <thead><tr><th>Datum</th><th>Gruppe</th><th>Von</th><th>Text</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="4" class="muted">Noch keine Meldungen.</td></tr>'}</tbody>
+      </table>
+    </div>
+    <div class="card row">
+      <a href="/settings${keyParam}">⚙️ Einstellungen</a>
+      <a href="/dashboard${keyParam}">📊 Dashboard</a>
+    </div>`));
 });
 
 // Live-Dashboard
@@ -463,6 +626,7 @@ app.get('/dashboard', (req, res) => {
     </div>
     <div class="card row">
       <a href="/settings${keyParam}">⚙️ Einstellungen</a>
+      <a href="/reports${keyParam}">📋 Meldungen</a>
       <a href="/qr${keyParam}">QR-Code</a>
     </div>`, { refresh: 10, refreshUrl: `/dashboard${keyParam}` }));
 });
@@ -592,22 +756,56 @@ async function startBot() {
           if (moderated) continue;
         }
 
-        // 2) Befehle
+        // 2a) Heiratsbestätigung prüfen (vor Befehl-Check)
+        if (text.trim().toLowerCase() === 'ja') {
+          const proposalKey = `${jid}:${senderJid}`;
+          const proposal = proposals.get(proposalKey);
+          if (proposal && Date.now() < proposal.expiresAt) {
+            proposals.delete(proposalKey);
+            if (findMarriage(jid, senderJid) || findMarriage(jid, proposal.proposerJid)) {
+              await sock.sendMessage(jid, { text: 'Eine der Personen ist bereits verheiratet! 💔' });
+            } else {
+              const key = marriageKey(senderJid, proposal.proposerJid);
+              if (!config.groups[jid]) config.groups[jid] = defaultGroupConfig();
+              if (!config.groups[jid].marriages) config.groups[jid].marriages = {};
+              config.groups[jid].marriages[key] = { p1: senderJid, p2: proposal.proposerJid, since: Date.now() };
+              await persist();
+              const n1 = senderJid.split('@')[0], n2 = proposal.proposerJid.split('@')[0];
+              await sock.sendMessage(jid, {
+                text: `💍 @${n2} und @${n1} sind jetzt verheiratet! Herzlichen Glückwunsch! 🎊`,
+                mentions: [senderJid, proposal.proposerJid],
+              });
+            }
+            continue;
+          }
+        }
+
+        // 2b) Befehle
         if (!text.startsWith(COMMAND_PREFIX)) continue;
         const parts = text.slice(COMMAND_PREFIX.length).trim().split(/\s+/);
         const raw = parts[0].toLowerCase();
         const cmd = ALIAS[raw] || raw;
         const args = parts.slice(1);
-        if (group.commands[cmd] === false) continue; // in dieser Gruppe deaktiviert
+
+        const cmdSetting = group.commands[cmd];
+        if (cmdSetting === false) continue; // in dieser Gruppe deaktiviert
+        if (cmdSetting === 'admin') {
+          const metaForAdmin = await getGroupMeta(jid);
+          if (!isAdmin(metaForAdmin, senderJid)) continue; // nur Admins
+        }
 
         const reply = (t) => sock.sendMessage(jid, { text: t }, { quoted: msg });
         let handled = true;
 
         switch (cmd) {
           case 'hilfe': {
-            const lines = COMMANDS.filter((c) => group.commands[c.key] !== false)
-              .map((c) => `${COMMAND_PREFIX}${c.key} – ${c.desc}`).join('\n');
-            await reply(`🤖 *Bot-Befehle*\n\n${lines}`);
+            const lines = COMMANDS
+              .filter((c) => group.commands[c.key] !== false)
+              .map((c) => {
+                const adminTag = group.commands[c.key] === 'admin' ? ' 🛡️' : '';
+                return `${COMMAND_PREFIX}${c.key}${adminTag} – ${c.desc}`;
+              }).join('\n');
+            await reply(`🤖 *Bot-Befehle*\n\n${lines}\n\n🛡️ = nur Admins`);
             break;
           }
           case 'ping': {
@@ -648,12 +846,99 @@ async function startBot() {
           case 'alle': {
             const meta = await getGroupMeta(jid);
             if (!meta) { await reply('Konnte die Gruppe nicht laden.'); break; }
-            if (!isAdmin(meta, senderJid)) { await reply('Nur Admins dürfen alle markieren.'); break; }
             const mentions = meta.participants.map((p) => p.id);
             await sock.sendMessage(jid, {
               text: '📢 *Sammelruf*\n' + mentions.map((m) => '@' + m.split('@')[0]).join(' '),
               mentions,
             });
+            break;
+          }
+          case 'marry': {
+            const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+            const target = mentioned[0];
+            if (!target) {
+              const m = findMarriage(jid, senderJid);
+              if (!m) {
+                await reply(`Du bist nicht verheiratet. 💌 Schreib ${COMMAND_PREFIX}marry @person um einen Antrag zu machen.`);
+              } else {
+                const partner = m.p1 === senderJid ? m.p2 : m.p1;
+                const days = Math.floor((Date.now() - m.since) / 86400000);
+                const pNum = partner.split('@')[0];
+                await sock.sendMessage(jid, {
+                  text: `💍 Du bist seit ${days} Tag(en) mit @${pNum} verheiratet.\nGlück: ${happinessStatus(m.since)}`,
+                  mentions: [partner],
+                }, { quoted: msg });
+              }
+              break;
+            }
+            if (target === senderJid) { await reply('Du kannst dich nicht selbst heiraten! 😅'); break; }
+            const botJidM = jidNormalizedUser(botState.me?.id || '');
+            if (jidNormalizedUser(target) === botJidM) { await reply('Danke für den Antrag, aber ich bin nur ein Bot! 🤖'); break; }
+            if (findMarriage(jid, senderJid)) { await reply('Du bist bereits verheiratet! 💍'); break; }
+            if (findMarriage(jid, target)) {
+              await sock.sendMessage(jid, {
+                text: `@${target.split('@')[0]} ist bereits verheiratet! 💔`,
+                mentions: [target],
+              }, { quoted: msg });
+              break;
+            }
+            proposals.set(`${jid}:${target}`, { proposerJid: senderJid, targetJid: target, expiresAt: Date.now() + 5 * 60 * 1000 });
+            const sNum2 = senderJid.split('@')[0], tNum2 = target.split('@')[0];
+            await sock.sendMessage(jid, {
+              text: `💌 @${sNum2} macht @${tNum2} einen Heiratsantrag! 💍\n@${tNum2}, antworte mit *ja* um anzunehmen (5 Minuten Zeit).`,
+              mentions: [senderJid, target],
+            });
+            break;
+          }
+          case '8ball': {
+            const BALL_ANSWERS = [
+              'Ja, definitiv! ✅', 'Absolut! 🎯', 'Sehr wahrscheinlich 👍',
+              'Die Zeichen sagen ja ✨', 'Ohne Zweifel! 💯', 'Du kannst darauf zählen 🎱',
+              'Ungewiss – frag später nochmal 🤔', 'Besser nicht zu sagen 🌫️',
+              'Schwer zu sagen 😶', 'Eher nicht ❌', 'Sehr zweifelhaft 🙅',
+              'Auf keinen Fall! 🚫',
+            ];
+            const q = args.join(' ').trim();
+            if (!q) { await reply(`Stell eine Frage! z.B. ${COMMAND_PREFIX}8ball Wird es heute regnen?`); break; }
+            await reply(`🎱 *${BALL_ANSWERS[Math.floor(Math.random() * BALL_ANSWERS.length)]}*`);
+            break;
+          }
+          case 'münze':
+            await reply(Math.random() < 0.5 ? '🪙 *Kopf!*' : '🪙 *Zahl!*');
+            break;
+          case 'rps': {
+            const RPS_CHOICES = ['stein', 'schere', 'papier'];
+            const RPS_EMOJI = { stein: '🪨', schere: '✂️', papier: '📄' };
+            const RPS_BEATS = { stein: 'schere', schere: 'papier', papier: 'stein' };
+            const userPick = args[0]?.toLowerCase();
+            if (!RPS_CHOICES.includes(userPick)) {
+              await reply(`Wähle: stein, schere oder papier.\nBeispiel: ${COMMAND_PREFIX}rps stein`);
+              break;
+            }
+            const botPick = RPS_CHOICES[Math.floor(Math.random() * 3)];
+            let rpsResult;
+            if (userPick === botPick) rpsResult = 'Unentschieden! 🤝';
+            else if (RPS_BEATS[userPick] === botPick) rpsResult = 'Du gewinnst! 🎉';
+            else rpsResult = 'Ich gewinne! 🤖';
+            await reply(`${RPS_EMOJI[userPick]} vs ${RPS_EMOJI[botPick]} – *${rpsResult}*`);
+            break;
+          }
+          case 'melden': {
+            const reportText = args.join(' ').trim();
+            if (!reportText) { await reply(`Nutzung: ${COMMAND_PREFIX}melden <Grund>`); break; }
+            const grpInfo = botState.groups.find((g) => g.id === jid);
+            if (!config.reports) config.reports = [];
+            config.reports.push({
+              id: Date.now(),
+              groupJid: jid,
+              groupName: grpInfo?.subject || jid,
+              senderNum: senderJid.split('@')[0],
+              text: reportText,
+              at: Date.now(),
+            });
+            if (config.reports.length > 200) config.reports = config.reports.slice(-200);
+            await persist();
+            await reply('✅ Deine Meldung wurde aufgenommen. Das Team wird sie prüfen.');
             break;
           }
           default:

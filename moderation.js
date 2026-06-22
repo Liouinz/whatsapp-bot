@@ -9,16 +9,12 @@
  * Pro Gruppe konfigurierbar über das übergebene `group.moderation`-Objekt:
  *   { badwords:boolean, links:boolean, warnLimit:number, extraBadwords:string[] }
  *
- * Wichtig: Zum Löschen von Nachrichten muss der Bot in der Gruppe ADMIN sein.
- * Ist er das nicht, schlägt das Löschen fehl und wird nur geloggt.
- * Soft-Mute bedeutet: Während der Mute-Zeit wird jede weitere Nachricht der
- * Person sofort wieder gelöscht (WhatsApp kennt kein echtes Stummschalten).
- *
- * Zustände (Verwarnungen, Mutes, Zähler) liegen im Arbeitsspeicher.
+ * Persistente Warnungen: createModeration erhält optionale Callbacks
+ *   loadWarn(groupJid) → { warnings:{jid:{count,lastAt}}, mutedUntil:{jid:timestamp} }
+ *   saveWarn(groupJid, data) → void
+ * damit Verwarnungen und Mutes Neustarts überleben.
  */
 
-// Starter-Liste an Beleidigungen. Pro Gruppe über das Textfeld auf der Webseite
-// erweiterbar (group.moderation.extraBadwords).
 const DEFAULT_BADWORDS = [
   'arschloch', 'hurensohn', 'hurensöhne', 'hure', 'fotze', 'wichser',
   'schlampe', 'nutte', 'missgeburt', 'spast', 'spasti', 'mongo', 'bastard',
@@ -27,7 +23,6 @@ const DEFAULT_BADWORDS = [
   'retard', 'nigga',
 ];
 
-// Erkennt Links/URLs: http(s)://, www., WhatsApp-Einladungen und gängige TLDs.
 const LINK_REGEX =
   /(https?:\/\/|www\.)\S+|\bchat\.whatsapp\.com\/\S+|\b[a-z0-9-]+\.(com|net|org|de|io|me|gg|xyz|info|link|to|app|co|ru|tv|shop|store)\b/i;
 
@@ -41,8 +36,6 @@ function findBadword(text, extraWords = []) {
     else singleWords.add(w);
   }
   for (const p of phrases) if (lower.includes(p)) return p;
-  // In Wörter zerlegen (umlaut-bewusst), exakt vergleichen → keine Fehlalarme
-  // wie "Klasse" → "ass".
   const tokens = lower.split(/[^a-zäöüß0-9]+/).filter(Boolean);
   for (const t of tokens) if (singleWords.has(t)) return t;
   return null;
@@ -52,18 +45,44 @@ function hasLink(text) {
   return LINK_REGEX.test(text);
 }
 
-function createModeration({ logger, botState }) {
-  const warnings = new Map(); // senderJid -> { count, lastAt }
-  const mutedUntil = new Map(); // senderJid -> timestamp
-  const msgTimes = new Map(); // senderJid -> [timestamps]
-  const lastMsg = new Map(); // senderJid -> { text, count }
-
+function createModeration({ logger, botState, loadWarn, saveWarn }) {
   const MUTE_MS = 10 * 60 * 1000;
   const SPAM_LIMIT = 6;
   const SPAM_WINDOW_MS = 10 * 1000;
   const REPEAT_LIMIT = 4;
 
-  function isMuted(jid) {
+  // Per-Gruppe Cache: groupJid -> { warnings, mutedUntil, msgTimes, lastMsg }
+  const groupCache = new Map();
+
+  function getState(groupJid) {
+    if (!groupCache.has(groupJid)) {
+      const saved = (loadWarn && loadWarn(groupJid)) || {};
+      groupCache.set(groupJid, {
+        warnings: new Map(Object.entries(saved.warnings || {})),
+        mutedUntil: new Map(
+          Object.entries(saved.mutedUntil || {}).map(([k, v]) => [k, Number(v)])
+        ),
+        msgTimes: new Map(),
+        lastMsg: new Map(),
+      });
+    }
+    return groupCache.get(groupJid);
+  }
+
+  function flush(groupJid) {
+    if (!saveWarn) return;
+    const s = groupCache.get(groupJid);
+    if (!s) return;
+    saveWarn(groupJid, {
+      warnings: Object.fromEntries(s.warnings),
+      mutedUntil: Object.fromEntries(
+        [...s.mutedUntil.entries()].filter(([, t]) => t > Date.now())
+      ),
+    });
+  }
+
+  function isMuted(groupJid, jid) {
+    const { mutedUntil } = getState(groupJid);
     const until = mutedUntil.get(jid);
     if (!until) return false;
     if (Date.now() >= until) {
@@ -72,24 +91,28 @@ function createModeration({ logger, botState }) {
     }
     return true;
   }
-  function mute(jid, ms = MUTE_MS) {
+
+  function mute(groupJid, jid, ms = MUTE_MS) {
+    const { mutedUntil } = getState(groupJid);
     mutedUntil.set(jid, Date.now() + ms);
+    flush(groupJid);
   }
 
-  function findSpam(jid, text) {
+  function findSpam(groupJid, jid, text) {
+    const state = getState(groupJid);
     const now = Date.now();
-    const times = (msgTimes.get(jid) || []).filter((t) => now - t < SPAM_WINDOW_MS);
+    const times = (state.msgTimes.get(jid) || []).filter((t) => now - t < SPAM_WINDOW_MS);
     times.push(now);
-    msgTimes.set(jid, times);
+    state.msgTimes.set(jid, times);
     if (times.length > SPAM_LIMIT) return 'flood';
     const trimmed = text.trim();
     if (trimmed) {
-      const prev = lastMsg.get(jid);
+      const prev = state.lastMsg.get(jid);
       if (prev && prev.text === trimmed) {
         prev.count += 1;
         if (prev.count >= REPEAT_LIMIT) return 'repeat';
       } else {
-        lastMsg.set(jid, { text: trimmed, count: 1 });
+        state.lastMsg.set(jid, { text: trimmed, count: 1 });
       }
     }
     return null;
@@ -120,21 +143,15 @@ function createModeration({ logger, botState }) {
     botState.moderation.lastActionAt = Date.now();
   }
 
-  /**
-   * Prüft EINE Nachricht. Gibt true zurück, wenn moderiert wurde (dann sollte
-   * die Nachricht NICHT mehr als Befehl verarbeitet werden).
-   */
   async function checkMessage({ sock, group, remoteJid, senderJid, text, msg, isAdmin }) {
     const mod = group.moderation || {};
-    if (isAdmin) return false; // Admins werden nicht moderiert
+    if (isAdmin) return false;
 
-    // Bereits stummgeschaltet -> jede weitere Nachricht entfernen
-    if (isMuted(senderJid)) {
+    if (isMuted(remoteJid, senderJid)) {
       await deleteMessage(sock, remoteJid, msg);
       return true;
     }
 
-    // 1) Links
     if (mod.links && hasLink(text)) {
       await deleteMessage(sock, remoteJid, msg);
       recordAction(`Link von ${senderJid.split('@')[0]}`);
@@ -143,23 +160,25 @@ function createModeration({ logger, botState }) {
       return true;
     }
 
-    // 2) Beleidigungen
     if (mod.badwords) {
       const badword = findBadword(text, mod.extraBadwords || []);
       if (badword) {
         await deleteMessage(sock, remoteJid, msg);
         const warnLimit = Number(mod.warnLimit) || 3;
-        const w = warnings.get(senderJid) || { count: 0, lastAt: 0 };
+        const state = getState(remoteJid);
+        const w = state.warnings.get(senderJid) || { count: 0, lastAt: 0 };
         w.count += 1;
         w.lastAt = Date.now();
-        warnings.set(senderJid, w);
+        state.warnings.set(senderJid, w);
         recordAction(`Beleidigung von ${senderJid.split('@')[0]}`);
         if (w.count >= warnLimit) {
-          mute(senderJid);
+          mute(remoteJid, senderJid);
+          state.warnings.delete(senderJid);
+          flush(remoteJid);
           await notify(sock, remoteJid, senderJid,
             `du wurdest nach ${warnLimit} Verwarnungen für ${Math.round(MUTE_MS / 60000)} Minuten stummgeschaltet.`);
-          warnings.delete(senderJid);
         } else {
+          flush(remoteJid);
           await notify(sock, remoteJid, senderJid,
             `bitte bleib freundlich. Verwarnung ${w.count}/${warnLimit}.`);
         }
@@ -167,17 +186,17 @@ function createModeration({ logger, botState }) {
       }
     }
 
-    // 3) Spam/Flood (greift, sobald Moderation für die Gruppe aktiv ist)
     if (mod.badwords || mod.links) {
-      const spam = findSpam(senderJid, text);
+      const spam = findSpam(remoteJid, senderJid, text);
       if (spam) {
         await deleteMessage(sock, remoteJid, msg);
-        mute(senderJid);
+        mute(remoteJid, senderJid);
         recordAction(`Spam (${spam}) von ${senderJid.split('@')[0]}`);
         await notify(sock, remoteJid, senderJid,
           `bitte nicht spammen. Du bist für ${Math.round(MUTE_MS / 60000)} Minuten stummgeschaltet.`);
-        lastMsg.delete(senderJid);
-        msgTimes.delete(senderJid);
+        const state = getState(remoteJid);
+        state.lastMsg.delete(senderJid);
+        state.msgTimes.delete(senderJid);
         return true;
       }
     }
@@ -188,13 +207,21 @@ function createModeration({ logger, botState }) {
   // Aufräumen, damit die Maps nicht unbegrenzt wachsen
   const cleanup = setInterval(() => {
     const now = Date.now();
-    for (const [jid, until] of mutedUntil) if (until <= now) mutedUntil.delete(jid);
-    for (const [jid, times] of msgTimes) {
-      const recent = times.filter((t) => now - t < SPAM_WINDOW_MS);
-      if (recent.length === 0) msgTimes.delete(jid);
-      else msgTimes.set(jid, recent);
+    for (const [groupJid, state] of groupCache) {
+      let changed = false;
+      for (const [jid, until] of state.mutedUntil) {
+        if (until <= now) { state.mutedUntil.delete(jid); changed = true; }
+      }
+      for (const [jid, times] of state.msgTimes) {
+        const recent = times.filter((t) => now - t < SPAM_WINDOW_MS);
+        if (recent.length === 0) state.msgTimes.delete(jid);
+        else state.msgTimes.set(jid, recent);
+      }
+      for (const [jid, w] of state.warnings) {
+        if (now - w.lastAt > 24 * 60 * 60 * 1000) { state.warnings.delete(jid); changed = true; }
+      }
+      if (changed) flush(groupJid);
     }
-    for (const [jid, w] of warnings) if (now - w.lastAt > 24 * 60 * 60 * 1000) warnings.delete(jid);
   }, 10 * 60 * 1000);
   cleanup.unref?.();
 
