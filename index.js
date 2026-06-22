@@ -31,7 +31,9 @@ const {
 } = require('@whiskeysockets/baileys');
 
 const PORT = process.env.PORT || 3000;
-const QR_PASSWORD = process.env.QR_PASSWORD || '';
+// Eingebautes Standard-Passwort, damit die Seite überall sofort funktioniert.
+// In Render per Umgebungsvariable QR_PASSWORD überschreibbar.
+const QR_PASSWORD = process.env.QR_PASSWORD || 'XWMEr3MZv-pH';
 const SELF_URL = (process.env.SELF_URL || '').replace(/\/+$/, '');
 const COMMAND_PREFIX = process.env.COMMAND_PREFIX || '!';
 const CONFIG_PATH = path.join(__dirname, 'bot_config.json');
@@ -93,9 +95,11 @@ const STYLE = `
        margin:0;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:24px}
   .card{background:#1a1d24;border:1px solid #2a2f3a;border-radius:16px;padding:24px;
         max-width:560px;width:100%;margin:12px 0;box-shadow:0 6px 24px rgba(0,0,0,.3)}
-  h1{font-size:1.4rem;margin:0 0 4px} h2{font-size:1.1rem;margin:0 0 12px}
+  h1{font-size:clamp(1.25rem,4vw,1.5rem);margin:0 0 4px} h2{font-size:1.1rem;margin:0 0 12px}
   .muted{color:#8b93a3;font-size:.9rem} a{color:#4f9cf9}
-  .qr{background:#fff;padding:16px;border-radius:12px;display:inline-block}
+  img{max-width:100%;height:auto;display:block}
+  .qr{background:#fff;padding:16px;border-radius:12px;display:inline-block;max-width:100%}
+  .qr img{width:320px;max-width:100%;margin:0 auto}
   .status{display:inline-block;padding:4px 12px;border-radius:999px;font-size:.85rem;font-weight:600}
   .on{background:#10391f;color:#4ade80} .off{background:#3a1010;color:#f87171}
   .grp{display:flex;align-items:center;gap:12px;padding:12px;border:1px solid #2a2f3a;
@@ -109,6 +113,7 @@ const STYLE = `
   .input{width:100%;padding:13px;border-radius:10px;border:1px solid #2a2f3a;
          background:#141821;color:#e7e9ee;font-size:1rem;margin-top:4px}
   .row{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+  @media(max-width:600px){body{padding:14px} .card{padding:18px}}
 `;
 
 function page(title, body, opts = {}) {
@@ -215,7 +220,7 @@ app.get('/qr', async (req, res) => {
       <div class="card" style="text-align:center">
         <h1>📲 WhatsApp verbinden</h1>
         <p class="muted">WhatsApp → Einstellungen → <b>Verknüpfte Geräte</b> → <b>Gerät hinzufügen</b></p>
-        <div class="qr"><img src="${qrImage}" alt="QR Code" width="360" height="360"></div>
+        <div class="qr"><img src="${qrImage}" alt="QR Code"></div>
         <p class="muted">Der Code aktualisiert sich automatisch.</p>
       </div>`, { refresh: 25, refreshUrl: `/qr${keyParam}` }));
   } catch (err) {
