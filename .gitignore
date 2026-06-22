@@ -144,3 +144,4 @@ vite.config.ts.timestamp-*
 
 # WhatsApp-Session (Baileys) – niemals committen
 auth_info/
+bot_config.json
