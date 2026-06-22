@@ -27,10 +27,14 @@ QR_PASSWORD=geheim npm start
 
 1. Neuen **Web Service** aus diesem Repo erstellen.
 2. **Build Command:** `npm install`  •  **Start Command:** `npm start`
-3. Environment-Variablen setzen:
-   - `QR_PASSWORD` – Passwort für die `/qr`-Seite (**Pflicht**)
+3. Environment-Variablen (optional) setzen:
+   - `QR_PASSWORD` – Passwort für die Web-Oberfläche. Ist **keins** gesetzt, gilt
+     das eingebaute Standard-Passwort `XWMEr3MZv-pH`. Zum Absichern hier ein
+     eigenes setzen.
    - `SELF_URL` – optional, die öffentliche Render-URL (z. B. `https://dein-bot.onrender.com`)
-4. Nach dem Deploy `https://dein-bot.onrender.com/qr?key=DEIN_PASSWORT` öffnen und scannen.
+4. Nach dem Deploy `https://dein-bot.onrender.com/` öffnen, Passwort eingeben und
+   den QR-Code scannen. Die Oberfläche passt sich automatisch an Handy, Tablet
+   und Laptop an.
 
 ## Gegen Inaktivität wach halten (wichtig)
 
