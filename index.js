@@ -106,6 +106,8 @@ const STYLE = `
   button{background:#4f9cf9;color:#06122a;border:0;border-radius:10px;padding:12px 20px;
          font-size:1rem;font-weight:700;cursor:pointer;width:100%;margin-top:12px}
   button:hover{background:#6fb0ff}
+  .input{width:100%;padding:13px;border-radius:10px;border:1px solid #2a2f3a;
+         background:#141821;color:#e7e9ee;font-size:1rem;margin-top:4px}
   .row{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
 `;
 
@@ -126,7 +128,7 @@ function requireAuth(req, res) {
     return false;
   }
   if (!passwordOk(req.query.key)) {
-    res.status(401).send(page('Zugriff verweigert', '<div class="card"><h1>🔒 Zugriff verweigert</h1><p class="muted">Falsches oder fehlendes Passwort.</p></div>'));
+    res.status(401).send(page('Zugriff verweigert', '<div class="card"><h1>🔒 Zugriff verweigert</h1><p class="muted">Falsches oder fehlendes Passwort.</p><a href="/"><button>Zurück zur Anmeldung</button></a></div>'));
     return false;
   }
   return true;
@@ -140,8 +142,29 @@ app.use(express.urlencoded({ extended: true }));
 // Offener Health-Check für externe Uptime-Monitore
 app.get('/ping', (_req, res) => res.status(200).send('ok'));
 
-// Öffentlicher Statusüberblick (ohne Geheimnisse)
+// Startseite: Anmeldung (HTML) – führt zu QR-Code bzw. Einstellungen
 app.get('/', (_req, res) => {
+  const statusBadge = botState.connected
+    ? '<span class="status on">✅ verbunden</span>'
+    : botState.qr
+      ? '<span class="status off">⭕ wartet auf QR-Scan</span>'
+      : '<span class="status off">⭕ getrennt</span>';
+  res.send(page('WhatsApp-Bot', `
+    <div class="card">
+      <div class="row"><h1>🤖 WhatsApp-Bot</h1>${statusBadge}</div>
+      <p class="muted">${botState.connected
+        ? 'Verbunden. Melde dich an, um die Gruppen zu verwalten.'
+        : 'Noch nicht verbunden. Melde dich an, um den QR-Code zu scannen.'}</p>
+    </div>
+    <form class="card" method="get" action="/go">
+      <h2>🔑 Anmelden</h2>
+      <input class="input" type="password" name="key" placeholder="Passwort" autofocus required>
+      <button type="submit">Weiter →</button>
+    </form>`));
+});
+
+// Maschinenlesbarer Status (für Debugging/Monitoring)
+app.get('/status', (_req, res) => {
   res.json({
     status: botState.connected ? 'verbunden' : 'getrennt',
     nummer: botState.me ? botState.me.id.split(':')[0] : null,
@@ -149,6 +172,18 @@ app.get('/', (_req, res) => {
     aktiveGruppen: config.activeGroups.length,
     uptimeSekunden: Math.round((Date.now() - botState.startedAt) / 1000),
   });
+});
+
+// Nach Anmeldung passend weiterleiten
+app.get('/go', (req, res) => {
+  if (!QR_PASSWORD) {
+    return res.status(503).send(page('Gesperrt', '<div class="card"><h1>🔒 Gesperrt</h1><p class="muted">Es ist kein QR_PASSWORD gesetzt. Bitte in den Render-Einstellungen setzen.</p></div>'));
+  }
+  if (!passwordOk(req.query.key)) {
+    return res.status(401).send(page('Falsches Passwort', '<div class="card"><h1>🔒 Falsches Passwort</h1><a href="/"><button>Erneut versuchen</button></a></div>'));
+  }
+  const keyParam = `?key=${encodeURIComponent(req.query.key)}`;
+  res.redirect(botState.connected ? `/settings${keyParam}` : `/qr${keyParam}`);
 });
 
 // QR-Code-Seite (passwortgeschützt)
@@ -162,9 +197,9 @@ app.get('/qr', async (req, res) => {
     return res.send(page('Verbunden', `
       <div class="card">
         <h1>✅ Verbunden</h1>
-        <p class="muted">Der Bot ist mit WhatsApp verbunden.</p>
+        <p class="muted">Erfolgreich verbunden – weiter zu den Einstellungen…</p>
         <a href="/settings${keyParam}"><button>Weiter zu den Einstellungen →</button></a>
-      </div>`));
+      </div>`, { refresh: 2, refreshUrl: `/settings${keyParam}` }));
   }
   if (!botState.qr) {
     return res.send(page('Warte auf QR', `
