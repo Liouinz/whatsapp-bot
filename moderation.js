@@ -12,7 +12,15 @@
  * Persistente Warnungen: createModeration erhält optionale Callbacks
  *   loadWarn(groupJid) → { warnings:{jid:{count,lastAt}}, mutedUntil:{jid:timestamp} }
  *   saveWarn(groupJid, data) → void
- * damit Verwarnungen und Mutes Neustarts überleben.
+ *
+ * Zusätzliche Exports für Admin-Befehle:
+ *   muteUser(groupJid, targetJid, minutes)
+ *   unmuteUser(groupJid, targetJid)
+ *   isMutedUser(groupJid, targetJid) → boolean
+ *   getWarnings(groupJid, targetJid) → {count, lastAt}
+ *   addWarning(groupJid, targetJid) → {count, lastAt}
+ *   clearWarnings(groupJid, targetJid)
+ *   getAllWarnings(groupJid) → [{jid, count, lastAt}]
  */
 
 const DEFAULT_BADWORDS = [
@@ -204,7 +212,7 @@ function createModeration({ logger, botState, loadWarn, saveWarn }) {
     return false;
   }
 
-  // Aufräumen, damit die Maps nicht unbegrenzt wachsen
+  // Aufräumen
   const cleanup = setInterval(() => {
     const now = Date.now();
     for (const [groupJid, state] of groupCache) {
@@ -225,7 +233,45 @@ function createModeration({ logger, botState, loadWarn, saveWarn }) {
   }, 10 * 60 * 1000);
   cleanup.unref?.();
 
-  return { checkMessage };
+  return {
+    checkMessage,
+    muteUser(groupJid, targetJid, minutes = 10) {
+      mute(groupJid, targetJid, Math.min(minutes, 1440) * 60 * 1000);
+    },
+    unmuteUser(groupJid, targetJid) {
+      const s = getState(groupJid);
+      s.mutedUntil.delete(targetJid);
+      flush(groupJid);
+    },
+    isMutedUser(groupJid, targetJid) {
+      return isMuted(groupJid, targetJid);
+    },
+    getWarnings(groupJid, targetJid) {
+      return getState(groupJid).warnings.get(targetJid) || { count: 0, lastAt: 0 };
+    },
+    addWarning(groupJid, targetJid) {
+      const s = getState(groupJid);
+      const w = s.warnings.get(targetJid) || { count: 0, lastAt: 0 };
+      w.count += 1;
+      w.lastAt = Date.now();
+      s.warnings.set(targetJid, w);
+      flush(groupJid);
+      return w;
+    },
+    clearWarnings(groupJid, targetJid) {
+      const s = getState(groupJid);
+      s.warnings.delete(targetJid);
+      flush(groupJid);
+    },
+    getAllWarnings(groupJid) {
+      return [...getState(groupJid).warnings.entries()].map(([jid, w]) => ({ jid, ...w }));
+    },
+    getMuteTimeLeft(groupJid, targetJid) {
+      const until = getState(groupJid).mutedUntil.get(targetJid);
+      if (!until) return 0;
+      return Math.max(0, until - Date.now());
+    },
+  };
 }
 
 module.exports = { createModeration, findBadword, hasLink, DEFAULT_BADWORDS };
