@@ -31,7 +31,9 @@ const { createModeration } = require('./moderation');
 const PORT = process.env.PORT || 3000;
 // Eingebautes Standard-Passwort, in Render per QR_PASSWORD überschreibbar.
 const QR_PASSWORD = process.env.QR_PASSWORD || 'XWMEr3MZv-pH';
-const SELF_URL = (process.env.SELF_URL || '').replace(/\/+$/, '');
+// Self-Ping-Ziel: bevorzugt SELF_URL, fällt automatisch auf die von Render gesetzte
+// RENDER_EXTERNAL_URL zurück – so funktioniert der Wach-halte-Ping auch ohne manuelle Variable.
+const SELF_URL = (process.env.SELF_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/+$/, '');
 const COMMAND_PREFIX = process.env.COMMAND_PREFIX || '!';
 // Optionaler Notfall-Override für den Community-Inhaber (komma-getrennte Nummern ohne +).
 // Normalerweise wird der Inhaber automatisch als Ersteller der Community-Hauptgruppe erkannt;
@@ -40,6 +42,16 @@ const OWNER_OVERRIDE = (process.env.OWNER_JIDS || '')
   .split(',').map((s) => s.replace(/\D/g, '')).filter(Boolean);
 
 const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
+
+// ---------- Absturzschutz ----------
+// Render Free startet einen abgestürzten Prozess nicht von selbst neu. Damit der Bot
+// NIEMALS wegen eines unerwarteten Fehlers stirbt, fangen wir alles global ab und laufen weiter.
+process.on('uncaughtException', (err) => {
+  logger.error({ err }, 'uncaughtException abgefangen – Bot läuft weiter');
+});
+process.on('unhandledRejection', (reason) => {
+  logger.error({ reason }, 'unhandledRejection abgefangen – Bot läuft weiter');
+});
 
 // ====================================================================
 // Datenarrays für Spiele & Spaß-Befehle
@@ -289,7 +301,7 @@ const ACTIONS = {
   slap: [
     '{a} gibt {b} eine spielerische Ohrfeige 👋',
     '{a} watscht {b} mit einem Fisch ab 🐟',
-    '{a} klatscht {b} eine �frech 😆',
+    '{a} klatscht {b} eine \u{1F590}\u{FE0F} frech \u{1F606}',
     '{a} haut {b} mit einem Kissen 🛏️',
     '{a} gibt {b} einen Klaps auf den Hinterkopf 😅',
     '{a} schlägt {b} mit einer Gummihuhn 🐔',
@@ -561,6 +573,8 @@ const botState = {
   lastCommand: null,
   moderation: { actionsTotal: 0, lastAction: null, lastActionAt: null },
   activityLog: [], // letzte 100 Bot-Aktionen
+  reconnecting: false, // verhindert mehrere parallele Reconnects
+  lastConnectedAt: 0,  // Zeitpunkt der letzten erfolgreichen Verbindung
 };
 
 // In-Memory-Maps für laufende Spiele
@@ -2096,7 +2110,9 @@ app.get('/dashboard', (req, res) => {
   const statusBadge = botState.connected
     ? '<span class="status on">✅ verbunden</span>'
     : '<span class="status off">⭕ getrennt</span>';
-  const speicher = store.usingMongo() ? 'MongoDB' : 'Datei (flüchtig)';
+  const speicher = store.usingTurso() ? 'Turso (Cloud) ✅'
+    : store.usingMongo() ? 'MongoDB ✅'
+    : 'Datei (flüchtig) ⚠️';
 
   res.send(page('Dashboard', `
     ${navBar(keyParam, 'dashboard')}
@@ -2261,6 +2277,33 @@ function isAdmin(meta, jid) {
 }
 
 // ---------- WhatsApp-Verbindung ----------
+// Geschützter Reconnect: stellt sicher, dass nie mehrere Verbindungsversuche gleichzeitig
+// laufen (sonst doppelte Sockets). Wartet 3s und versucht es erneut.
+function scheduleReconnect(grund) {
+  if (botState.reconnecting) return;
+  botState.reconnecting = true;
+  logger.warn({ grund }, 'Neuverbindung in 3s…');
+  setTimeout(() => {
+    startBot().catch((err) => {
+      logger.error({ err }, 'Reconnect fehlgeschlagen – neuer Versuch in 10s');
+      botState.reconnecting = false;
+      setTimeout(() => scheduleReconnect('Wiederholung'), 10_000);
+    });
+  }, 3000);
+}
+
+// Watchdog: erkennt eine still gestorbene Verbindung (kein 'close'-Event) und erzwingt
+// nach 2 Minuten Offline-Zeit eine Neuverbindung. So bleibt der Bot dauerhaft erreichbar.
+setInterval(() => {
+  if (!botState.connected && !botState.reconnecting && botState.lastConnectedAt > 0) {
+    const offlineMs = Date.now() - botState.lastConnectedAt;
+    if (offlineMs > 2 * 60 * 1000) {
+      logger.warn({ offlineSek: Math.round(offlineMs / 1000) }, 'Watchdog: Bot offline – erzwinge Neuverbindung');
+      scheduleReconnect('Watchdog');
+    }
+  }
+}, 60 * 1000);
+
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState('auth_info');
   const { version } = await fetchLatestBaileysVersion();
@@ -2278,6 +2321,8 @@ async function startBot() {
     }
     if (connection === 'open') {
       botState.connected = true;
+      botState.reconnecting = false;
+      botState.lastConnectedAt = Date.now();
       botState.qr = null;
       botState.me = sock.user;
       logger.info({ nummer: sock.user?.id }, '✅ Mit WhatsApp verbunden');
@@ -2289,8 +2334,7 @@ async function startBot() {
       if (statusCode === DisconnectReason.loggedOut) {
         logger.error('Ausgeloggt. Ordner "auth_info" löschen und neu per QR-Code einloggen.');
       } else {
-        logger.warn({ statusCode }, 'Verbindung getrennt – Neuverbindung in 3s');
-        setTimeout(() => startBot().catch((err) => logger.error({ err }, 'Reconnect fehlgeschlagen')), 3000);
+        scheduleReconnect('Verbindung getrennt');
       }
     }
   });
@@ -2406,7 +2450,7 @@ async function startBot() {
           if (proposal && Date.now() < proposal.expiresAt) {
             proposals.delete(proposalKey);
             if (findMarriage(jid, senderJid) || findMarriage(jid, proposal.proposerJid)) {
-              await sock.sendMessage(jid, { text: 'Eine der Personen ist bereits verheiratet! 💔' });
+              await sock.sendMessage(jid, { text: 'Eine der Personen ist bereits verheiratet! \u{1F494}' });
             } else {
               const key = marriageKey(senderJid, proposal.proposerJid);
               if (!config.groups[jid]) config.groups[jid] = defaultGroupConfig();
@@ -2415,7 +2459,7 @@ async function startBot() {
               await persist();
               const n1 = senderJid.split('@')[0], n2 = proposal.proposerJid.split('@')[0];
               await sock.sendMessage(jid, {
-                text: `💍 @${n2} und @${n1} sind jetzt verheiratet! Herzlichen Glückwunsch! 🎊`,
+                text: `\u{1F48D} @${n2} und @${n1} sind jetzt verheiratet! Herzlichen Glückwunsch! \u{1F38A}`,
                 mentions: [senderJid, proposal.proposerJid],
               });
             }
@@ -2505,13 +2549,13 @@ async function startBot() {
             if (!target) {
               const m = findMarriage(jid, senderJid);
               if (!m) {
-                await reply(`Du bist nicht verheiratet. 💌 Schreib ${COMMAND_PREFIX}marry @person um einen Antrag zu machen.`);
+                await reply(`Du bist nicht verheiratet. \u{1F48C} Schreib ${COMMAND_PREFIX}marry @person um einen Antrag zu machen.`);
               } else {
                 const partner = m.p1 === senderJid ? m.p2 : m.p1;
                 const days = Math.floor((Date.now() - m.since) / 86400000);
                 const pNum = partner.split('@')[0];
                 await sock.sendMessage(jid, {
-                  text: `💍 Du bist seit ${days} Tag(en) mit @${pNum} verheiratet.\nGlück: ${happinessStatus(m.since)}`,
+                  text: `\u{1F48D} Du bist seit ${days} Tag(en) mit @${pNum} verheiratet.\nGlück: ${happinessStatus(m.since)}`,
                   mentions: [partner],
                 }, { quoted: msg });
               }
@@ -2520,10 +2564,10 @@ async function startBot() {
             if (target === senderJid) { await reply('Du kannst dich nicht selbst heiraten! 😅'); break; }
             const botJidM = jidNormalizedUser(botState.me?.id || '');
             if (jidNormalizedUser(target) === botJidM) { await reply('Danke für den Antrag, aber ich bin nur ein Bot! 🤖'); break; }
-            if (findMarriage(jid, senderJid)) { await reply('Du bist bereits verheiratet! 💍'); break; }
+            if (findMarriage(jid, senderJid)) { await reply('Du bist bereits verheiratet! \u{1F48D}'); break; }
             if (findMarriage(jid, target)) {
               await sock.sendMessage(jid, {
-                text: `@${target.split('@')[0]} ist bereits verheiratet! 💔`,
+                text: `@${target.split('@')[0]} ist bereits verheiratet! \u{1F494}`,
                 mentions: [target],
               }, { quoted: msg });
               break;
@@ -2531,7 +2575,7 @@ async function startBot() {
             proposals.set(`${jid}:${target}`, { proposerJid: senderJid, targetJid: target, expiresAt: Date.now() + 5 * 60 * 1000 });
             const sNum2 = senderJid.split('@')[0], tNum2 = target.split('@')[0];
             await sock.sendMessage(jid, {
-              text: `💌 @${sNum2} macht @${tNum2} einen Heiratsantrag! 💍\n@${tNum2}, antworte mit *ja* um anzunehmen (5 Minuten Zeit).`,
+              text: `\u{1F48C} @${sNum2} macht @${tNum2} einen Heiratsantrag! \u{1F48D}\n@${tNum2}, antworte mit *ja* um anzunehmen (5 Minuten Zeit).`,
               mentions: [senderJid, target],
             });
             break;
@@ -3031,7 +3075,7 @@ async function startBot() {
           // ---- Ehe-Erweiterungen ----
           case 'divorce': {
             const m2 = findMarriage(jid, senderJid);
-            if (!m2) { await reply('Du bist nicht verheiratet. 💔'); break; }
+            if (!m2) { await reply('Du bist nicht verheiratet. \u{1F494}'); break; }
             delete config.groups[jid].marriages[m2.key];
             await persist();
             const partnerNum2 = (m2.p1 === senderJid ? m2.p2 : m2.p1).split('@')[0];
@@ -3357,10 +3401,13 @@ store.loadConfig(logger)
     config.settings = { dmAssistant: false, ...(config.settings || {}) };
     if (!Array.isArray(config.anliegen)) config.anliegen = [];
     if (!config.communityBans || typeof config.communityBans !== 'object') config.communityBans = {};
-    logger.info('Konfiguration geladen');
+    const speicherTyp = store.usingTurso() ? 'Turso (Cloud)' : store.usingMongo() ? 'MongoDB' : 'lokale Datei (flüchtig)';
+    logger.info({ speicher: speicherTyp, selfPing: SELF_URL || 'AUS' }, 'Konfiguration geladen');
     return startBot();
   })
   .catch((err) => {
-    logger.error({ err }, 'Start fehlgeschlagen');
-    process.exit(1);
+    logger.error({ err }, 'Start fehlgeschlagen – versuche trotzdem zu starten');
+    // Nicht hart beenden: lieber mit leerer Config starten, damit der Bot online bleibt.
+    config = config && config.groups ? config : { groups: {} };
+    startBot().catch((e) => logger.error({ e }, 'Bot-Start endgültig fehlgeschlagen'));
   });
