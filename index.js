@@ -347,6 +347,8 @@ const COMMANDS = [
   { key: 'link',       desc: 'Einladungslink abrufen', adminDefault: true },
   { key: 'revoke',     desc: 'Einladungslink widerrufen & neu erstellen', adminDefault: true },
   { key: 'announce',   desc: 'alle markieren + Nachricht senden', adminDefault: true },
+  { key: 'pin',        desc: 'zitierte Nachricht anpinnen', adminDefault: true },
+  { key: 'unpin',      desc: 'zitierte Nachricht lösen', adminDefault: true },
   { key: 'setregeln',  desc: 'Gruppenregeln festlegen', adminDefault: true },
   { key: 'setwelcome', desc: 'Willkommensnachricht festlegen', adminDefault: true },
   { key: 'welcome',    desc: 'Willkommensnachrichten an/aus', adminDefault: true },
@@ -671,11 +673,36 @@ const STYLE = `
   .log-command{border-color:#7fd1ff} .log-message{border-color:rgba(255,255,255,.2)}
   .log-kick{border-color:#f97316} .log-ban{border-color:#ef4444}
   .log-warn{border-color:#fde68a} .log-mute{border-color:#c084fc}
+  .log-pin{border-color:#38bdf8} .log-unpin{border-color:#94a3b8}
   .leaderboard{counter-reset:rank}
   .lb-row{display:flex;align-items:center;gap:10px;padding:9px 12px;
     border:1px solid rgba(255,255,255,.08);border-radius:10px;margin:5px 0;background:rgba(255,255,255,.03)}
   .lb-rank{font-size:1.2rem;width:28px;text-align:center;font-weight:700}
   .lb-num{flex:1;font-weight:600} .lb-count{color:#aeb8c6;font-size:.85rem}
+  /* ---- Navigationsleiste ---- */
+  .nav{position:sticky;top:0;z-index:5;display:flex;gap:6px;flex-wrap:nowrap;overflow-x:auto;
+    max-width:600px;width:100%;margin:0 0 12px;padding:10px;border-radius:14px;
+    background:rgba(13,17,24,.78);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+    border:1px solid rgba(255,255,255,.1);box-shadow:0 6px 22px rgba(0,0,0,.3);
+    scrollbar-width:thin;-webkit-overflow-scrolling:touch}
+  .nav::-webkit-scrollbar{height:5px} .nav::-webkit-scrollbar-thumb{background:rgba(255,255,255,.2);border-radius:99px}
+  .nav a{flex:0 0 auto;display:inline-flex;align-items:center;gap:5px;padding:8px 13px;border-radius:10px;
+    font-size:.85rem;font-weight:600;color:#cdd6e3;white-space:nowrap;transition:background .18s,color .18s,transform .1s}
+  .nav a:hover{background:rgba(255,255,255,.08);text-decoration:none;transform:translateY(-1px)}
+  .nav a.active{background:linear-gradient(135deg,#0f8b8d,#38ef7d);color:#06231a}
+  /* ---- Toolbar & Segmented-Control ---- */
+  .toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+  .seg{display:inline-flex;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);
+    border-radius:11px;padding:3px;gap:2px}
+  .seg-btn{padding:7px 13px;border-radius:9px;font-size:.82rem;font-weight:600;color:#cdd6e3;
+    cursor:pointer;width:auto;margin:0;background:transparent;border:0;transition:background .15s,color .15s}
+  .seg-btn.active{background:linear-gradient(135deg,#0f8b8d,#38ef7d);color:#06231a}
+  .seg-btn:hover:not(.active){background:rgba(255,255,255,.08)}
+  .chip{display:inline-flex;align-items:center;gap:4px;font-size:.72rem;font-weight:600;
+    padding:3px 10px;border-radius:999px;background:rgba(127,209,255,.15);color:#bfe3ff}
+  .chip.on{background:rgba(34,197,94,.2);color:#86efac} .chip.off{background:rgba(248,113,113,.18);color:#fca5a5}
+  .toast{animation:pop .4s ease both}
+  @keyframes pop{0%{opacity:0;transform:scale(.9)}60%{transform:scale(1.03)}100%{opacity:1;transform:scale(1)}}
 `;
 
 const LEAVES =
@@ -692,6 +719,24 @@ function page(title, body, opts = {}) {
     <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
     ${refresh}<title>${title}</title><style>${STYLE}</style></head>
     <body>${LEAVES}${body}${opts.script || ''}</body></html>`;
+}
+
+// Gemeinsame Navigationsleiste für alle Innenseiten
+function navBar(keyParam, active = '') {
+  const items = [
+    ['settings', '⚙️', 'Gruppen'],
+    ['dashboard', '📊', 'Dashboard'],
+    ['lookup', '🔎', 'Nummer'],
+    ['search', '🔍', 'Suche'],
+    ['reports', '📋', 'Meldungen'],
+    ['banlog', '🚫', 'Ban-Log'],
+    ['activity', '📡', 'Aktivität'],
+    ['qr', '📲', 'QR'],
+  ];
+  const links = items.map(([path, icon, label]) =>
+    `<a href="/${path}${keyParam}" class="${active === path ? 'active' : ''}">${icon} ${label}</a>`
+  ).join('');
+  return `<nav class="nav">${links}</nav>`;
 }
 
 function requireAuth(req, res) {
@@ -816,19 +861,24 @@ app.get('/settings', async (req, res) => {
   } else {
     for (const g of botState.groups) {
       const gc = effectiveGroupConfig(g.id);
+      const stats = config.groups[g.id]?.memberStats || {};
+      const activity = Object.values(stats).reduce((a, m) => a + (m.messages || 0) + (m.commands || 0), 0);
       const badge = g.isCommunity
         ? '<span class="badge">🏘️ Community</span>'
         : g.community ? '<span class="badge">in Community</span>' : '';
-      const activeBadge = gc.active ? '<span class="badge" style="background:rgba(34,197,94,.2);color:#86efac">aktiv</span>' : '';
+      const activeBadge = gc.active
+        ? '<span class="chip on">● aktiv</span>'
+        : '<span class="chip off">○ inaktiv</span>';
       const pic = botState.groupPics[g.id];
       const avatar = pic
         ? `<img class="avatar" src="${escapeHtml(pic)}" alt="" loading="lazy">`
         : `<div class="avatar" style="display:flex;align-items:center;justify-content:center;font-size:1.3rem">👥</div>`;
       groupsHtml += `
-        <a class="grp" href="/group?id=${encodeURIComponent(g.id)}&key=${encodeURIComponent(req.query.key)}">
+        <a class="grp" data-active="${gc.active ? 1 : 0}" data-name="${escapeHtml((g.subject || 'unbenannt').toLowerCase())}" data-size="${g.size || 0}" data-activity="${activity}"
+           href="/group?id=${encodeURIComponent(g.id)}&key=${encodeURIComponent(req.query.key)}">
           ${avatar}
-          <span class="meta"><span class="name">${escapeHtml(g.subject || 'Unbenannt')}${badge}${activeBadge}</span>
-            <span class="muted">${g.size || 0} Mitglieder</span></span>
+          <span class="meta"><span class="name">${escapeHtml(g.subject || 'Unbenannt')}${badge} ${activeBadge}</span>
+            <span class="muted">${g.size || 0} Mitglieder · ${activity} Aktivität</span></span>
           <span style="font-size:1.3rem">⚙️</span>
         </a>`;
     }
@@ -836,8 +886,9 @@ app.get('/settings', async (req, res) => {
 
   const totalMembers = botState.groups.reduce((s, g) => s + (g.size || 0), 0);
   res.send(page('Einstellungen', `
+    ${navBar(keyParam, 'settings')}
     <div class="card">
-      <div class="row"><h1>⚙️ Einstellungen</h1><span class="status on">verbunden</span></div>
+      <div class="row"><h1>⚙️ Gruppen-Übersicht</h1><span class="status on">verbunden</span></div>
       <p class="muted">Nummer: <b>${escapeHtml(nummer)}</b></p>
       <div class="stats" style="margin-top:12px">
         <div class="stat"><div class="k">Aktive Gruppen</div><div class="v">${activeGroupCount()}</div></div>
@@ -847,19 +898,57 @@ app.get('/settings', async (req, res) => {
     </div>
     <div class="card">
       <h2>Deine Gruppen & Communities</h2>
-      <input type="search" id="grpSearch" class="search-bar" placeholder="🔍 Gruppe suchen…" oninput="filterGroups(this.value)">
+      <input type="search" id="grpSearch" class="search-bar" placeholder="🔍 Gruppe suchen…" oninput="applyView()">
+      <div class="toolbar">
+        <div class="seg" id="segFilter">
+          <button type="button" class="seg-btn active" data-filter="all" onclick="setFilter(this)">Alle</button>
+          <button type="button" class="seg-btn" data-filter="active" onclick="setFilter(this)">Aktiv</button>
+          <button type="button" class="seg-btn" data-filter="inactive" onclick="setFilter(this)">Inaktiv</button>
+        </div>
+        <select class="input" id="sortSel" style="width:auto;min-width:170px;margin:0" onchange="applyView()">
+          <option value="name-asc">Name A–Z</option>
+          <option value="name-desc">Name Z–A</option>
+          <option value="size-desc">Größe (absteigend)</option>
+          <option value="size-asc">Größe (aufsteigend)</option>
+          <option value="activity-desc">Aktivität (absteigend)</option>
+        </select>
+      </div>
+      <p class="muted" id="grpCount" style="margin:0 0 8px"></p>
       <div id="grpList">${groupsHtml}</div>
     </div>
     <div class="card row" style="flex-wrap:wrap;gap:10px">
       <a href="/settings${keyParam}">🔄 Neu laden</a>
+      <a href="/lookup${keyParam}">🔎 Nummer suchen</a>
       <a href="/dashboard${keyParam}">📊 Dashboard</a>
-      <a href="/reports${keyParam}">📋 Meldungen</a>
-      <a href="/banlog${keyParam}">🚫 Ban-Log</a>
-      <a href="/activity${keyParam}">📡 Aktivität</a>
-      <a href="/search${keyParam}">🔍 Suche</a>
-      <a href="/qr${keyParam}">QR-Code</a>
     </div>`,
-    { script: `<script>function filterGroups(v){v=v.toLowerCase();document.querySelectorAll('#grpList .grp').forEach(function(el){el.style.display=el.textContent.toLowerCase().includes(v)?'':'none';})}</script>` }
+    { script: `<script>
+      var curFilter='all';
+      function setFilter(btn){curFilter=btn.dataset.filter;
+        document.querySelectorAll('#segFilter .seg-btn').forEach(function(b){b.classList.toggle('active',b===btn)});applyView();}
+      function applyView(){
+        var q=(document.getElementById('grpSearch').value||'').toLowerCase();
+        var sort=document.getElementById('sortSel').value;
+        var list=document.getElementById('grpList');
+        var cards=Array.prototype.slice.call(list.querySelectorAll('.grp'));
+        cards.sort(function(a,b){
+          if(sort==='name-asc')return a.dataset.name.localeCompare(b.dataset.name);
+          if(sort==='name-desc')return b.dataset.name.localeCompare(a.dataset.name);
+          if(sort==='size-desc')return b.dataset.size-a.dataset.size;
+          if(sort==='size-asc')return a.dataset.size-b.dataset.size;
+          if(sort==='activity-desc')return b.dataset.activity-a.dataset.activity;
+          return 0;
+        });
+        var shown=0;
+        cards.forEach(function(el){
+          list.appendChild(el);
+          var okF=curFilter==='all'||(curFilter==='active'&&el.dataset.active==='1')||(curFilter==='inactive'&&el.dataset.active==='0');
+          var okQ=el.dataset.name.includes(q);
+          var vis=okF&&okQ; el.style.display=vis?'':'none'; if(vis)shown++;
+        });
+        var c=document.getElementById('grpCount'); if(c)c.textContent=shown+' von '+cards.length+' Gruppen';
+      }
+      applyView();
+    </script>` }
   ));
 });
 
@@ -1035,12 +1124,13 @@ app.get('/group/members', async (req, res) => {
   }
 
   res.send(page(`Mitglieder – ${group.subject}`, `
+    ${navBar(keyParam, '')}
     <div class="card">
       <div class="row">
         <h1>👥 ${escapeHtml(group.subject || 'Gruppe')}</h1>
         <a href="/group?id=${encodeURIComponent(id)}&key=${encodeURIComponent(req.query.key)}">← zurück</a>
       </div>
-      <p class="muted">${participants.length} Mitglieder</p>
+      <p class="muted">${participants.length} Mitglieder · <a href="/group/stats?id=${encodeURIComponent(id)}&key=${encodeURIComponent(req.query.key)}">🏆 Leaderboard</a></p>
     </div>
     <div class="card">
       <input type="search" id="memSearch" class="search-bar" placeholder="🔍 Nummer suchen…" oninput="filterMem(this.value)">
@@ -1069,6 +1159,7 @@ app.get('/reports', (req, res) => {
   }
 
   res.send(page('Meldungen', `
+    ${navBar(keyParam, 'reports')}
     <div class="card">
       <div class="row">
         <h1>📋 Meldungen</h1>
@@ -1086,6 +1177,106 @@ app.get('/reports', (req, res) => {
       <a href="/settings${keyParam}">⚙️ Einstellungen</a>
       <a href="/dashboard${keyParam}">📊 Dashboard</a>
     </div>`));
+});
+
+// Globale Nummern-Suche – alle Infos & gemeinsame Gruppen
+app.get('/lookup', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!requireAuth(req, res)) return;
+  const keyParam = keyOf(req);
+  const keyEnc = encodeURIComponent(req.query.key);
+  const rawNum = String(req.query.num || '');
+  const num = rawNum.replace(/\D/g, '');
+
+  const searchForm = `
+    <form class="card" method="get" action="/lookup">
+      <input type="hidden" name="key" value="${escapeHtml(req.query.key)}">
+      <h2>🔎 Nummer nachschlagen</h2>
+      <p class="muted">Gib eine Telefonnummer ein (nur Ziffern, mit Ländervorwahl, z. B. 491511234567).</p>
+      <input type="search" name="num" class="search-bar" placeholder="491511234567" value="${escapeHtml(num)}" autofocus>
+      <button type="submit">Suchen</button>
+    </form>`;
+
+  if (!num) {
+    return res.send(page('Nummer-Suche', `${navBar(keyParam, 'lookup')}${searchForm}`));
+  }
+  if (!botState.connected) {
+    return res.send(page('Nummer-Suche', `${navBar(keyParam, 'lookup')}${searchForm}
+      <div class="card"><p class="muted">⚠️ Bot nicht verbunden – Gruppen können nicht geladen werden.</p></div>`));
+  }
+
+  await refreshGroups();
+  // Metadaten aller Gruppen (gecacht) parallel laden
+  await Promise.allSettled(botState.groups.map((g) => getGroupMeta(g.id)));
+
+  const targetJid = `${num}@s.whatsapp.net`;
+  let totalMsg = 0, totalCmd = 0, totalWarn = 0;
+  const groupCards = [];
+
+  for (const g of botState.groups) {
+    const meta = botState.groupMeta[g.id]?.meta;
+    if (!meta) continue;
+    const member = meta.participants.find((p) => p.id.split('@')[0] === num);
+    if (!member) continue;
+
+    const stats = getMemberStats(g.id, num);
+    const warn = moderation.getWarnings(g.id, targetJid);
+    const muteLeft = moderation.getMuteTimeLeft(g.id, targetJid);
+    const marriage = findMarriage(g.id, targetJid);
+    const gc = effectiveGroupConfig(g.id);
+    totalMsg += stats.messages || 0;
+    totalCmd += stats.commands || 0;
+    totalWarn += warn.count || 0;
+
+    const roleTag = member.admin === 'superadmin' ? '<span class="tag tag-creator">👑 Ersteller</span>'
+      : member.admin ? '<span class="tag tag-admin">🛡️ Admin</span>' : '';
+    const statusTag = muteLeft > 0 ? `<span class="chip off">🔇 ${formatDuration(muteLeft)}</span>` : '<span class="chip on">● aktiv</span>';
+    const marriageLine = marriage
+      ? `<p class="muted">💍 verheiratet mit ${escapeHtml((marriage.p1 === targetJid ? marriage.p2 : marriage.p1).split('@')[0])} · ${happinessStatus(marriage.since)}</p>`
+      : '';
+
+    groupCards.push(`
+      <div class="card">
+        <div class="row">
+          <h2 style="margin:0">${escapeHtml(g.subject || 'Gruppe')} ${gc.active ? '' : '<span class="chip off">inaktiv</span>'}</h2>
+          ${statusTag}
+        </div>
+        <p class="muted">${roleTag} ${g.size || 0} Mitglieder</p>
+        <div class="stats">
+          <div class="stat"><div class="k">Nachrichten</div><div class="v">${stats.messages || 0}</div></div>
+          <div class="stat"><div class="k">Befehle</div><div class="v">${stats.commands || 0}</div></div>
+          <div class="stat"><div class="k">Verwarnungen</div><div class="v">${warn.count || 0}</div></div>
+        </div>
+        ${marriageLine}
+        <div class="row" style="margin-top:10px;gap:6px;justify-content:flex-start">
+          <a href="/member?jid=${encodeURIComponent(targetJid)}&group=${encodeURIComponent(g.id)}&key=${keyEnc}" class="action-btn btn-blue">📋 Profil</a>
+          <form method="POST" action="/member/action?key=${keyEnc}" style="display:inline" onsubmit="return confirm('Wirklich muten?')">
+            <input type="hidden" name="action" value="mute"><input type="hidden" name="targetJid" value="${escapeHtml(targetJid)}"><input type="hidden" name="groupJid" value="${escapeHtml(g.id)}">
+            <button type="submit" class="action-btn btn-yellow">🔇 Mute</button>
+          </form>
+          <form method="POST" action="/member/action?key=${keyEnc}" style="display:inline" onsubmit="return confirm('Wirklich kicken?')">
+            <input type="hidden" name="action" value="kick"><input type="hidden" name="targetJid" value="${escapeHtml(targetJid)}"><input type="hidden" name="groupJid" value="${escapeHtml(g.id)}">
+            <button type="submit" class="action-btn btn-red">🚫 Kick</button>
+          </form>
+        </div>
+      </div>`);
+  }
+
+  const summary = groupCards.length
+    ? `<div class="card">
+        <h1>👤 ${escapeHtml(num)}</h1>
+        <p class="muted">In <b>${groupCards.length}</b> gemeinsamen Gruppe(n) gefunden.</p>
+        <div class="stats">
+          <div class="stat"><div class="k">Nachrichten gesamt</div><div class="v">${totalMsg}</div></div>
+          <div class="stat"><div class="k">Befehle gesamt</div><div class="v">${totalCmd}</div></div>
+          <div class="stat"><div class="k">Verwarnungen gesamt</div><div class="v">${totalWarn}</div></div>
+          <div class="stat"><div class="k">Gemeinsame Gruppen</div><div class="v">${groupCards.length}</div></div>
+        </div>
+      </div>`
+    : `<div class="card"><h1>👤 ${escapeHtml(num)}</h1>
+        <p class="muted">Diese Nummer wurde in keiner gemeinsamen Gruppe gefunden.</p></div>`;
+
+  res.send(page(`Nummer ${num}`, `${navBar(keyParam, 'lookup')}${searchForm}${summary}${groupCards.join('')}`));
 });
 
 // Mitglieder-Profil
@@ -1121,11 +1312,12 @@ app.get('/member', async (req, res) => {
   ).join('') || '<tr><td colspan="3" class="muted">Keine Einträge</td></tr>';
 
   res.send(page(`Profil – ${num}`, `
+    ${navBar(keyParam, '')}
     <div class="card">
       <div class="row"><h1>👤 ${escapeHtml(num)}</h1>
         <a href="/group/members?id=${encodeURIComponent(groupJid)}&key=${encodeURIComponent(req.query.key)}">← zurück</a>
       </div>
-      <p class="muted">Gruppe: <b>${escapeHtml(group?.subject || groupJid)}</b></p>
+      <p class="muted">Gruppe: <b>${escapeHtml(group?.subject || groupJid)}</b> · <a href="/lookup?num=${encodeURIComponent(num)}&key=${encodeURIComponent(req.query.key)}">🔎 alle Gruppen dieser Nummer</a></p>
     </div>
     <div class="card">
       <h2>📊 Aktivität</h2>
@@ -1204,6 +1396,7 @@ app.get('/banlog', (req, res) => {
   ).join('') || '<tr><td colspan="5" class="muted">Keine Einträge vorhanden.</td></tr>';
 
   res.send(page('Ban-Log', `
+    ${navBar(keyParam, 'banlog')}
     <div class="card">
       <div class="row"><h1>🚫 Ban-Log</h1><a href="/settings${keyParam}">← zurück</a></div>
       <p class="muted">${entries.length} Einträge gesamt</p>
@@ -1235,6 +1428,7 @@ app.get('/activity', (req, res) => {
   }).join('') || '<p class="muted">Noch keine Aktivität aufgezeichnet.</p>';
 
   res.send(page('Aktivitäts-Log', `
+    ${navBar(keyParam, 'activity')}
     <div class="card">
       <div class="row"><h1>📡 Live-Aktivität</h1><a href="/settings${keyParam}">← zurück</a></div>
       <p class="muted">Letzte ${log.length} Einträge</p>
@@ -1285,8 +1479,10 @@ app.get('/search', (req, res) => {
   }
 
   res.send(page('Suche', `
+    ${navBar(keyParam, 'search')}
     <div class="card">
-      <div class="row"><h1>🔍 Suche</h1><a href="/settings${keyParam}">← zurück</a></div>
+      <div class="row"><h1>🔍 Suche</h1><a href="/lookup${keyParam}">🔎 Nummer-Suche</a></div>
+      <p class="muted">Durchsuche Gruppen & Meldungen. Für eine bestimmte Nummer nutze die <a href="/lookup${keyParam}">Nummer-Suche</a>.</p>
     </div>
     <form class="card" method="get" action="/search">
       <input type="hidden" name="key" value="${escapeHtml(req.query.key)}">
@@ -1347,6 +1543,7 @@ app.get('/dashboard', (req, res) => {
   const speicher = store.usingMongo() ? 'MongoDB' : 'Datei (flüchtig)';
 
   res.send(page('Dashboard', `
+    ${navBar(keyParam, 'dashboard')}
     <div class="card">
       <div class="row"><h1>📊 Dashboard</h1>${statusBadge}</div>
       <p class="muted">Live-Daten vom Server · aktualisiert alle 10 s</p>
@@ -1881,6 +2078,42 @@ async function startBot() {
               text: `📢 ${mentions2.map((m) => '@' + m.split('@')[0]).join(' ')}\n\n${text2}`,
               mentions: mentions2,
             });
+            break;
+          }
+          case 'pin':
+          case 'unpin': {
+            const ctxP = msg.message?.extendedTextMessage?.contextInfo;
+            if (!ctxP || !ctxP.stanzaId) {
+              await reply(`Antworte auf eine Nachricht und schreibe ${COMMAND_PREFIX}${cmd}, um sie anzupinnen/zu lösen.`);
+              break;
+            }
+            const botJidP = jidNormalizedUser(botState.me?.id || '');
+            const quotedKey = {
+              remoteJid: jid,
+              fromMe: jidNormalizedUser(ctxP.participant || '') === botJidP,
+              id: ctxP.stanzaId,
+              participant: ctxP.participant || undefined,
+            };
+            const TIMES = { 1: 86400, 7: 604800, 30: 2592000 };
+            const days = TIMES[Number(args[0])] ? Number(args[0]) : 7;
+            try {
+              if (cmd === 'pin') {
+                await sock.sendMessage(jid, { pin: quotedKey, type: 1, time: TIMES[days] });
+                const fromNum = (ctxP.participant || '').split('@')[0];
+                activityLogPush({ type: 'pin', groupJid: jid, senderNum, targetNum: fromNum });
+                await sock.sendMessage(jid, {
+                  text: `📌 Nachricht${fromNum ? ` von @${fromNum}` : ''} wurde für ${days} Tag(e) angepinnt.`,
+                  mentions: ctxP.participant ? [ctxP.participant] : [],
+                });
+              } else {
+                await sock.sendMessage(jid, { pin: quotedKey, type: 2 });
+                activityLogPush({ type: 'unpin', groupJid: jid, senderNum });
+                await reply('📌 Nachricht wurde gelöst.');
+              }
+            } catch (err) {
+              logger.warn({ err }, 'Pin/Unpin fehlgeschlagen');
+              await reply('Anpinnen fehlgeschlagen. Bin ich Admin und unterstützt der Chat das?');
+            }
             break;
           }
           case 'setregeln': {
