@@ -909,6 +909,11 @@ const STYLE = `
   .log-pin{border-color:#38bdf8} .log-unpin{border-color:#94a3b8}
   .log-anliegen{border-color:#a78bfa}
   .log-lock{border-color:#fb7185} .log-del{border-color:#f43f5e} .log-slowmode{border-color:#facc15}
+  .cmd-row{display:flex;gap:10px;align-items:flex-start;padding:11px 12px;margin:6px 0;
+    border:1px solid rgba(255,255,255,.08);border-radius:11px;background:rgba(255,255,255,.03);transition:border-color .15s}
+  .cmd-row:hover{border-color:rgba(127,209,255,.4)}
+  .cmd-name{font-size:.95rem;font-weight:700;color:#7fd1ff;background:rgba(127,209,255,.12);padding:2px 8px;border-radius:7px}
+  .cmd-section h2{margin-bottom:6px}
   .leaderboard{counter-reset:rank}
   .lb-row{display:flex;align-items:center;gap:10px;padding:9px 12px;
     border:1px solid rgba(255,255,255,.08);border-radius:10px;margin:5px 0;background:rgba(255,255,255,.03)}
@@ -961,6 +966,7 @@ function navBar(keyParam, active = '') {
   const items = [
     ['settings', '⚙️', 'Gruppen'],
     ['community', '🏘️', 'Communities'],
+    ['befehle', '📖', 'Befehle'],
     ['dashboard', '📊', 'Dashboard'],
     ['lookup', '🔎', 'Nummer'],
     ['search', '🔍', 'Suche'],
@@ -1975,6 +1981,73 @@ app.post('/global/save', async (req, res) => {
   await persist();
   logger.info({ dmAssistant: config.settings.dmAssistant }, 'Globale Optionen gespeichert');
   res.redirect(`/anliegen${keyParam}`);
+});
+
+// Befehls-Übersicht – Nachschlagewerk aller Kommandos
+app.get('/befehle', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!requireAuth(req, res)) return;
+  const keyParam = keyOf(req);
+
+  // Aliase pro Befehl umkehren ({ ziel: [alias, ...] })
+  const aliasMap = {};
+  for (const [alias, target] of Object.entries(ALIAS)) {
+    (aliasMap[target] = aliasMap[target] || []).push(alias);
+  }
+
+  // Thematische Gruppierung anhand bekannter Befehlsschlüssel
+  const groupsDef = [
+    ['📋 Allgemein', ['hilfe', 'ping', 'info', 'id', 'regeln', 'zeit', 'würfel', 'gruppe', 'top', 'stats', 'melden']],
+    ['🛡️ Admin – Moderation', ['kick', 'ban', 'mute', 'unmute', 'warn', 'unwarn', 'clearwarn', 'warninfo', 'warnlist', 'del', 'slowmode']],
+    ['🛡️ Admin – Gruppe', ['promote', 'demote', 'link', 'revoke', 'announce', 'pin', 'unpin', 'admins', 'setname', 'setdesc', 'setregeln', 'setwelcome', 'welcome', 'lock', 'unlock', 'infolock', 'infounlock', 'ephemeral', 'addmode', 'remind', 'sag', 'alle']],
+    ['🎮 Spiele & Spaß', ['marry', 'divorce', 'profil', '8ball', 'münze', 'rps', 'joke', 'fakt', 'quote', 'truth', 'dare', 'riddle', 'antwort', 'quiz', 'roulette', 'ship', 'rate', 'choose', 'number', 'calc', 'reverse', 'timer', 'poll', 'would', 'nhie', 'mostlikely', 'iq', 'simp', 'vibe', 'mock', 'emojify', 'roll', 'horoskop']],
+    ['💞 Soziales', ['kiss', 'hug', 'slap', 'poke', 'compliment']],
+  ];
+  const known = new Set(groupsDef.flatMap(([, keys]) => keys));
+  const rest = COMMANDS.filter((c) => !known.has(c.key)).map((c) => c.key);
+  if (rest.length) groupsDef.push(['Sonstiges', rest]);
+
+  const byKey = Object.fromEntries(COMMANDS.map((c) => [c.key, c]));
+  const renderCmd = (key) => {
+    const c = byKey[key];
+    if (!c) return '';
+    const adminBadge = c.adminDefault ? '<span class="tag tag-admin">🛡️ nur Admins</span>' : '<span class="tag tag-bot">👥 alle</span>';
+    const aliases = (aliasMap[key] || []).length
+      ? `<div class="muted" style="font-size:.78rem;margin-top:3px">auch: ${aliasMap[key].map((a) => COMMAND_PREFIX + escapeHtml(a)).join(', ')}</div>`
+      : '';
+    return `<div class="cmd-row" data-search="${escapeHtml((key + ' ' + c.desc + ' ' + (aliasMap[key] || []).join(' ')).toLowerCase())}">
+      <div style="flex:1;min-width:0">
+        <code class="cmd-name">${COMMAND_PREFIX}${escapeHtml(key)}</code> ${adminBadge}
+        <div class="muted" style="margin-top:2px">${escapeHtml(c.desc)}</div>
+        ${aliases}
+      </div>
+    </div>`;
+  };
+
+  const sections = groupsDef.map(([title, keys]) => {
+    const rows = keys.map(renderCmd).join('');
+    if (!rows) return '';
+    return `<div class="card cmd-section"><h2>${title} <span class="muted" style="font-size:.85rem">(${keys.filter((k) => byKey[k]).length})</span></h2>${rows}</div>`;
+  }).join('');
+
+  res.send(page('Befehle', `
+    ${navBar(keyParam, 'befehle')}
+    <div class="card">
+      <div class="row"><h1>📖 Befehls-Übersicht</h1><span class="chip">${COMMANDS.length} Befehle</span></div>
+      <p class="muted">Alle verfügbaren Befehle mit Beschreibung. Das Präfix ist „<b>${escapeHtml(COMMAND_PREFIX)}</b>".
+        🛡️ = standardmäßig nur Admins, 👥 = für alle (pro Gruppe in den <a href="/settings${keyParam}">Einstellungen</a> änderbar).</p>
+      <input type="search" id="cmdSearch" class="search-bar" placeholder="🔍 Befehl oder Stichwort suchen…" oninput="filterCmd(this.value)">
+      <p class="muted" id="cmdCount" style="margin:4px 0 0"></p>
+    </div>
+    ${sections}`,
+    { script: `<script>
+      function filterCmd(v){v=(v||'').toLowerCase();var shown=0,total=0;
+        document.querySelectorAll('.cmd-row').forEach(function(el){total++;var ok=el.dataset.search.includes(v);el.style.display=ok?'':'none';if(ok)shown++;});
+        document.querySelectorAll('.cmd-section').forEach(function(sec){var any=sec.querySelectorAll('.cmd-row');var vis=Array.prototype.some.call(any,function(e){return e.style.display!=='none';});sec.style.display=vis?'':'none';});
+        var c=document.getElementById('cmdCount');if(c)c.textContent=shown+' von '+total+' Befehlen';}
+      filterCmd('');
+    </script>` }
+  ));
 });
 
 // Live-Dashboard
