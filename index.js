@@ -1177,6 +1177,7 @@ function navBar(keyParam, active = '') {
     ['Verwaltung', [
       ['settings', '⚙️', 'Gruppen'],
       ['community', '🏘️', 'Communities'],
+      ['community/global', '🌐', 'Global-Einstellungen'],
       ['befehle', '📖', 'Befehle'],
     ]],
     ['Sicherheit', [
@@ -1808,6 +1809,126 @@ app.post('/community/toggle', async (req, res) => {
     logger.info({ parent, enable, n }, 'Community umgeschaltet');
   }
   res.redirect(`/community${keyParam}`);
+});
+
+// Community-weite Globaleinstellungen – Seite
+app.get('/community/global', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!requireAuth(req, res)) return;
+  const keyParam = keyOf(req);
+  const keyEnc = encodeURIComponent(req.query.key);
+  const gs = config.globalSettings || {};
+  const mod = gs.moderation || {};
+
+  const toggleRow = (name, label, checked, note = '') =>
+    `<label class="toggle-row"><span>${label}${note ? `<small class="muted"> – ${note}</small>` : ''}</span><input type="hidden" name="${name}" value="0"><input type="checkbox" name="${name}" value="1"${checked ? ' checked' : ''}></label>`;
+
+  res.send(page('Global-Einstellungen', `${navBar(keyParam, 'community/global')}
+    <div class="page-header"><h1>🌐 Globaleinstellungen</h1><a href="/community${keyParam}">← Communities</a></div>
+    <div class="card" style="border:2px solid #ff9800;background:rgba(255,152,0,.08)">
+      <p>⚠️ <b>Achtung:</b> Wenn Synchronisation aktiv ist, überschreiben diese Einstellungen alle Gruppeneinstellungen beim Speichern.</p>
+    </div>
+    <form method="POST" action="/community/global/save?key=${keyEnc}">
+      <div class="card">
+        <h2>🔄 Synchronisation</h2>
+        ${toggleRow('syncEnabled', 'Sync aktiviert', gs.syncEnabled, 'Einstellungen auf alle Gruppen anwenden')}
+        ${toggleRow('botActive', 'Bot in allen Gruppen aktiv', gs.botActive !== false, 'Schaltet alle Gruppen ein/aus')}
+      </div>
+      <div class="card">
+        <h2>👋 Willkommensnachricht</h2>
+        ${toggleRow('welcomeEnabled', 'Willkommen aktiviert', gs.welcome?.enabled)}
+        <label>Nachricht (Platzhalter: {user})<br>
+          <textarea name="welcomeMsg" rows="3" style="width:100%;margin-top:6px">${escapeHtml(gs.welcome?.message || 'Willkommen, {user}! 👋')}</textarea>
+        </label>
+      </div>
+      <div class="card">
+        <h2>🛡️ Moderation</h2>
+        ${toggleRow('badwords', 'Schlechte Wörter filtern', mod.badwords)}
+        ${toggleRow('links', 'Links löschen', mod.links)}
+        <label>Warn-Limit (1–10)<br><input type="number" name="warnLimit" min="1" max="10" value="${mod.warnLimit || 3}" style="width:80px;margin-top:4px"></label>
+        <label style="margin-top:10px;display:block">Slowmode (Sekunden, 0=aus)<br><input type="number" name="slowmode" min="0" max="300" value="${mod.slowmode || 0}" style="width:80px;margin-top:4px"></label>
+      </div>
+      <div class="card">
+        <h2>🎮 Spielmodus</h2>
+        ${toggleRow('gameEnabled', 'Spiele in allen Gruppen', gs.gameEnabled, 'Aktiviert/deaktiviert das Spielmodul global')}
+      </div>
+      <div class="card">
+        <h2>📢 Globale Ankündigung</h2>
+        <p class="muted">Diese Nachricht wird <b>einmalig</b> beim Speichern an alle aktiven Gruppen gesendet. Leer lassen, um nichts zu senden.</p>
+        <textarea name="announcement" rows="3" style="width:100%" placeholder="Nachricht an alle Gruppen …"></textarea>
+      </div>
+      <div class="card" style="display:flex;gap:10px;flex-wrap:wrap">
+        <button type="submit" class="glow-btn">💾 Speichern & Synchronisieren</button>
+        <a href="/community${keyParam}" style="align-self:center">Abbrechen</a>
+      </div>
+    </form>`));
+});
+
+// Community-weite Globaleinstellungen – Speichern & Sync
+app.post('/community/global/save', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const keyParam = keyOf(req);
+  const b = req.body;
+
+  const gs = {
+    syncEnabled: b.syncEnabled === '1',
+    botActive: b.botActive === '1',
+    welcome: {
+      enabled: b.welcomeEnabled === '1',
+      message: String(b.welcomeMsg || 'Willkommen, {user}! 👋').slice(0, 500),
+    },
+    moderation: {
+      badwords: b.badwords === '1',
+      links: b.links === '1',
+      warnLimit: Math.min(10, Math.max(1, Number(b.warnLimit) || 3)),
+      slowmode: Math.min(300, Math.max(0, Number(b.slowmode) || 0)),
+    },
+    gameEnabled: b.gameEnabled === '1',
+    announcement: String(b.announcement || '').slice(0, 1000),
+  };
+  config.globalSettings = gs;
+
+  let synced = 0;
+  if (gs.syncEnabled && config.groups) {
+    for (const [gid, grp] of Object.entries(config.groups)) {
+      grp.active = gs.botActive;
+      grp.welcome = grp.welcome || {};
+      grp.welcome.enabled = gs.welcome.enabled;
+      grp.welcome.message = gs.welcome.message;
+      grp.moderation = grp.moderation || {};
+      grp.moderation.badwords = gs.moderation.badwords;
+      grp.moderation.links = gs.moderation.links;
+      grp.moderation.warnLimit = gs.moderation.warnLimit;
+      grp.moderation.slowmode = gs.moderation.slowmode;
+      if (gs.gameEnabled && gameLayer.isReady()) {
+        if (!config.gameGroups) config.gameGroups = {};
+        config.gameGroups[gid] = true;
+      } else if (!gs.gameEnabled) {
+        if (config.gameGroups) delete config.gameGroups[gid];
+      }
+      synced++;
+    }
+    logger.info({ synced }, 'Global-Sync: alle Gruppen synchronisiert');
+  }
+
+  // Globale Ankündigung senden
+  if (gs.announcement && botState.connected && botState.sock) {
+    const activeGids = Object.entries(config.groups || {})
+      .filter(([, g]) => g.active)
+      .map(([gid]) => gid);
+    let sent = 0;
+    for (const gid of activeGids) {
+      try {
+        await botState.sock.sendMessage(gid, { text: gs.announcement });
+        sent++;
+        await new Promise((r) => setTimeout(r, 300)); // Rate-limit
+      } catch (_) {}
+    }
+    logger.info({ sent }, 'Globale Ankündigung gesendet');
+  }
+
+  persist();
+  res.redirect(`/community/global?key=${encodeURIComponent(req.query.key)}&saved=1`);
 });
 
 // Globale Nummern-Suche – alle Infos & gemeinsame Gruppen

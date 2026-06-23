@@ -210,14 +210,15 @@ class EconomyManager {
     await this.db.batch([
       'CREATE TABLE IF NOT EXISTS balances (user_id TEXT PRIMARY KEY, amount INTEGER NOT NULL DEFAULT 0)',
       'CREATE TABLE IF NOT EXISTS owned_houses (user_id TEXT NOT NULL, house_id TEXT NOT NULL, bought_at INTEGER NOT NULL, PRIMARY KEY (user_id, house_id))',
-      // Cooldowns & Spieler-Metadaten (last_daily, last_work, last_rent, xp, bank …)
       'CREATE TABLE IF NOT EXISTS player_meta (user_id TEXT NOT NULL, key TEXT NOT NULL, value INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (user_id, key))',
-      // Bank: getrennt vom Bargeld, wirft täglich Zinsen ab
       'CREATE TABLE IF NOT EXISTS bank (user_id TEXT PRIMARY KEY, amount INTEGER NOT NULL DEFAULT 0)',
-      // Freigeschaltete Achievements
       'CREATE TABLE IF NOT EXISTS achievements (user_id TEXT NOT NULL, ach_id TEXT NOT NULL, unlocked_at INTEGER NOT NULL, PRIMARY KEY (user_id, ach_id))',
-      // Lotterie-Lose der laufenden Ziehung
       'CREATE TABLE IF NOT EXISTS lottery (user_id TEXT NOT NULL, draw_seed INTEGER NOT NULL, tickets INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (user_id, draw_seed))',
+      'CREATE TABLE IF NOT EXISTS trade_offers (seller_id TEXT NOT NULL, house_id TEXT NOT NULL, asking_price INTEGER NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (seller_id, house_id))',
+      'CREATE TABLE IF NOT EXISTS player_location (user_id TEXT PRIMARY KEY, region_id TEXT NOT NULL DEFAULT \'dorf\', arrived_at INTEGER NOT NULL DEFAULT 0)',
+      'CREATE TABLE IF NOT EXISTS monster_kills (user_id TEXT NOT NULL, monster_id TEXT NOT NULL, killed_at INTEGER NOT NULL, region_id TEXT NOT NULL)',
+      'CREATE TABLE IF NOT EXISTS world_resources (user_id TEXT NOT NULL, resource_id TEXT NOT NULL, amount INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (user_id, resource_id))',
+      'CREATE TABLE IF NOT EXISTS player_profession (user_id TEXT PRIMARY KEY, profession_id TEXT NOT NULL, level INTEGER NOT NULL DEFAULT 1, xp INTEGER NOT NULL DEFAULT 0, last_work INTEGER NOT NULL DEFAULT 0)',
     ], 'write');
   }
 
@@ -274,8 +275,10 @@ class EconomyManager {
   // Level / XP
   // ================================================================
   async addXp(userId, amount) {
+    const prestige = await this.getMeta(userId, 'prestige');
+    const mult = 1 + prestige; // prestige 1 → 2×, prestige 2 → 3×, …
     const cur = await this.getMeta(userId, 'xp');
-    const next = cur + Math.max(0, Math.floor(amount));
+    const next = cur + Math.max(0, Math.floor(amount * mult));
     await this.setMeta(userId, 'xp', next);
     const before = levelFromXp(cur);
     const after = levelFromXp(next);
@@ -542,13 +545,14 @@ class EconomyManager {
   }
 
   // ---- Geld an eine andere Person überweisen ----
-  async pay(fromId, toId, amount) {
+  async pay(fromId, toId, amount, tax = 0) {
     amount = Math.floor(amount);
+    tax = Math.max(0, Math.floor(tax));
     if (amount <= 0) return { ok: false, reason: 'Betrag muss positiv sein.' };
-    const remaining = await this.deductBalance(fromId, amount);
+    const remaining = await this.deductBalance(fromId, amount + tax);
     if (remaining === null) return { ok: false, reason: 'Nicht genug Coins.' };
     const toBal = await this.addBalance(toId, amount);
-    return { ok: true, amount, fromBalance: remaining, toBalance: toBal };
+    return { ok: true, amount, tax, fromBalance: remaining, toBalance: toBal };
   }
 
   // ---- Mieteinnahmen aus eigenen Häusern (alle 24h) ----
@@ -629,17 +633,102 @@ class EconomyManager {
     return offers;
   }
 
-  async getLeaderboard() {
-    const rs = await this.db.execute('SELECT user_id, SUM(0) as total FROM owned_houses GROUP BY user_id LIMIT 10');
-    const rows = rs.rows;
-    const results = await Promise.all(rows.map(async (r) => {
+  async getLeaderboard(limitOrType = 10) {
+    let limit = 10;
+    let type = 'wealth';
+    if (typeof limitOrType === 'number') limit = limitOrType;
+    if (typeof limitOrType === 'string') type = limitOrType;
+
+    if (type === 'level') {
+      const rs = await this.db.execute({ sql: 'SELECT user_id, value as xp FROM player_meta WHERE key=? ORDER BY value DESC LIMIT ?', args: ['xp', limit] });
+      return rs.rows.map((r) => ({ userId: r.user_id, xp: Number(r.xp), level: levelFromXp(Number(r.xp)) }));
+    }
+    if (type === 'prestige') {
+      const rs = await this.db.execute({ sql: 'SELECT user_id, value as prestige FROM player_meta WHERE key=? ORDER BY value DESC LIMIT ?', args: ['prestige', limit] });
+      return rs.rows.map((r) => ({ userId: r.user_id, prestige: Number(r.prestige) }));
+    }
+
+    // Default: wealth (cash + bank + houses)
+    const rs = await this.db.execute({ sql: 'SELECT user_id FROM balances ORDER BY amount DESC LIMIT ?', args: [Math.max(limit * 3, 30)] });
+    const results = await Promise.all(rs.rows.map(async (r) => {
       const inv = await this.getInventory(r.user_id);
       const totalValue = inv.reduce((s, e) => s + (e.house?.price || 0), 0);
       const balance = await this.getBalance(r.user_id);
-      return { userId: r.user_id, houseCount: inv.length, totalValue, balance };
+      const bank = await this.getBank(r.user_id);
+      return { userId: r.user_id, houseCount: inv.length, totalValue, balance, bank };
     }));
-    return results.sort((a, b) => (b.totalValue + b.balance) - (a.totalValue + a.balance));
+    return results
+      .sort((a, b) => (b.totalValue + b.balance + b.bank) - (a.totalValue + a.balance + a.bank))
+      .slice(0, limit);
   }
+
+  // Rich level display for !rang command
+  async getLevelCard(userId) {
+    const [xp, prestige, balance, bank] = await Promise.all([
+      this.getMeta(userId, 'xp'),
+      this.getMeta(userId, 'prestige'),
+      this.getBalance(userId),
+      this.getBank(userId),
+    ]);
+    const level = levelFromXp(xp);
+    const cur = xpForLevel(level);
+    const need = xpForLevel(level + 1);
+    const progress = need > cur ? Math.floor(((xp - cur) / (need - cur)) * 100) : 100;
+    const title = LEVEL_TITLES[Math.min(level - 1, LEVEL_TITLES.length - 1)] || 'Legende';
+    const badge = getLevelBadge(level);
+    const xpMult = 1 + prestige;
+    const nextReward = prestige > 0 ? `${xpMult}× XP-Multiplikator` : 'Prestige für 2× XP';
+    return { level, xp, intoLevel: xp - cur, levelSpan: need - cur, progress, title, badge, prestige, xpMult, nextReward, balance, bank };
+  }
+
+  async getRankCard(userId) {
+    const card = await this.getLevelCard(userId);
+    const bar = '█'.repeat(Math.floor(card.progress / 10)) + '░'.repeat(10 - Math.floor(card.progress / 10));
+    return (
+      `${card.badge} *Level ${card.level}* – _${card.title}_\n` +
+      `XP: ${card.intoLevel.toLocaleString('de-DE')}/${card.levelSpan.toLocaleString('de-DE')} (${card.progress}%)\n` +
+      `[${bar}]\n` +
+      `✨ Prestige: ${card.prestige}  ⚡ XP-Boost: ${card.xpMult}×\n` +
+      `💵 Bargeld: ${formatBalance(card.balance)}  🏦 Bank: ${formatBalance(card.bank)}\n` +
+      `📌 _${card.nextReward}_`
+    );
+  }
+}
+
+// Level-Titel (100 Stufen)
+const LEVEL_TITLES = [
+  'Frischling','Neuling','Beginner','Lehrling','Schüler',
+  'Azubi','Praktikant','Hilfskraft','Arbeiter','Geselle',
+  'Fachkraft','Experte','Veteran','Profi','Meister',
+  'Großmeister','Champion','Elite','Held','Legende',
+  'Ikone','Mythos','Titan','Gott','Unsterblicher',
+  'Abgesandter','Wächter','Hüter','Beschützer','Streiter',
+  'Krieger','Kämpfer','Ritter','Paladin','Barbar',
+  'Jäger','Bogenschütze','Assassine','Dieb','Magier',
+  'Hexer','Druide','Priester','Barde','Alchemist',
+  'Ingenieur','Stratege','Anführer','General','König',
+  'Kaiser','Pharao','Sultan','Zar','Rajah',
+  'Großfürst','Erzherzog','Herzog','Markgraf','Graf',
+  'Baron','Ritter (Adel)','Edelmann','Lord','Sir',
+  'Meisterschmied','Chefkoch','Kapitän','Admiral','Kommandeur',
+  'Marschall','Feldherr','Oberst','Major','Hauptmann',
+  'Leutnant','Sergeant','Korporat','Soldat','Rekrut',
+  'Forscher','Entdecker','Abenteurer','Pionier','Trailblazer',
+  'Goldsucher','Schatzjäger','Glücksritter','Spekulant','Händler',
+  'Kaufmann','Millionär','Multimillionär','Milliardär','Plutokrat',
+  'Oligarch','Mogul','Tycoon','Magnaten','Übermensch',
+  'Halbgott','Transzendent',
+];
+
+function getLevelBadge(level) {
+  if (level >= 100) return '🌌';
+  if (level >= 86) return '🌠';
+  if (level >= 71) return '💫';
+  if (level >= 56) return '💎';
+  if (level >= 41) return '💜';
+  if (level >= 26) return '🥇';
+  if (level >= 11) return '🥈';
+  return '🥉';
 }
 
 // ====================================================================
@@ -1402,6 +1491,7 @@ module.exports = {
   checkFriendBonus, recordFriendInteraction,
   setGlobalMultiplier, getGlobalMultiplier, getGlobalMultiplierInfo,
   fmtNumber, fmtPercent, houseValue, totalHouseValue,
+  LEVEL_TITLES, getLevelBadge,
   // Seasonal helper (static, no instance needed)
   getCurrentSeason: EconomyManager.currentSeason,
   getLotterySeed: EconomyManager.lotterySeed,

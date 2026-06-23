@@ -528,10 +528,83 @@ ClanManager.prototype.contributeClanTask = async function (clanId, userId, event
   }).catch(() => {});
 };
 
+// ====================================================================
+// Gilden-Skill-Baum (3 Kategorien × 3 Skills)
+// ====================================================================
+const GUILD_SKILLS = [
+  // Kategorie: Wirtschaft
+  { id: 'gs_treasury1',  cat: 'economy',  name: '💰 Erweiterter Tresor I',  cost: 1000,  desc: '+5% auf alle Tagesboni der Mitglieder' },
+  { id: 'gs_treasury2',  cat: 'economy',  name: '💰 Erweiterter Tresor II', cost: 3000,  desc: '+10% auf alle Tagesboni', requires: 'gs_treasury1' },
+  { id: 'gs_treasury3',  cat: 'economy',  name: '💰 Goldene Schatzkammer',  cost: 8000,  desc: '+20% auf alle Tagesboni', requires: 'gs_treasury2' },
+  // Kategorie: Kampf
+  { id: 'gs_combat1',    cat: 'combat',   name: '⚔️ Kampfausbildung I',     cost: 1500,  desc: '+5% ATK für Gilden-Mitglieder im Kampf' },
+  { id: 'gs_combat2',    cat: 'combat',   name: '⚔️ Kampfausbildung II',    cost: 4500,  desc: '+10% ATK + +5% DEF', requires: 'gs_combat1' },
+  { id: 'gs_combat3',    cat: 'combat',   name: '⚔️ Elite-Krieger',         cost: 12000, desc: '+20% ATK + +15% DEF', requires: 'gs_combat2' },
+  // Kategorie: Entdeckung
+  { id: 'gs_explore1',   cat: 'explore',  name: '🗺️ Erkundungsgeist I',    cost: 1200,  desc: '+10% Rohstoff-Drops beim Sammeln' },
+  { id: 'gs_explore2',   cat: 'explore',  name: '🗺️ Erkundungsgeist II',   cost: 3500,  desc: '+20% Rohstoff-Drops + -10% Reisekosten', requires: 'gs_explore1' },
+  { id: 'gs_explore3',   cat: 'explore',  name: '🗺️ Weltenwanderer',       cost: 9000,  desc: '+30% Drops + -25% Reisekosten + +5% XP überall', requires: 'gs_explore2' },
+];
+
+// Gilden-Territorium – kontrollierte Weltregionen (gibt +10% Drops)
+const guildTerritories = new Map(); // regionId → clanId
+
+ClanManager.prototype.getSkills = async function (clanId) {
+  const rs = await this.db.execute({ sql: 'SELECT key FROM player_meta WHERE user_id=? AND key LIKE ? AND value=1', args: [clanId, 'gskill_%'] }).catch(() => ({ rows: [] }));
+  return new Set(rs.rows.map((r) => r.key.replace('gskill_', '')));
+};
+
+ClanManager.prototype.unlockSkill = async function (leaderId, skillId) {
+  const myMem = await this.getMembership(leaderId).catch(() => null);
+  if (!myMem || myMem.role !== 'leader') return { ok: false, reason: 'Nur der Gildenleiter kann Skills freischalten.' };
+  const skill = GUILD_SKILLS.find((s) => s.id === skillId);
+  if (!skill) return { ok: false, reason: 'Skill nicht gefunden.' };
+  const clanInfo = await this.getClan(myMem.clan_id).catch(() => null);
+  if (!clanInfo) return { ok: false, reason: 'Gilde nicht gefunden.' };
+  const owned = await this.getSkills(myMem.clan_id);
+  if (owned.has(skillId)) return { ok: false, reason: 'Skill bereits freigeschaltet.' };
+  if (skill.requires && !owned.has(skill.requires)) return { ok: false, reason: `Benötigt zuerst: ${skill.requires}` };
+  if (clanInfo.treasury < skill.cost) return { ok: false, reason: `Nicht genug im Tresor. Benötigt: ${skill.cost} XP` };
+  await this.db.execute({ sql: 'UPDATE clans SET treasury=treasury-? WHERE clan_id=?', args: [skill.cost, myMem.clan_id] });
+  await this.db.execute({ sql: 'INSERT OR REPLACE INTO player_meta(user_id,key,value) VALUES(?,?,1)', args: [myMem.clan_id, `gskill_${skillId}`] });
+  return { ok: true, skill };
+};
+
+ClanManager.prototype.claimTerritory = async function (leaderId, regionId) {
+  const myMem = await this.getMembership(leaderId).catch(() => null);
+  if (!myMem || myMem.role !== 'leader') return { ok: false, reason: 'Nur der Gildenleiter kann Territorium beanspruchen.' };
+  const current = guildTerritories.get(regionId);
+  if (current === myMem.clan_id) return { ok: false, reason: 'Ihr kontrolliert diese Region bereits.' };
+  guildTerritories.set(regionId, myMem.clan_id);
+  const clan = await this.getClan(myMem.clan_id).catch(() => null);
+  return { ok: true, clanName: clan?.name || '?', regionId };
+};
+
+ClanManager.prototype.getTerritories = function () {
+  return [...guildTerritories.entries()].map(([region, clanId]) => ({ region, clanId }));
+};
+
+ClanManager.prototype.getGuildBonus = async function (userId) {
+  const myMem = await this.getMembership(userId).catch(() => null);
+  if (!myMem) return { daily: 0, atk: 0, def: 0, dropBonus: 0, travelDiscount: 0, xpBonus: 0 };
+  const owned = await this.getSkills(myMem.clan_id);
+  let daily = 0, atk = 0, def = 0, dropBonus = 0, travelDiscount = 0, xpBonus = 0;
+  if (owned.has('gs_treasury1')) daily += 5;
+  if (owned.has('gs_treasury2')) daily += 10;
+  if (owned.has('gs_treasury3')) daily += 20;
+  if (owned.has('gs_combat1')) atk += 5;
+  if (owned.has('gs_combat2')) { atk += 10; def += 5; }
+  if (owned.has('gs_combat3')) { atk += 20; def += 15; }
+  if (owned.has('gs_explore1')) dropBonus += 10;
+  if (owned.has('gs_explore2')) { dropBonus += 20; travelDiscount += 10; }
+  if (owned.has('gs_explore3')) { dropBonus += 30; travelDiscount += 25; xpBonus += 5; }
+  return { daily, atk, def, dropBonus, travelDiscount, xpBonus };
+};
+
 // Formatiert eine Clan-Kurz-Info für den Chat
 function fmtClanBadge(clan, lvlInfo) {
   const lbl = lvlInfo?.current?.name || 'Neuling';
   return `[${clan.name}] ${lbl} | XP: ${clan.xp}`;
 }
 
-module.exports = { ClanManager, CLAN_LEVELS, clanLevelInfo, clanWars, CLAN_TASKS, todaysClanTask, fmtClanBadge };
+module.exports = { ClanManager, CLAN_LEVELS, clanLevelInfo, clanWars, CLAN_TASKS, todaysClanTask, fmtClanBadge, GUILD_SKILLS, guildTerritories };

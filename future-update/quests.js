@@ -53,6 +53,34 @@ const WEEKLY_QUEST_POOL = [
   { id: 'w_gift_3',      text: 'Verschenke 3 Items',                  event: 'gift',     goal: 3,      reward: 8000,   xp: 240 },
 ];
 
+// ====================================================================
+// Welt-Quests (für das neue Weltsystem)
+// ====================================================================
+const WORLD_QUEST_POOL = [
+  { id: 'wq_fight_3',    text: 'Besiege 3 Monster',              event: 'fight_win',   goal: 3,   reward: 800,   xp: 50 },
+  { id: 'wq_fight_10',   text: 'Besiege 10 Monster',             event: 'fight_win',   goal: 10,  reward: 2500,  xp: 120 },
+  { id: 'wq_travel',     text: 'Reise in eine neue Region',      event: 'travel',      goal: 1,   reward: 500,   xp: 30 },
+  { id: 'wq_gather',     text: 'Sammle 3× Rohstoffe',            event: 'gather',      goal: 3,   reward: 600,   xp: 35 },
+  { id: 'wq_explore',    text: 'Erkunde eine Region',            event: 'explore',     goal: 1,   reward: 700,   xp: 40 },
+  { id: 'wq_hunt',       text: 'Starte eine Jagd',               event: 'hunt',        goal: 1,   reward: 1200,  xp: 60 },
+  { id: 'wq_sell_res',   text: 'Verkaufe Rohstoffe',             event: 'sell_res',    goal: 1,   reward: 400,   xp: 25 },
+  { id: 'wq_fight_boss', text: 'Besiege 1 Monster in höherer Region', event: 'fight_win', goal: 1, reward: 1500, xp: 75 },
+  { id: 'wq_kill_5',     text: 'Sammle 5 Monster-Abschüsse',     event: 'fight_win',   goal: 5,   reward: 1800,  xp: 90 },
+  { id: 'wq_flee',       text: 'Fliehe erfolgreich vor einem Monster', event: 'flee_ok', goal: 1, reward: 300,   xp: 20 },
+];
+
+// ====================================================================
+// Berufs-Quests
+// ====================================================================
+const PROF_QUEST_POOL = [
+  { id: 'pq_work_3',     text: 'Arbeite 3× als Beruf',           event: 'prof_work',   goal: 3,   reward: 600,   xp: 35 },
+  { id: 'pq_work_5',     text: 'Arbeite 5× als Beruf',           event: 'prof_work',   goal: 5,   reward: 1200,  xp: 60 },
+  { id: 'pq_income',     text: 'Kassiere passive Einnahmen',      event: 'prof_income', goal: 1,   reward: 400,   xp: 25 },
+  { id: 'pq_special_2',  text: 'Führe 2 Berufsspezialaktionen aus', event: 'prof_special', goal: 2, reward: 800,  xp: 45 },
+  { id: 'pq_levelup',    text: 'Steige im Beruf auf',             event: 'prof_levelup', goal: 1,  reward: 2000,  xp: 100 },
+  { id: 'pq_earn_3k',    text: 'Verdiene 3.000 Coins durch Beruf', event: 'prof_earn',  goal: 3000, reward: 1500, xp: 70 },
+];
+
 function todaySeed() {
   const d = new Date();
   return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
@@ -488,6 +516,7 @@ function questResetInfo() {
 
 module.exports = {
   QuestManager, QUEST_POOL, WEEKLY_QUEST_POOL,
+  WORLD_QUEST_POOL, PROF_QUEST_POOL,
   SEASONAL_QUEST_POOL, ACHIEVEMENT_QUESTS,
   dailyQuests, weeklyQuests, seasonalQuests,
   questProgressBar, formatQuestSummary, estimateCompletion, questCalendar, questResetInfo,

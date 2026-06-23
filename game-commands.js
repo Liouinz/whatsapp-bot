@@ -13,13 +13,15 @@
 // ====================================================================
 'use strict';
 
-let economyMod, gamesMod, shopMod, questsMod, eventsMod, clanMod;
+let economyMod, gamesMod, shopMod, questsMod, eventsMod, clanMod, worldMod, profMod;
 try { economyMod = require('./economy'); } catch (_) { /* optional */ }
 try { gamesMod = require('./future-update/games'); } catch (_) { /* optional */ }
 try { shopMod = require('./future-update/shop'); } catch (_) { /* optional */ }
 try { questsMod = require('./future-update/quests'); } catch (_) { /* optional */ }
 try { eventsMod = require('./future-update/events'); } catch (_) { /* optional */ }
 try { clanMod = require('./future-update/clan'); } catch (_) { /* optional */ }
+try { worldMod = require('./future-update/world'); } catch (_) { /* optional */ }
+try { profMod = require('./future-update/professions'); } catch (_) { /* optional */ }
 
 const fmt = (economyMod && economyMod.formatBalance) || ((n) => `${Math.round(n)} 🪙`);
 const fmtWait = (gamesMod && gamesMod.fmtWait) || ((ms) => `${Math.ceil(ms / 60000)} Min`);
@@ -31,7 +33,7 @@ const setGameGroup = (gamesMod && gamesMod.setGameGroup) || ((cfg, jid, on) => {
 const HOUSES = (economyMod && economyMod.HOUSES) || [];
 
 // Modul-Instanzen (nach initModules gesetzt)
-const mgrs = { economy: null, game: null, shop: null, quest: null, events: null, clan: null };
+const mgrs = { economy: null, game: null, shop: null, quest: null, events: null, clan: null, world: null, professions: null };
 let _logger = { info() {}, warn() {}, error() {} };
 
 // ====================================================================
@@ -69,7 +71,15 @@ async function initModules({ logger } = {}) {
       try { mgrs.clan = new clanMod.ClanManager(economy); await mgrs.clan.init(); }
       catch (e) { _logger.warn({ e }, 'Clan-Init übersprungen'); mgrs.clan = null; }
     }
-    _logger.info('🎮 Wirtschaft, Shop, Quests, Events, Clan & Casino aktiviert (Turso)');
+    if (worldMod && worldMod.WorldManager) {
+      try { mgrs.world = new worldMod.WorldManager(economy); }
+      catch (e) { _logger.warn({ e }, 'World-Init übersprungen'); mgrs.world = null; }
+    }
+    if (profMod && profMod.ProfessionManager) {
+      try { mgrs.professions = new profMod.ProfessionManager(economy); }
+      catch (e) { _logger.warn({ e }, 'Professions-Init übersprungen'); mgrs.professions = null; }
+    }
+    _logger.info('🎮 Wirtschaft, Shop, Quests, Events, Clan, Welt & Berufe aktiviert (Turso)');
     return { ok: true };
   } catch (e) {
     _logger.error({ e }, 'Spielmodule-Init fehlgeschlagen – Bot läuft ohne Spielteil');
@@ -93,21 +103,84 @@ async function heartbeat() {
 const ECON_CMDS = [
   'balance', 'kontostand', 'geld', 'vermögen', 'networth', 'daily', 'arbeiten', 'work',
   'miete', 'markt', 'kaufen', 'verkaufen', 'inventar', 'häuser', 'pay', 'überweisen',
-  'level', 'rang', 'achievements', 'erfolge', 'prestige', 'einzahlen', 'deposit',
+  'level', 'rang', 'levelcard', 'profil', 'achievements', 'erfolge', 'prestige', 'einzahlen', 'deposit',
   'auszahlen', 'withdraw', 'zinsen', 'reich', 'rangliste', 'lotto', 'lotterie',
   'jackpot', 'saisonbonus', 'stats', 'statistik',
+  // Neue Wirtschaftsbefehle
+  'bankinfo', 'tagesherausforderung', 'challenge', 'aktien', 'stocks', 'aktienkaufen', 'aktienverkaufen',
+  'anbieten', 'handelsangebot', 'handel', 'handelsmarkt', 'trade', 'handelabbrechen',
+  'angebot', 'levelrangliste', 'prestigerangliste', 'weltrangliste', 'reichrangliste',
+  'freund', 'freundeinkommen', 'vermoegenssteuer', 'sparplan', 'kredit',
 ];
 const CASINO_CMDS = [
   'slots', 'coinflip', 'cf', 'würfelwette', 'roulette', 'blackjack', 'bj', 'poker',
   'crash', 'keno', 'hl', 'higherlower', 'rauben', 'rob', 'glücksrad', 'wheel',
   'rubbellos', 'scratch', 'box', 'tagesbox', 'event', 'ereignis',
+  // Neue Casino-Befehle
+  'videopoker', 'videopokerhalten', 'kriegsspiel', 'superslots', 'dreherrad', 'zahlenduel',
+  'baccarat', 'pferderennen', 'minen', 'wuerfelturm', 'jackpotslots',
+  'turnier', 'turnierstand', 'turnieranmelden',
+  'boss', 'bossangriff', 'bossstatus',
+  'gruplotto', 'gruplottojoin', 'gruplottoziehung',
+  'megaevent', 'eventstatus',
 ];
-const SHOP_CMDS = ['shop', 'kaufenitem', 'buyitem', 'items', 'meineitems', 'einkommen', 'tagesdeal', 'crafting', 'craften'];
-const QUEST_CMDS = ['quests', 'aufgaben', 'claim'];
-const CLAN_CMDS = ['clan'];
+const SHOP_CMDS = [
+  'shop', 'kaufenitem', 'buyitem', 'items', 'meineitems', 'einkommen', 'tagesdeal', 'crafting', 'craften',
+  // Neue Shop-Befehle
+  'waffen', 'weapons', 'ruestungen', 'armor', 'reiseausruestung', 'werkzeuge', 'traenke', 'potions',
+  'trank', 'trinken', 'usepotion', 'marktplatz', 'marketplace', 'angebote',
+  'verkaufenitem', 'verschenken', 'wishlist', 'wunschliste', 'verzaubern', 'enchant',
+  'paket', 'bundle', 'upgradeitem', 'upgrade', 'legendaer',
+];
+const QUEST_CMDS = [
+  'quests', 'aufgaben', 'claim',
+  // Neue Quest-Befehle
+  'wochenquest', 'saisonquest', 'questkalender', 'weltquest', 'berufsquest',
+  'erfolgsquest', 'questinfo', 'questreset',
+];
+const CLAN_CMDS = [
+  'clan', 'gilde',
+  // Neue Gilden-Befehle
+  'gildeskills', 'gildequest', 'gildeterritorium',
+];
+const WORLD_CMDS = [
+  'reisen', 'travel', 'karte', 'weltkarte', 'worldmap', 'region', 'regioninfo',
+  'standort', 'ort', 'location', 'whereami',
+  'kämpfen', 'kampf', 'fight', 'attack', 'angreifen', 'monster', 'monsterangriff',
+  'jagd', 'hunt', 'jagen', 'jagdladungen',
+  'flucht', 'flee', 'escape',
+  'sammeln', 'ernten', 'harvest', 'collect', 'ressourcen', 'rohstoffe', 'resources',
+  'verkaufenrohstoffe', 'rohstoffverkauf',
+  'bestiarium', 'monsterinfo', 'monsterkills',
+  'erkunden', 'explore', 'erkundung', 'entdecken',
+  'weltranking', 'topjaeger',
+];
+const PROF_CMDS = [
+  'beruf', 'profession', 'job', 'berufe', 'berufsinfo', 'profinfo',
+  'beruflevel', 'proftrain', 'berufsarbeit', 'jobwork',
+  'berufseinnahmen', 'berufseinkommen',
+  'spezialakt', 'specialaction',
+  // Berufs-Spezialfähigkeiten
+  'anpflanzen', 'pflanzen', 'feldernten', 'feldernten',
+  'graben', 'sprengen', 'schürfen',
+  'handeln', 'feilschen', 'investieren',
+  'patrouillieren', 'trainieren', 'wachen',
+  'zaubern', 'studieren', 'beschwören',
+  'schleichen', 'klauen', 'spionieren',
+  'kochen', 'backen', 'braten',
+  'schmieden', 'schärfen', 'härten',
+  'angeln', 'netzwerfen', 'tauchen',
+  'brauen', 'destillieren', 'experimentieren',
+  'kartografieren', 'entdecken',
+  'spekulieren',
+  'berufsrangliste', 'profleaderboard',
+];
 
-const GAME_CMDS = new Set([...ECON_CMDS, ...CASINO_CMDS, ...SHOP_CMDS, ...QUEST_CMDS, ...CLAN_CMDS]);
-const ALL_CMDS = new Set([...GAME_CMDS, 'spielgruppe']);
+const GAME_CMDS = new Set([
+  ...ECON_CMDS, ...CASINO_CMDS, ...SHOP_CMDS, ...QUEST_CMDS,
+  ...CLAN_CMDS, ...WORLD_CMDS, ...PROF_CMDS,
+]);
+const ALL_CMDS = new Set([...GAME_CMDS, 'spielgruppe', 'hilfewelt', 'hilfeberuf', 'hilfegilden']);
 
 function owns(cmd) { return ALL_CMDS.has(cmd); }
 
@@ -176,11 +249,18 @@ async function handleSpielgruppe(ctx) {
 
 async function dispatch(ctx) {
   const { cmd } = ctx;
-  if (ECON_CMDS.includes(cmd)) return econ(ctx);
-  if (CASINO_CMDS.includes(cmd)) return casino(ctx);
-  if (SHOP_CMDS.includes(cmd)) return shopCmd(ctx);
-  if (QUEST_CMDS.includes(cmd)) return questCmd(ctx);
-  if (CLAN_CMDS.includes(cmd)) return clanCmd(ctx);
+  if (WORLD_CMDS.includes(cmd)) return worldCmd(ctx);
+  else if (PROF_CMDS.includes(cmd)) return profCmd(ctx);
+  else if (ECON_CMDS.includes(cmd)) return econ(ctx);
+  else if (CASINO_CMDS.includes(cmd)) return casino(ctx);
+  else if (SHOP_CMDS.includes(cmd)) return shopCmd(ctx);
+  else if (QUEST_CMDS.includes(cmd)) return questCmd(ctx);
+  else if (CLAN_CMDS.includes(cmd)) return clanCmd(ctx);
+  else if (cmd === 'hilfewelt') {
+    await ctx.reply('🌍 *Weltbefehle*\n\n!karte – Weltkarte\n!reisen <region> – Bereise eine Region\n!region – Info zur aktuellen Region\n!standort – Wo bin ich?\n!kämpfen – Monster bekämpfen\n!jagd – Jagd starten (5/Tag)\n!sammeln – Rohstoffe sammeln\n!ressourcen – Meine Rohstoffe\n!erkunden – Gebiet erkunden\n!bestiarium – Alle Monster\n!topjaeger – Weltrangliste');
+  } else if (cmd === 'hilfeberuf') {
+    await ctx.reply('💼 *Berufsbefehle*\n\n!berufe – Alle Berufe anzeigen\n!beruf – Mein Beruf\n!beruf <id> wählen – Beruf wählen\n!berufsarbeit – Berufsarbeit ausführen\n!berufseinnahmen – Passive Einnahmen abholen\n!berufsrangliste – Top-Spieler nach Beruf');
+  }
 }
 
 // ====================================================================
@@ -264,18 +344,26 @@ async function econ(ctx) {
       const amount = Number(args.find((a) => /^\d+$/.test(a)));
       if (!target || !amount) { await reply(`Nutzung: ${COMMAND_PREFIX}pay @person <Betrag>`); return; }
       if (target === senderJid) { await reply('Du kannst dir nicht selbst Geld überweisen. 😄'); return; }
-      const r = await eco.pay(senderJid, target, amount);
+      const tax = economyMod.calcTax ? economyMod.calcTax(amount) : 0;
+      const r = await eco.pay(senderJid, target, amount, tax);
       if (!r.ok) { await reply(`❌ ${r.reason}`); return; }
+      if (tax > 0) { try { await eco.addBalance('jackpot_system', tax); } catch (_) {} }
       try { await eco.setMeta(senderJid, 'total_given', (await eco.getMeta(senderJid, 'total_given')) + amount); } catch (_) {}
-      await sock.sendMessage(jid, { text: `💸 Du hast @${target.split('@')[0]} ${fmt(r.amount)} überwiesen.`, mentions: [target] }, { quoted: msg });
+      const taxNote = tax > 0 ? `\n💼 Steuer: ${fmt(tax)} (zum Jackpot)` : '';
+      await sock.sendMessage(jid, { text: `💸 Du hast @${target.split('@')[0]} ${fmt(r.amount)} überwiesen.${taxNote}`, mentions: [target] }, { quoted: msg });
       return;
     }
-    case 'level': case 'rang': {
-      const lvl = await eco.getLevelInfo(senderJid);
-      const pr = await eco.getPrestige(senderJid);
-      const filled = lvl.levelSpan > 0 ? Math.floor((lvl.intoLevel / lvl.levelSpan) * 10) : 0;
-      const bar = '█'.repeat(filled) + '░'.repeat(10 - filled);
-      await reply(`⭐ *Level ${lvl.level}*${pr > 0 ? ` · Prestige ${pr}✨` : ''}\n[${bar}] ${lvl.intoLevel}/${lvl.levelSpan} XP\nNächstes Level bei ${lvl.nextAt} XP`);
+    case 'level': case 'rang': case 'levelcard': case 'profil': {
+      if (typeof eco.getRankCard === 'function') {
+        const card = await eco.getRankCard(senderJid);
+        await reply(`╔══════════════╗\n*SPIELERPROFIL*\n╚══════════════╝\n\n${card}`);
+      } else {
+        const lvl = await eco.getLevelInfo(senderJid);
+        const pr = await eco.getPrestige(senderJid);
+        const filled = lvl.levelSpan > 0 ? Math.floor((lvl.intoLevel / lvl.levelSpan) * 10) : 0;
+        const bar = '█'.repeat(filled) + '░'.repeat(10 - filled);
+        await reply(`⭐ *Level ${lvl.level}*${pr > 0 ? ` · Prestige ${pr}✨` : ''}\n[${bar}] ${lvl.intoLevel}/${lvl.levelSpan} XP`);
+      }
       return;
     }
     case 'achievements': case 'erfolge': {
@@ -319,13 +407,28 @@ async function econ(ctx) {
       await reply(`💹 Tageszins: *+${fmt(r.interest)}* (1%)\nBank: ${fmt(r.bank)}`);
       return;
     }
-    case 'reich': case 'rangliste': {
-      const top = await eco.getLeaderboard();
+    case 'reich': case 'rangliste': case 'reichrangliste': case 'weltrangliste': {
+      const top = await eco.getLeaderboard('wealth');
       if (!top.length) { await reply('Noch keine Spieler in der Rangliste. Kauf das erste Haus! 🏠'); return; }
-      const sorted = [...top].sort((a, b) => (b.totalValue + b.balance) - (a.totalValue + a.balance));
       const medals = ['🥇', '🥈', '🥉'];
-      const lines = sorted.map((p, i) => `${medals[i] || `${i + 1}.`} @${p.userId.split('@')[0]} – ${fmt(p.totalValue + p.balance)}`);
-      await sock.sendMessage(jid, { text: `💰 *Reichste Spieler*\n\n${lines.join('\n')}`, mentions: sorted.map((p) => p.userId) });
+      const lines = top.map((p, i) => `${medals[i] || `${i + 1}.`} @${p.userId.split('@')[0]} – ${fmt(p.totalValue + p.balance + p.bank)}`);
+      await sock.sendMessage(jid, { text: `💰 *Reichste Spieler*\n\n${lines.join('\n')}`, mentions: top.map((p) => p.userId) });
+      return;
+    }
+    case 'levelrangliste': {
+      const top = await eco.getLeaderboard('level');
+      if (!top.length) { await reply('Noch keine Level-Daten.'); return; }
+      const medals = ['🥇', '🥈', '🥉'];
+      const lines = top.map((p, i) => `${medals[i] || `${i + 1}.`} @${p.userId.split('@')[0]} – Level ${p.level} (${p.xp} XP)`);
+      await sock.sendMessage(jid, { text: `⭐ *Level-Rangliste*\n\n${lines.join('\n')}`, mentions: top.map((p) => p.userId) });
+      return;
+    }
+    case 'prestigerangliste': {
+      const top = await eco.getLeaderboard('prestige');
+      if (!top.length) { await reply('Noch keine Prestige-Daten.'); return; }
+      const medals = ['🥇', '🥈', '🥉'];
+      const lines = top.map((p, i) => `${medals[i] || `${i + 1}.`} @${p.userId.split('@')[0]} – Prestige ${p.prestige} ✨`);
+      await sock.sendMessage(jid, { text: `✨ *Prestige-Rangliste*\n\n${lines.join('\n')}`, mentions: top.map((p) => p.userId) });
       return;
     }
     case 'lotto': case 'lotterie': {
@@ -690,8 +793,240 @@ async function clanCmd(ctx) {
       await reply(`🏰 Clan *${r.name}* aufgelöst.${r.treasuryReturned > 0 ? ` Tresor zurück: ${fmt(r.treasuryReturned)}` : ''}`);
       return;
     }
+    case 'skills': case 'gildeskills': {
+      if (typeof clan.getSkills === 'function') {
+        const myMem = await clan.getMembership(senderJid).catch(() => null);
+        if (!myMem) { await reply('Du bist in keiner Gilde.'); return; }
+        const owned = await clan.getSkills(myMem.clan_id);
+        const clanMod2 = require('./future-update/clan');
+        const allSkills = clanMod2.GUILD_SKILLS || [];
+        const lines = allSkills.map((s) => `${owned.has(s.id) ? '✅' : '🔒'} *${s.name}* [${s.id}] – ${s.cost} XP\n_${s.desc}_${s.requires ? ` (Benötigt: ${s.requires})` : ''}`);
+        await reply(`⚔️ *Gilde-Skills*\n\n${lines.join('\n\n')}\nFreischalten: ${COMMAND_PREFIX}clan skills freischalten <skill-id>`);
+      }
+      if ((args[1] || '') === 'freischalten' || (args[1] || '') === 'unlock') {
+        const skillId = args[2];
+        if (!skillId) { await reply(`Nutzung: ${COMMAND_PREFIX}clan skills freischalten <skill-id>`); return; }
+        const r = await clan.unlockSkill(senderJid, skillId);
+        if (!r.ok) { await reply(`❌ ${r.reason}`); return; }
+        await reply(`✅ *${r.skill.name}* freigeschaltet!\n_${r.skill.desc}_`);
+      }
+      return;
+    }
+    case 'territorium': case 'gildeterritorium': {
+      if (typeof clan.claimTerritory === 'function') {
+        const regionId = (args[1] || '').toLowerCase();
+        if (!regionId) {
+          const territories = clan.getTerritories ? clan.getTerritories() : [];
+          await reply(`🗺️ *Kontrollierte Gebiete*\n\n${territories.length ? territories.map((t) => `${t.region} → Clan ${t.clanId.split('@')[0]}`).join('\n') : 'Keine Gebiete unter Kontrolle.'}\n\nGebiet beanspruchen: ${COMMAND_PREFIX}clan territorium <region-id>`);
+          return;
+        }
+        const r = await clan.claimTerritory(senderJid, regionId);
+        if (!r.ok) { await reply(`❌ ${r.reason}`); return; }
+        await reply(`🏴 *${r.clanName}* kontrolliert jetzt *${r.regionId}*!\n+10% Drops für alle Gildenmitglieder in dieser Region.`);
+      }
+      return;
+    }
     default:
-      await reply(`⚔️ *Clan-Befehle*\n${COMMAND_PREFIX}clan info\n${COMMAND_PREFIX}clan erstellen <Name> <TAG>\n${COMMAND_PREFIX}clan suche [name]\n${COMMAND_PREFIX}clan beitritt <id>\n${COMMAND_PREFIX}clan verlassen\n${COMMAND_PREFIX}clan spenden <betrag>\n${COMMAND_PREFIX}clan top\n${COMMAND_PREFIX}clan auflösen`);
+      await reply(`⚔️ *Clan/Gilde-Befehle*\n${COMMAND_PREFIX}clan info · ${COMMAND_PREFIX}clan erstellen <Name> <TAG>\n${COMMAND_PREFIX}clan suche [name] · ${COMMAND_PREFIX}clan beitritt <id>\n${COMMAND_PREFIX}clan verlassen · ${COMMAND_PREFIX}clan spenden <betrag>\n${COMMAND_PREFIX}clan top · ${COMMAND_PREFIX}clan skills · ${COMMAND_PREFIX}clan territorium\n${COMMAND_PREFIX}clan auflösen`);
+  }
+}
+
+// ====================================================================
+// Weltbefehle
+// ====================================================================
+async function worldCmd(ctx) {
+  const { cmd, args, senderJid, reply, COMMAND_PREFIX } = ctx;
+  const world = mgrs.world;
+  if (!world) { await reply('🌍 Weltmodul nicht verfügbar.'); return; }
+
+  switch (cmd) {
+    case 'karte': case 'weltkarte': case 'worldmap': {
+      const map = await world.getWorldMap();
+      await reply(map);
+      return;
+    }
+    case 'standort': case 'ort': case 'location': case 'whereami': {
+      const loc = await world.getLocation(senderJid);
+      await reply(`📍 Du bist in: ${loc.emoji} *${loc.name}*\n_${loc.description}_\nMonster: ${loc.monsters.join(', ')}`);
+      return;
+    }
+    case 'reisen': case 'travel': {
+      const regionId = (args[0] || '').toLowerCase();
+      if (!regionId) { await reply(`Nutzung: ${COMMAND_PREFIX}reisen <region-id>\nZeige die Karte mit ${COMMAND_PREFIX}karte`); return; }
+      const r = await world.travel(senderJid, regionId);
+      if (!r.ok) { await reply(`❌ ${r.reason}`); return; }
+      await reply(`✈️ Du reist nach ${r.region.emoji} *${r.region.name}*!\nReisekosten: ${fmt(r.cost)}\nKontostand: ${fmt(r.balance)}\n\n_${r.region.description}_`);
+      return;
+    }
+    case 'region': case 'regioninfo': {
+      const regionId = (args[0] || '').toLowerCase();
+      if (!regionId) { await reply(`Nutzung: ${COMMAND_PREFIX}region <id>`); return; }
+      const r = await world.getRegionInfo(regionId);
+      if (!r) { await reply('Region nicht gefunden.'); return; }
+      await reply(`${r.emoji} *${r.name}*\n_${r.description}_\n\n⚔️ Monster: ${r.monsters.join(' · ')}\n🌿 Ressourcen: ${r.resources.join(' · ')}\n💰 Reisekosten: ${fmt(r.travelCost)}\n⭐ Min-Level: ${r.minLevel}`);
+      return;
+    }
+    case 'kämpfen': case 'kampf': case 'fight': case 'attack': case 'angreifen': case 'monster': case 'monsterangriff': {
+      const r = await world.fight(senderJid);
+      if (!r.ok) { await reply(`❌ ${r.reason}`); return; }
+      const winTxt = r.win
+        ? `✅ *Sieg!* +${fmt(r.coinsGained)}${r.drop ? ` + 1× ${r.drop}` : ''}\n+${r.xpGained} XP${r.leveledUp ? ` → 🎉 Level ${r.newLevel}!` : ''}\nHP: ${r.userHpLeft} übrig`
+        : `💀 *Niederlage* – du hast ${r.monster.name} verloren.\n+${r.xpGained} XP (Tröstungspreis)`;
+      await reply(`⚔️ *Kampf gegen ${r.monster.emoji} ${r.monster.name}*\n(${r.rounds} Runden)\n\n${winTxt}`);
+      return;
+    }
+    case 'jagd': case 'hunt': case 'jagen': {
+      const charges = await world.getHuntCharges(senderJid);
+      if (charges.remaining <= 0) { await reply(`🏹 Keine Jagdladungen mehr (0/${charges.total}).\nKomm morgen wieder!`); return; }
+      const results = await world.hunt(senderJid);
+      if (!results.ok) { await reply(`❌ ${results.reason}`); return; }
+      const lines = results.battles.map((r, i) =>
+        `${i + 1}. ${r.monster.emoji} ${r.monster.name}: ${r.win ? `✅ +${fmt(r.coinsGained)} +${r.xpGained}XP` : '💀 verloren'}`
+      );
+      await reply(`🏹 *Jagd* (${charges.remaining - 1} Ladungen übrig)\n\n${lines.join('\n')}\n\n💰 Gesamt: ${fmt(results.totalCoins)}\n⭐ Gesamt-XP: ${results.totalXp}`);
+      return;
+    }
+    case 'jagdladungen': {
+      const c = await world.getHuntCharges(senderJid);
+      await reply(`🏹 Jagdladungen: ${c.remaining}/${c.total}`);
+      return;
+    }
+    case 'flucht': case 'flee': case 'escape': {
+      const r = await world.flee(senderJid);
+      await reply(r.message);
+      return;
+    }
+    case 'sammeln': case 'ernten': case 'harvest': case 'collect': {
+      const r = await world.gather(senderJid);
+      if (!r.ok) { await reply(`⏳ Sammeln wieder in ${fmtWait(r.waitMs)}.`); return; }
+      const lines = r.gathered.map((g) => `${g.resource.emoji} ${g.resource.name}: ×${g.amount}`);
+      await reply(`🌿 *Gesammelt in ${r.region.emoji} ${r.region.name}*\n\n${lines.join('\n')}`);
+      return;
+    }
+    case 'ressourcen': case 'rohstoffe': case 'resources': {
+      const res = await world.getResources(senderJid);
+      if (!res.length) { await reply('Du hast keine Rohstoffe. Nutze !sammeln in einer Region.'); return; }
+      await reply(`🌿 *Deine Rohstoffe*\n\n${res.map((r) => `${r.resource.emoji} ${r.resource.name}: ×${r.amount} (${fmt(r.resource.sellPrice * r.amount)})`).join('\n')}`);
+      return;
+    }
+    case 'verkaufenrohstoffe': case 'rohstoffverkauf': {
+      const resId = (args[0] || '').toLowerCase();
+      const amount = Number(args[1]) || 0;
+      if (!resId || !amount) { await reply(`Nutzung: ${COMMAND_PREFIX}rohstoffverkauf <id> <menge>`); return; }
+      const r = await world.sellResources(senderJid, resId, amount);
+      if (!r.ok) { await reply(`❌ ${r.reason}`); return; }
+      await reply(`✅ ${r.amount}× ${r.resource.emoji} ${r.resource.name} verkauft → +${fmt(r.earned)}\nKontostand: ${fmt(r.balance)}`);
+      return;
+    }
+    case 'bestiarium': case 'monsterinfo': {
+      const monId = (args[0] || '').toLowerCase();
+      if (monId && worldMod && worldMod.findMonster) {
+        const m = worldMod.findMonster(monId);
+        if (!m) { await reply('Monster nicht gefunden.'); return; }
+        await reply(`${m.emoji} *${m.name}*\nHP: ${m.hp} | ATK: ${m.atk} | DEF: ${m.def}\n💰 Drop: ${m.coinMin}–${m.coinMax}\n⭐ XP: ${m.xpReward}\n🎁 Drop-Chance: ${Math.round(m.dropChance * 100)}%`);
+      } else {
+        const loc = await world.getLocation(senderJid);
+        await reply(`📖 *Bestiarium – ${loc.emoji} ${loc.name}*\n\nNutze ${COMMAND_PREFIX}bestiarium <monster-id> für Details.\nMonster hier: ${loc.monsters.join(', ')}`);
+      }
+      return;
+    }
+    case 'monsterkills': {
+      const kills = await world.getMonsterKills(senderJid);
+      await reply(`☠️ *Monster-Abschüsse*\n\nGesamt: ${kills.total}\n\n${kills.byMonster.slice(0, 10).map((k) => `${k.name}: ×${k.kills}`).join('\n')}`);
+      return;
+    }
+    case 'erkunden': case 'explore': case 'erkundung': case 'entdecken': {
+      const r = await world.explore(senderJid);
+      if (!r.ok) { await reply(`⏳ Erkunden wieder in ${fmtWait(r.waitMs)}.`); return; }
+      await reply(`🔭 *Erkundung*\n\n${r.message}${r.reward ? `\n\n${r.rewardText}` : ''}`);
+      return;
+    }
+    case 'weltranking': case 'topjaeger': {
+      const board = await world.getWorldLeaderboard();
+      if (!board.length) { await reply('Noch keine Spieler in der Welt.'); return; }
+      const medals = ['🥇', '🥈', '🥉'];
+      await reply(`🌍 *Welt-Rangliste (Monster-Kills)*\n\n${board.map((p, i) => `${medals[i] || `${i + 1}.`} @${p.userId.split('@')[0]}: ${p.kills} Kills`).join('\n')}`);
+      return;
+    }
+    default:
+      await reply(`🌍 *Weltbefehle*\n${COMMAND_PREFIX}karte · ${COMMAND_PREFIX}standort · ${COMMAND_PREFIX}reisen <region>\n${COMMAND_PREFIX}kämpfen · ${COMMAND_PREFIX}jagd · ${COMMAND_PREFIX}sammeln · ${COMMAND_PREFIX}ressourcen\n${COMMAND_PREFIX}erkunden · ${COMMAND_PREFIX}bestiarium · ${COMMAND_PREFIX}topjaeger`);
+  }
+}
+
+// ====================================================================
+// Berufsbefehle
+// ====================================================================
+async function profCmd(ctx) {
+  const { cmd, args, senderJid, reply, COMMAND_PREFIX } = ctx;
+  const prof = mgrs.professions;
+  if (!prof) { await reply('💼 Berufsmodul nicht verfügbar.'); return; }
+
+  const SPECIAL_CMDS = new Set([
+    'anpflanzen','pflanzen','feldernten','graben','sprengen','schürfen',
+    'handeln','feilschen','investieren','patrouillieren','trainieren','wachen',
+    'zaubern','studieren','beschwören','schleichen','klauen','spionieren',
+    'kochen','backen','braten','schmieden','schärfen','härten',
+    'angeln','netzwerfen','tauchen','brauen','destillieren','experimentieren',
+    'kartografieren','spekulieren',
+  ]);
+
+  if (SPECIAL_CMDS.has(cmd)) {
+    const r = await prof.getSpecialActionResult(senderJid, cmd);
+    if (!r.ok) { await reply(`❌ ${r.reason}`); return; }
+    await reply(`💼 *${r.action}*\n\n${r.flavor}\n\n+${fmt(r.earned)} | +${r.profXp} Beruf-XP${r.leveledUp ? `\n🎉 Beruf-Level ${r.profLevel}!` : ''}\nKontostand: ${fmt(r.balance)}`);
+    return;
+  }
+
+  switch (cmd) {
+    case 'berufe': {
+      const list = prof.getProfessionList();
+      await reply(`💼 *Alle Berufe*\n\n${list.map((p) => `${p.emoji} *${p.name}* [${p.id}]\n_${p.description}_\n📈 Einkommen/h: ${fmt(p.passiveIncomePerHour)} | XP-Bonus: +${Math.round((p.xpBonus - 1) * 100)}%`).join('\n\n')}\n\nWählen: ${COMMAND_PREFIX}beruf <id> wählen`);
+      return;
+    }
+    case 'beruf': case 'profession': case 'job': {
+      if ((args[1] || '').toLowerCase() === 'wählen' || (args[0] === 'wählen')) {
+        const profId = args[0] === 'wählen' ? '' : args[0];
+        if (!profId) { await reply(`Nutzung: ${COMMAND_PREFIX}beruf <id> wählen`); return; }
+        const r = await prof.chooseProfession(senderJid, profId);
+        if (!r.ok) { await reply(`❌ ${r.reason}`); return; }
+        await reply(`${r.profession.emoji} Du bist jetzt *${r.profession.name}*!${r.switched ? `\nWechselkosten: ${fmt(r.cost)}` : ''}\n\nSpezial: ${r.profession.specialActions.join(', ')}`);
+        return;
+      }
+      const p = await prof.getProfession(senderJid);
+      if (!p) { await reply(`Du hast noch keinen Beruf. Wähle mit ${COMMAND_PREFIX}berufe einen aus.`); return; }
+      const bar = '█'.repeat(Math.floor((p.intoLevel / p.levelSpan) * 10)) + '░'.repeat(10 - Math.floor((p.intoLevel / p.levelSpan) * 10));
+      await reply(`${p.profession.emoji} *${p.profession.name}* Level ${p.level}\n[${bar}] ${p.intoLevel}/${p.levelSpan} XP\n\n💰 Einkommen/h: ${fmt(p.passiveIncome)}\n⚡ XP-Bonus: +${Math.round((p.xpBonus - 1) * 100)}%\n🎯 Spezial: ${p.profession.specialActions.join(', ')}`);
+      return;
+    }
+    case 'berufsinfo': case 'profinfo': {
+      const profId = (args[0] || '').toLowerCase();
+      if (!profId) { await reply(`Nutzung: ${COMMAND_PREFIX}berufsinfo <id>`); return; }
+      const p = prof.getProfessionInfo(profId);
+      if (!p) { await reply('Beruf nicht gefunden.'); return; }
+      await reply(`${p.emoji} *${p.name}*\n_${p.description}_\n\nEinkommen/h: ${fmt(p.passiveIncomePerHour)}\nXP-Bonus: +${Math.round((p.xpBonus - 1) * 100)}%\nArbeits-Cooldown: ${Math.round(p.workCooldownMs / 60000)} Min\nVerdienst: ${fmt(p.workRewardMin)}–${fmt(p.workRewardMax)}\n\nSpezial: ${p.specialActions.join(', ')}`);
+      return;
+    }
+    case 'berufsarbeit': case 'jobwork': case 'proftrain': {
+      const r = await prof.professionWork(senderJid);
+      if (!r.ok) { await reply(`⏳ Berufsarbeit wieder in ${fmtWait(r.waitMs)}.`); return; }
+      await reply(`💼 Berufsarbeit: +${fmt(r.earned)}!\n+${r.profXp} Beruf-XP${r.leveledUp ? `\n🎉 Beruf-Level ${r.profLevel}!` : ''}\nKontostand: ${fmt(r.balance)}`);
+      return;
+    }
+    case 'berufseinnahmen': case 'berufseinkommen': {
+      const r = await prof.collectPassiveIncome(senderJid);
+      if (!r.ok) { await reply(r.reason || `⏳ Passive Einnahmen wieder in ${fmtWait(r.waitMs)}.`); return; }
+      await reply(`💰 *Passive Einnahmen*\n\n${fmt(r.earned)} (${r.hours}h × Einkommen/h)\nKontostand: ${fmt(r.balance)}`);
+      return;
+    }
+    case 'berufsrangliste': case 'profleaderboard': {
+      const board = await prof.getProfessionLeaderboard();
+      if (!board.length) { await reply('Noch keine Beruf-Daten.'); return; }
+      const medals = ['🥇', '🥈', '🥉'];
+      await reply(`💼 *Berufs-Rangliste*\n\n${board.map((p, i) => `${medals[i] || `${i + 1}.`} @${p.userId.split('@')[0]} – ${p.professionName} Lv.${p.level}`).join('\n')}`);
+      return;
+    }
+    default:
+      await reply(`💼 *Berufsbefehle*\n${COMMAND_PREFIX}berufe · ${COMMAND_PREFIX}beruf · ${COMMAND_PREFIX}beruf <id> wählen\n${COMMAND_PREFIX}berufsarbeit · ${COMMAND_PREFIX}berufseinnahmen · ${COMMAND_PREFIX}berufsrangliste`);
   }
 }
 
@@ -700,15 +1035,17 @@ async function clanCmd(ctx) {
 // ====================================================================
 function gameHelp(prefix) {
   return `🎮 *Spiel- & Wirtschaftsbefehle*\n\n` +
-    `💰 *Wirtschaft*\n${prefix}balance · ${prefix}daily · ${prefix}arbeiten · ${prefix}miete · ${prefix}vermögen · ${prefix}pay @p <betrag> · ${prefix}level · ${prefix}reich\n` +
+    `💰 *Wirtschaft*\n${prefix}balance · ${prefix}daily · ${prefix}arbeiten · ${prefix}miete · ${prefix}vermögen · ${prefix}pay @p <betrag> · ${prefix}level · ${prefix}rich\n` +
     `🏠 *Häuser*\n${prefix}markt · ${prefix}kaufen <id> · ${prefix}verkaufen <id> · ${prefix}inventar\n` +
     `🏦 *Bank*\n${prefix}einzahlen <n> · ${prefix}auszahlen <n> · ${prefix}zinsen\n` +
-    `🎲 *Casino*\n${prefix}slots <n> · ${prefix}coinflip kopf <n> · ${prefix}würfelwette <n> · ${prefix}roulette rot <n> · ${prefix}blackjack <n> · ${prefix}poker <n> · ${prefix}crash <n> 1.8x · ${prefix}keno <n> 3 7 11 15 19 · ${prefix}hl höher <n> · ${prefix}rauben @p\n` +
-    `🎁 *Glück*\n${prefix}glücksrad <n> · ${prefix}rubbellos · ${prefix}box <stufe> · ${prefix}tagesbox · ${prefix}event · ${prefix}lotto <n>\n` +
-    `🛒 *Shop*\n${prefix}shop · ${prefix}kaufenitem <id> · ${prefix}items · ${prefix}einkommen · ${prefix}tagesdeal · ${prefix}crafting\n` +
+    `🎲 *Casino*\n${prefix}slots <n> · ${prefix}coinflip kopf <n> · ${prefix}blackjack <n> · ${prefix}poker <n> · ${prefix}crash <n> 1.8x · ${prefix}keno <n> 3 7 11 15 19\n` +
+    `🎁 *Glück*\n${prefix}glücksrad <n> · ${prefix}rubbellos · ${prefix}box · ${prefix}lotto <n>\n` +
+    `🛒 *Shop*\n${prefix}shop · ${prefix}kaufenitem <id> · ${prefix}items · ${prefix}einkommen · ${prefix}crafting\n` +
+    `🌍 *Welt*\n${prefix}karte · ${prefix}reisen <region> · ${prefix}kämpfen · ${prefix}jagd · ${prefix}sammeln · ${prefix}erkunden\n` +
+    `💼 *Berufe*\n${prefix}berufe · ${prefix}beruf · ${prefix}berufsarbeit · ${prefix}berufseinnahmen\n` +
     `🎯 *Quests*\n${prefix}quests · ${prefix}claim <id>\n` +
-    `⚔️ *Clan*\n${prefix}clan info · ${prefix}clan erstellen <Name> <TAG> · ${prefix}clan top\n` +
-    `✨ ${prefix}prestige · ${prefix}achievements · ${prefix}saisonbonus`;
+    `⚔️ *Gilde*\n${prefix}clan info · ${prefix}clan erstellen <Name> <TAG> · ${prefix}clan top\n` +
+    `✨ ${prefix}prestige · ${prefix}achievements · ${prefix}profil · ${prefix}hilfewelt · ${prefix}hilfeberuf`;
 }
 
 // Befehle, die mit bestehenden index.js-Spaßbefehlen kollidieren und daher NUR

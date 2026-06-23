@@ -59,6 +59,46 @@ const ITEMS = [
   { id: 'craft_sword',   name: '⚔️ Legendäres Schwert',  price: 0,       type: 'luck',     value: 20, craft: true },
   { id: 'craft_staff',   name: '🪄 Magischer Stab',       price: 0,       type: 'xp_boost', value: 5,  craft: true },
   { id: 'craft_shield',  name: '🛡️ Diamantschild',        price: 0,       type: 'income',   value: 6000, craft: true },
+
+  // --- Waffen ⚔️ (Kampf-Schadensboni in der Welt) ---
+  { id: 'wpn_dagger',    name: '🗡️ Dolch',               price: 5000,    type: 'combat',   value: 5,  combatType: 'atk' },
+  { id: 'wpn_sword',     name: '⚔️ Schwert',              price: 15000,   type: 'combat',   value: 12, combatType: 'atk' },
+  { id: 'wpn_axe',       name: '🪓 Axt',                  price: 25000,   type: 'combat',   value: 18, combatType: 'atk' },
+  { id: 'wpn_staff',     name: '🪄 Zauberstab',           price: 40000,   type: 'combat',   value: 25, combatType: 'atk' },
+  { id: 'wpn_bow',       name: '🏹 Bogen',                price: 35000,   type: 'combat',   value: 22, combatType: 'atk' },
+  { id: 'wpn_spear',     name: '🔱 Speer',                price: 55000,   type: 'combat',   value: 30, combatType: 'atk' },
+
+  // --- Rüstungen 🛡️ (Verteidigung) ---
+  { id: 'arm_cloth',     name: '👘 Stoff-Rüstung',        price: 4000,    type: 'combat',   value: 4,  combatType: 'def' },
+  { id: 'arm_leather',   name: '🥋 Leder-Rüstung',        price: 12000,   type: 'combat',   value: 10, combatType: 'def' },
+  { id: 'arm_chain',     name: '⛓️ Kettenhemd',           price: 22000,   type: 'combat',   value: 16, combatType: 'def' },
+  { id: 'arm_plate',     name: '🛡️ Plattenrüstung',       price: 45000,   type: 'combat',   value: 25, combatType: 'def' },
+  { id: 'arm_dragon',    name: '🐉 Drachenschuppen-Rüstung', price: 120000, type: 'combat',  value: 45, combatType: 'def' },
+  { id: 'arm_divine',    name: '✨ Göttliche Rüstung',    price: 350000,  type: 'combat',   value: 70, combatType: 'def' },
+
+  // --- Reise-Ausrüstung 🗺️ (Reisekosten-Reduzierung & Erkunder-Drops) ---
+  { id: 'trv_boots',     name: '👢 Wanderstiefel',         price: 6000,    type: 'travel',   value: 10, travelType: 'discount' },
+  { id: 'trv_horse',     name: '🐎 Reisepferd',            price: 18000,   type: 'travel',   value: 20, travelType: 'discount' },
+  { id: 'trv_map',       name: '🗺️ Detailkarte',          price: 10000,   type: 'travel',   value: 25, travelType: 'drop_bonus' },
+  { id: 'trv_compass',   name: '🧭 Goldkompass',           price: 25000,   type: 'travel',   value: 35, travelType: 'drop_bonus' },
+  { id: 'trv_wagon',     name: '🛒 Reisewagen',            price: 40000,   type: 'travel',   value: 30, travelType: 'discount' },
+  { id: 'trv_portal',    name: '🌀 Teleportstein',         price: 100000,  type: 'travel',   value: 50, travelType: 'discount' },
+
+  // --- Berufs-Werkzeuge 🔧 (Beruf-XP-Boost) ---
+  { id: 'tool_hammer',   name: '🔨 Schmiedehammer',        price: 8000,    type: 'prof_boost', value: 25, profId: 'blacksmith' },
+  { id: 'tool_rod',      name: '🎣 Angelrute (Profi)',     price: 7000,    type: 'prof_boost', value: 25, profId: 'fisherman' },
+  { id: 'tool_plow',     name: '🌾 Pflug',                 price: 6000,    type: 'prof_boost', value: 25, profId: 'farmer' },
+  { id: 'tool_pickaxe',  name: '⛏️ Eisenspitzhacke',      price: 9000,    type: 'prof_boost', value: 25, profId: 'miner' },
+  { id: 'tool_knife',    name: '🔪 Kochklinge',            price: 5000,    type: 'prof_boost', value: 25, profId: 'chef' },
+  { id: 'tool_scale',    name: '⚖️ Händler-Waage',         price: 7500,    type: 'prof_boost', value: 25, profId: 'merchant' },
+
+  // --- Tränke 🧪 (temporäre Buffs, 1h Wirkung) ---
+  { id: 'pot_xp',        name: '🧪 XP-Trank',             price: 3000,    type: 'potion',   value: 50, potionType: 'xp_pct', duration: 3600000 },
+  { id: 'pot_luck',      name: '🍀 Glückstrank',           price: 4000,    type: 'potion',   value: 5,  potionType: 'luck_add', duration: 3600000 },
+  { id: 'pot_combat',    name: '💪 Kampftrank',            price: 5000,    type: 'potion',   value: 15, potionType: 'atk_pct', duration: 3600000 },
+  { id: 'pot_defense',   name: '🛡️ Schutztrank',          price: 5000,    type: 'potion',   value: 15, potionType: 'def_pct', duration: 3600000 },
+  { id: 'pot_income',    name: '💰 Reichtums-Elixier',     price: 7000,    type: 'potion',   value: 30, potionType: 'income_pct', duration: 3600000 },
+  { id: 'pot_mega',      name: '⚡ Mega-Elixier',          price: 15000,   type: 'potion',   value: 100, potionType: 'all_pct', duration: 1800000 },
 ];
 
 const ITEM_BY_ID = Object.fromEntries(ITEMS.map((i) => [i.id, i]));
@@ -144,13 +184,60 @@ class ShopManager {
   // Summierte Effekte aller besessenen Items
   async getEffects(userId) {
     const items = await this.getItems(userId);
-    const eff = { xpMult: 1, luckBonus: 0, dailyIncome: 0 };
+    const eff = {
+      xpMult: 1, luckBonus: 0, dailyIncome: 0,
+      combatAtk: 0, combatDef: 0,
+      travelDiscount: 0, dropBonus: 0,
+      profBoosts: {},        // { profId: bonusPct }
+      activePotion: null,    // highest-priority active potion
+    };
+    const now = Date.now();
     for (const { def } of items) {
       if (def.type === 'xp_boost') eff.xpMult *= def.value;
       else if (def.type === 'luck') eff.luckBonus += def.value;
       else if (def.type === 'income') eff.dailyIncome += def.value;
+      else if (def.type === 'combat') {
+        if (def.combatType === 'atk') eff.combatAtk += def.value;
+        else if (def.combatType === 'def') eff.combatDef += def.value;
+      } else if (def.type === 'travel') {
+        if (def.travelType === 'discount') eff.travelDiscount += def.value;
+        else if (def.travelType === 'drop_bonus') eff.dropBonus += def.value;
+      } else if (def.type === 'prof_boost' && def.profId) {
+        eff.profBoosts[def.profId] = (eff.profBoosts[def.profId] || 0) + def.value;
+      }
     }
+    // Check active potions from player_meta
+    try {
+      const potionExpiry = await this.eco.getMeta(userId, 'potion_expiry');
+      const potionType = await this.eco.getMeta(userId, 'potion_type');
+      const potionValue = await this.eco.getMeta(userId, 'potion_value');
+      if (potionExpiry > now && potionType) {
+        eff.activePotion = { type: potionType, value: potionValue, expiresAt: potionExpiry };
+        if (String(potionType) === 'xp_pct') eff.xpMult *= (1 + potionValue / 100);
+        else if (String(potionType) === 'luck_add') eff.luckBonus += potionValue;
+        else if (String(potionType) === 'atk_pct') eff.combatAtk = Math.floor(eff.combatAtk * (1 + potionValue / 100));
+        else if (String(potionType) === 'def_pct') eff.combatDef = Math.floor(eff.combatDef * (1 + potionValue / 100));
+        else if (String(potionType) === 'income_pct') eff.dailyIncome = Math.floor(eff.dailyIncome * (1 + potionValue / 100));
+        else if (String(potionType) === 'all_pct') { eff.xpMult *= (1 + potionValue / 100); eff.luckBonus += 10; eff.dailyIncome = Math.floor(eff.dailyIncome * 1.3); }
+      }
+    } catch (_) {}
     return eff;
+  }
+
+  // Trank aktivieren (einmalig verbrauchen)
+  async usePotion(userId, itemId) {
+    const item = ITEM_BY_ID[itemId];
+    if (!item || item.type !== 'potion') return { ok: false, reason: 'Das ist kein Trank.' };
+    const rs = await this.db.execute({ sql: 'SELECT 1 FROM owned_items WHERE user_id=? AND item_id=?', args: [userId, itemId] });
+    if (!rs.rows.length) return { ok: false, reason: 'Du besitzt diesen Trank nicht.' };
+    await this.db.execute({ sql: 'DELETE FROM owned_items WHERE user_id=? AND item_id=? LIMIT 1', args: [userId, itemId] });
+    const expiry = Date.now() + item.duration;
+    await this.eco.setMeta(userId, 'potion_expiry', expiry);
+    await this.eco.setMeta(userId, 'potion_value', item.value);
+    // Store potion type as string via a separate text meta approach — use numeric encoding
+    const typeMap = { xp_pct: 1, luck_add: 2, atk_pct: 3, def_pct: 4, income_pct: 5, all_pct: 6 };
+    await this.eco.setMeta(userId, 'potion_type', typeMap[item.potionType] || 0);
+    return { ok: true, item, expiresAt: expiry };
   }
 
   // Passives Tageseinkommen aus Items einsammeln
