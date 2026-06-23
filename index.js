@@ -33,6 +33,11 @@ const PORT = process.env.PORT || 3000;
 const QR_PASSWORD = process.env.QR_PASSWORD || 'XWMEr3MZv-pH';
 const SELF_URL = (process.env.SELF_URL || '').replace(/\/+$/, '');
 const COMMAND_PREFIX = process.env.COMMAND_PREFIX || '!';
+// Optionaler Notfall-Override für den Community-Inhaber (komma-getrennte Nummern ohne +).
+// Normalerweise wird der Inhaber automatisch als Ersteller der Community-Hauptgruppe erkannt;
+// dieser Override greift nur, falls die Metadaten der Hauptgruppe mal nicht lesbar sind.
+const OWNER_OVERRIDE = (process.env.OWNER_JIDS || '')
+  .split(',').map((s) => s.replace(/\D/g, '')).filter(Boolean);
 
 const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
 
@@ -445,6 +450,9 @@ const COMMANDS = [
   { key: 'alle',       desc: 'markiert alle Mitglieder', adminDefault: true },
   { key: 'kick',       desc: 'Mitglied aus der Gruppe entfernen', adminDefault: true },
   { key: 'ban',        desc: 'Mitglied kicken & im Ban-Log vermerken', adminDefault: true },
+  { key: 'communitykick', desc: '⚠️ Person dauerhaft aus ALLEN Community-Gruppen bannen', ownerOnly: true },
+  { key: 'communityunban', desc: 'Community-Bann einer Person aufheben', ownerOnly: true },
+  { key: 'communitybanlist', desc: 'alle dauerhaft gebannten Personen auflisten', ownerOnly: true },
   { key: 'mute',       desc: 'Mitglied stummschalten', adminDefault: true },
   { key: 'unmute',     desc: 'Stummschaltung aufheben', adminDefault: true },
   { key: 'warn',       desc: 'Mitglied manuell verwarnen', adminDefault: true },
@@ -534,6 +542,8 @@ const ALIAS = {
   loeschen: 'del', löschen: 'del', delete: 'del',
   erinnerung: 'remind', erinnere: 'remind',
   würfeln: 'roll',
+  ckick: 'communitykick', comban: 'communitykick', communityban: 'communitykick', nuke: 'communitykick',
+  cunban: 'communityunban', cbanlist: 'communitybanlist',
 };
 
 // Gemeinsamer Zustand
@@ -818,6 +828,15 @@ function getTargetJid(msg) {
     || msg.message?.imageMessage?.contextInfo
     || msg.message?.videoMessage?.contextInfo;
   return (ctx?.mentionedJid?.[0]) || (ctx?.participant) || null;
+}
+
+// ---------- Mini-Helfer für Community-Moderation ----------
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const subjectOf = (gid) => botState.groups.find((g) => g.id === gid)?.subject || gid.split('@')[0];
+// Erlaubt auch reine Nummern als Ziel, z. B. "!communitykick 4915123456789".
+function numArgToJid(a) {
+  const d = (a || '').replace(/\D/g, '');
+  return d.length >= 7 ? `${d}@s.whatsapp.net` : null;
 }
 
 // ---------- Hilfsfunktionen ----------
@@ -2191,6 +2210,50 @@ async function getGroupMeta(jid) {
     return null;
   }
 }
+// ---------- Community-Inhaber & permanente Sperrliste ----------
+// Parent-Community-JID für eine beliebige Gruppe (oder die Gruppe selbst, wenn sie Parent ist).
+function communityParentOf(jid) {
+  const g = botState.groups.find((x) => x.id === jid);
+  if (!g) return null;
+  return parentJidOf(g) || (g.isCommunity ? jid : null);
+}
+
+// Inhaber = Superadmin/Ersteller der Community-Hauptgruppe. Best-effort mit Fallbacks.
+async function getCommunityOwnerNum(parentJid) {
+  const meta = await getGroupMeta(parentJid);
+  if (meta) {
+    const creator = meta.participants?.find((p) => p.admin === 'superadmin');
+    const ownerJid = creator?.id || meta.owner || meta.subjectOwner;
+    if (ownerJid) return ownerJid.split('@')[0].replace(/\D/g, '');
+  }
+  return null;
+}
+
+// Erkennt automatisch, ob der Absender der Inhaber der Community dieser Gruppe ist.
+async function isCommunityOwner(senderJid, jid) {
+  const num = (senderJid || '').split('@')[0].replace(/\D/g, '');
+  if (!num) return false;
+  if (OWNER_OVERRIDE.includes(num)) return true; // Notfall-Override
+  const parent = communityParentOf(jid);
+  if (!parent) return false;
+  const ownerNum = await getCommunityOwnerNum(parent);
+  return Boolean(ownerNum && ownerNum === num);
+}
+
+// Persistente Sperrliste: config.communityBans[parentJid][num] = { reason, by, at }
+function ensureBanStore() { if (!config.communityBans) config.communityBans = {}; }
+function isCommunityBanned(parentJid, num) {
+  return Boolean(config.communityBans?.[parentJid]?.[num]);
+}
+function addCommunityBan(parentJid, num, by, reason) {
+  ensureBanStore();
+  if (!config.communityBans[parentJid]) config.communityBans[parentJid] = {};
+  config.communityBans[parentJid][num] = { reason: reason || 'kein Grund', by, at: Date.now() };
+}
+function removeCommunityBan(parentJid, num) {
+  if (config.communityBans?.[parentJid]) delete config.communityBans[parentJid][num];
+}
+
 function isAdmin(meta, jid) {
   if (!meta || !jid) return false;
   const p = meta.participants.find((x) => x.id === jid);
@@ -2238,6 +2301,26 @@ async function startBot() {
       const gc = effectiveGroupConfig(id);
       if (!gc.active) return;
       activityLogPush({ type: action, groupJid: id, participants });
+      // Permanenter Community-Bann: gebannte Personen bei Wiederbeitritt sofort entfernen.
+      if (action === 'add') {
+        const parent = communityParentOf(id);
+        if (parent) {
+          const stillHere = [];
+          for (const p of participants) {
+            const num = p.split('@')[0].replace(/\D/g, '');
+            if (isCommunityBanned(parent, num)) {
+              try {
+                await sock.groupParticipantsUpdate(id, [p], 'remove');
+                logger.info({ num, group: id }, 'Gebannte Person automatisch wieder entfernt');
+              } catch (e) { logger.warn({ e, num, group: id }, 'Auto-Rekick fehlgeschlagen'); }
+            } else {
+              stillHere.push(p);
+            }
+          }
+          // Willkommensnachricht nur für nicht-gebannte Neuzugänge.
+          participants = stillHere;
+        }
+      }
       if (action === 'add' && gc.welcome.enabled) {
         for (const p of participants) {
           const raw = (gc.welcome.message || 'Willkommen @{user} in der Gruppe! 🎉')
@@ -2351,7 +2434,8 @@ async function startBot() {
         if (cmdSetting === false) continue; // in dieser Gruppe deaktiviert
         if (!isOwner && cmdSetting === 'admin') {
           const metaForAdmin = await getGroupMeta(jid);
-          if (!isAdmin(metaForAdmin, senderJid)) continue; // nur Admins
+          // Der Community-Inhaber wird überall wie ein Admin behandelt.
+          if (!isAdmin(metaForAdmin, senderJid) && !(await isCommunityOwner(senderJid, jid))) continue;
         }
 
         const reply = (t) => sock.sendMessage(jid, { text: t }, { quoted: msg });
@@ -2359,13 +2443,16 @@ async function startBot() {
 
         switch (cmd) {
           case 'hilfe': {
+            const showOwner = await isCommunityOwner(senderJid, jid);
             const lines = COMMANDS
               .filter((c) => group.commands[c.key] !== false)
+              .filter((c) => !c.ownerOnly || showOwner) // Inhaber-Befehle nur dem Inhaber zeigen
               .map((c) => {
-                const adminTag = group.commands[c.key] === 'admin' ? ' 🛡️' : '';
+                const adminTag = c.ownerOnly ? ' 👑' : (group.commands[c.key] === 'admin' ? ' 🛡️' : '');
                 return `${COMMAND_PREFIX}${c.key}${adminTag} – ${c.desc}`;
               }).join('\n');
-            await reply(`🤖 *Bot-Befehle*\n\n${lines}\n\n🛡️ = nur Admins`);
+            const legend = showOwner ? '\n\n🛡️ = nur Admins · 👑 = nur Community-Inhaber' : '\n\n🛡️ = nur Admins';
+            await reply(`🤖 *Bot-Befehle*\n\n${lines}${legend}`);
             break;
           }
           case 'ping': {
@@ -2529,6 +2616,77 @@ async function startBot() {
                 mentions: [target],
               });
             } catch { await reply('Ban fehlgeschlagen. Bin ich Admin?'); }
+            break;
+          }
+          case 'communitykick': {
+            if (!(await isCommunityOwner(senderJid, jid))) { await reply('⛔ Nur der Community-Inhaber darf das.'); break; }
+            const target = getTargetJid(msg) || numArgToJid(args[0]);
+            if (!target) { await reply(`Nutzung: ${COMMAND_PREFIX}communitykick @person [Grund]`); break; }
+            await refreshGroups(true);
+            const parent = communityParentOf(jid);
+            if (!parent) { await reply('❌ Diese Gruppe gehört zu keiner Community.'); break; }
+
+            const targetNum = target.split('@')[0].replace(/\D/g, '');
+            const reason = args.filter((a) => !a.startsWith('@')).join(' ').trim() || 'maßloses Fehlverhalten';
+            addCommunityBan(parent, targetNum, senderNum, reason); // PERMANENT zuerst -> Auto-Rekick greift sofort
+            await persist();
+
+            const targets = botState.groups.filter((g) => parentJidOf(g) === parent).map((g) => g.id);
+            if (!targets.includes(parent)) targets.push(parent);
+            await sock.sendMessage(jid, {
+              text: `⏳ Banne @${targetNum} dauerhaft aus ${targets.length} Gruppen der Community „${communityName(parent)}"…`,
+              mentions: [target],
+            });
+
+            let ckOk = 0; const ckFailed = [];
+            for (const gid of targets) {
+              try {
+                const res = await sock.groupParticipantsUpdate(gid, [target], 'remove');
+                const status = Array.isArray(res) ? String(res[0]?.status ?? '200') : '200';
+                if (status === '200') { ckOk += 1; addBanLog(gid, { num: targetNum, bannedBy: senderNum, reason: `Community-Bann: ${reason}` }); }
+                else ckFailed.push(`${subjectOf(gid)} (${status})`);
+              } catch { ckFailed.push(subjectOf(gid)); }
+              await sleep(700); // Rate-Limit-Schutz
+            }
+            activityLogPush({ type: 'communitykick', groupJid: jid, senderNum, targetNum });
+            await persist();
+            let ckReport = `🔨 *Permanent gebannt*\n@${targetNum} aus *${ckOk}/${targets.length}* Gruppen entfernt.\nGrund: ${reason}\n\n🔒 Die Person wird bei jedem Wiederbeitritt automatisch entfernt – bis du \`${COMMAND_PREFIX}communityunban @person\` nutzt.`;
+            if (ckFailed.length) ckReport += `\n\n⚠️ Nicht entfernt (Bot kein Admin / kein Mitglied):\n• ${ckFailed.slice(0, 15).join('\n• ')}`;
+            if (ckFailed.length > 15) ckReport += `\n… und ${ckFailed.length - 15} weitere.`;
+            await sock.sendMessage(jid, { text: ckReport, mentions: [target] });
+            break;
+          }
+          case 'communityunban': {
+            if (!(await isCommunityOwner(senderJid, jid))) { await reply('⛔ Nur der Community-Inhaber darf das.'); break; }
+            const target = getTargetJid(msg) || numArgToJid(args[0]);
+            if (!target) { await reply(`Nutzung: ${COMMAND_PREFIX}communityunban @person`); break; }
+            const parent = communityParentOf(jid);
+            if (!parent) { await reply('❌ Diese Gruppe gehört zu keiner Community.'); break; }
+            const num = target.split('@')[0].replace(/\D/g, '');
+            if (!isCommunityBanned(parent, num)) { await reply('Diese Person ist nicht gebannt.'); break; }
+            removeCommunityBan(parent, num);
+            await persist();
+            await sock.sendMessage(jid, {
+              text: `✅ @${num} ist wieder freigegeben und darf der Community erneut beitreten.`,
+              mentions: [target],
+            });
+            break;
+          }
+          case 'communitybanlist': {
+            if (!(await isCommunityOwner(senderJid, jid))) { await reply('⛔ Nur der Community-Inhaber darf das.'); break; }
+            const parent = communityParentOf(jid);
+            if (!parent) { await reply('❌ Diese Gruppe gehört zu keiner Community.'); break; }
+            const bans = config.communityBans?.[parent] || {};
+            const entries = Object.entries(bans);
+            if (!entries.length) { await reply('✅ Aktuell ist niemand in dieser Community gebannt.'); break; }
+            const lines = entries
+              .sort((a, b) => (b[1].at || 0) - (a[1].at || 0))
+              .slice(0, 50)
+              .map(([num, info], i) => {
+                const d = info.at ? new Date(info.at).toLocaleDateString('de-DE') : '?';
+                return `${i + 1}. +${num} – ${info.reason || 'kein Grund'} (${d})`;
+              });
+            await reply(`🚷 *Gebannte Personen – ${communityName(parent)}* (${entries.length})\n\n${lines.join('\n')}`);
             break;
           }
           case 'mute': {
@@ -3198,6 +3356,7 @@ store.loadConfig(logger)
     // Globale Einstellungen & Anliegen-Liste sicherstellen
     config.settings = { dmAssistant: false, ...(config.settings || {}) };
     if (!Array.isArray(config.anliegen)) config.anliegen = [];
+    if (!config.communityBans || typeof config.communityBans !== 'object') config.communityBans = {};
     logger.info('Konfiguration geladen');
     return startBot();
   })
