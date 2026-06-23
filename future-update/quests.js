@@ -18,6 +18,13 @@ const QUEST_POOL = [
   { id: 'buy_house',    text: 'Kaufe ein Haus',             event: 'buyhouse', goal: 1, reward: 1500, xp: 60 },
   { id: 'gamble_any',   text: 'Setze 5× im Casino',         event: 'gamble', goal: 5,  reward: 700,  xp: 35 },
   { id: 'daily_claim',  text: 'Hole deinen Tagesbonus',     event: 'daily',  goal: 1,  reward: 300,  xp: 20 },
+  { id: 'play_roulette', text: 'Spiele 2× Roulette',        event: 'roulette', goal: 2, reward: 600, xp: 30 },
+  { id: 'win_big',      text: 'Gewinne 3 Casino-Spiele',    event: 'win',    goal: 3,  reward: 1200, xp: 55 },
+  { id: 'buy_item',     text: 'Kaufe ein Shop-Item',        event: 'buyitem', goal: 1, reward: 500,  xp: 30 },
+  { id: 'pay_someone',  text: 'Überweise jemandem Coins',   event: 'pay',    goal: 1,  reward: 400,  xp: 25 },
+  { id: 'collect_rent', text: 'Kassiere Mieteinnahmen',     event: 'rent',   goal: 1,  reward: 500,  xp: 30 },
+  { id: 'rob_someone',  text: 'Versuche einen Raub',        event: 'rob',    goal: 1,  reward: 450,  xp: 28 },
+  { id: 'earn_5k',      text: 'Verdiene 5000 Coins',        event: 'earn',   goal: 5000, reward: 1500, xp: 70 },
 ];
 
 function todaySeed() {

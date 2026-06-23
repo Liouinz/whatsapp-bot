@@ -17,7 +17,8 @@ startet oder etwas am Live-Betrieb kaputt geht.
 | 🏠 Wirtschaft | `../economy.js` | 130 Häuser, Coins, Kauf/Verkauf, Tagesangebote, Miete, **Bank+Zinsen, Level/XP, Achievements, Lotterie** | ausgebaut |
 | 🎮 Spiele | `games.js` | Slots, Coinflip, Würfelwette, **Roulette, Blackjack, Higher-Lower, PvP-Duell** + Inhaber-Freigabe pro Gruppe | ausgebaut |
 | 🛒 Shop | `shop.js` | Autos, Haustiere, Boosts (XP/Glück/Einkommen) + Tagesdeal | NEU |
-| 🎯 Quests | `quests.js` | 3 Tagesquests mit Fortschritt & Belohnung (Coins + XP) | NEU |
+| 🎯 Quests | `quests.js` | Tagesquests mit Fortschritt & Belohnung (Coins + XP) | NEU |
+| 🎲 Events | `events.js` | Zufallsereignisse, Glücksrad, Rubbellos, Mystery-Boxen | NEU |
 | 📋 Menüs | `menus.js` | `!menu`, `!adminmenu`, `!modmenu` – Befehle nach Rolle; Inhaber steuert Mod-Rechte | ausgebaut |
 | 🎨 Web-UI | `webui.js` | Neues cleanes Design (Apple/Samsung-Stil), Animationen, fertige Seiten-Renderer | ausgebaut |
 | 🔌 Einbau | `INTEGRATION.md` | Schritt-für-Schritt, wie jedes Modul in `index.js` eingehängt wird | — |

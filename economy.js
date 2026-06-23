@@ -170,6 +170,11 @@ const ACHIEVEMENTS = [
   { id: 'rich_100k', name: '💎 Reich', desc: 'Erreiche 100.000 Vermögen.', reward: 5000, test: (c) => c.net >= 100000 },
   { id: 'rich_1m', name: '👑 Millionär', desc: 'Erreiche 1.000.000 Vermögen.', reward: 50000, test: (c) => c.net >= 1000000 },
   { id: 'cash_25k', name: '🤑 Bargeld-König', desc: 'Halte 25.000 Bargeld.', reward: 2000, test: (c) => c.cash >= 25000 },
+  { id: 'cash_100k', name: '💵 Geldspeicher', desc: 'Halte 100.000 Bargeld.', reward: 8000, test: (c) => c.cash >= 100000 },
+  { id: 'twenty_houses', name: '🌆 Immobilien-Mogul', desc: 'Besitze 20 Häuser.', reward: 40000, test: (c) => c.houses >= 20 },
+  { id: 'rich_500k', name: '💷 Großverdiener', desc: 'Erreiche 500.000 Vermögen.', reward: 20000, test: (c) => c.net >= 500000 },
+  { id: 'rich_5m', name: '🏦 Multimillionär', desc: 'Erreiche 5.000.000 Vermögen.', reward: 200000, test: (c) => c.net >= 5000000 },
+  { id: 'rich_10m', name: '🌍 Tycoon', desc: 'Erreiche 10.000.000 Vermögen.', reward: 500000, test: (c) => c.net >= 10000000 },
 ];
 
 // ====================================================================

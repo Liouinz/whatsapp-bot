@@ -66,6 +66,8 @@ const CATEGORIES = {
       ['würfelwette', 'Würfeln gegen den Bot'], ['roulette', 'Roulette 🎡'],
       ['blackjack', 'Blackjack 🃏'], ['hl', 'Higher-Lower'],
       ['duell', 'Würfelduell gegen Spieler'], ['lotto', 'Lotterie-Los'],
+      ['glücksrad', 'Glücksrad drehen 🎡'], ['rubbellos', 'Rubbellos kaufen 🎫'],
+      ['box', 'Mystery-Box öffnen 📦'], ['event', 'Zufallsereignis 🎲'],
       ['rauben', 'jemanden ausrauben 🦹'],
     ],
   },

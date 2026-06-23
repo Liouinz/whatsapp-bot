@@ -26,8 +26,25 @@ const ITEMS = [
   { id: 'pet_dragon',   name: '🐉 Drache',          price: 150000, type: 'income', value: 2500 },
   // --- Boosts ⚡ ---
   { id: 'boost_xp',     name: '⚡ XP-Boost',        price: 15000,  type: 'xp_boost', value: 2 },
+  { id: 'boost_xp3',    name: '⚡ XP-Boost MAX',    price: 50000,  type: 'xp_boost', value: 3 },
   { id: 'boost_luck',   name: '🍀 Glücksbringer',   price: 40000,  type: 'luck',     value: 5 },
+  { id: 'boost_luck2',  name: '🌟 Goldhufeisen',    price: 90000,  type: 'luck',     value: 10 },
   { id: 'boost_income', name: '💼 Geschäftslizenz', price: 60000,  type: 'income',   value: 1500 },
+  // --- weitere Autos 🚗 ---
+  { id: 'car_van',      name: '🚐 Camper-Van',      price: 22000,  type: 'cosmetic' },
+  { id: 'car_truck',    name: '🚚 Truck',           price: 48000,  type: 'cosmetic' },
+  { id: 'car_bike',     name: '🏍️ Motorrad',        price: 18000,  type: 'cosmetic' },
+  { id: 'car_jet',      name: '🛩️ Privatjet',       price: 450000, type: 'cosmetic' },
+  { id: 'car_yacht',    name: '🛥️ Yacht',           price: 600000, type: 'income', value: 4000 },
+  // --- weitere Haustiere 🐾 ---
+  { id: 'pet_parrot',   name: '🦜 Papagei',         price: 7000,   type: 'income', value: 140 },
+  { id: 'pet_horse',    name: '🐴 Pferd',           price: 30000,  type: 'income', value: 500 },
+  { id: 'pet_unicorn',  name: '🦄 Einhorn',         price: 250000, type: 'luck',   value: 8 },
+  // --- Prestige/Sammler 💎 ---
+  { id: 'col_watch',    name: '⌚ Luxusuhr',        price: 80000,  type: 'cosmetic' },
+  { id: 'col_ring',     name: '💍 Diamantring',     price: 130000, type: 'cosmetic' },
+  { id: 'col_crown',    name: '👑 Goldene Krone',   price: 750000, type: 'cosmetic' },
+  { id: 'col_trophy',   name: '🏆 Pokal des Reichtums', price: 1000000, type: 'cosmetic' },
 ];
 
 const ITEM_BY_ID = Object.fromEntries(ITEMS.map((i) => [i.id, i]));
@@ -111,9 +128,11 @@ class ShopManager {
 }
 
 function shopList() {
-  const groups = { '🚗 Autos': [], '🐾 Haustiere': [], '⚡ Boosts': [] };
+  const groups = { '🚗 Fahrzeuge': [], '🐾 Haustiere': [], '⚡ Boosts': [], '💎 Sammler': [] };
   for (const i of ITEMS) {
-    const g = i.id.startsWith('car_') ? '🚗 Autos' : i.id.startsWith('pet_') ? '🐾 Haustiere' : '⚡ Boosts';
+    const g = i.id.startsWith('car_') ? '🚗 Fahrzeuge'
+      : i.id.startsWith('pet_') ? '🐾 Haustiere'
+      : i.id.startsWith('col_') ? '💎 Sammler' : '⚡ Boosts';
     groups[g].push(`▸ [${i.id}] ${i.name} – ${formatBalance(i.price)}`);
   }
   return '🛒 *Shop*\n\n' + Object.entries(groups).map(([k, v]) => `*${k}*\n${v.join('\n')}`).join('\n\n');

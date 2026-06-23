@@ -20,7 +20,8 @@ const { EconomyManager, HOUSES, TIER_LABELS, formatBalance, houseCard, marketPag
 const { GameManager, fmtWait, isGameGroup, setGameGroup } = require('./future-update/games');
 const { ShopManager, shopList } = require('./future-update/shop');
 const { QuestManager } = require('./future-update/quests');
-let economy = null, game = null, shop = null, quest = null;
+const { EventManager } = require('./future-update/events');
+let economy = null, game = null, shop = null, quest = null, events = null;
 const duels = new Map(); // für PvP-Würfelduelle: key = `${jid}:${gegnerNum}`
 ```
 
@@ -33,14 +34,16 @@ if (process.env.TURSO_DATABASE_URL && process.env.TURSO_AUTH_TOKEN) {
   shop = new ShopManager(economy); await shop.init();
   game = new GameManager(economy);
   quest = new QuestManager(economy);
-  logger.info('Wirtschaft, Shop, Quests & Spiele bereit');
+  events = new EventManager(economy);
+  logger.info('Wirtschaft, Shop, Quests, Events & Spiele bereit');
 }
 ```
 
 **Im `switch (cmd)`-Block:** die Cases aus den Kommentaren in `economy.js`
 (`ECONOMY_COMMANDS`), `future-update/games.js` (`GAME_COMMANDS`),
-`future-update/shop.js` (`SHOP_COMMANDS`) und `future-update/quests.js`
-(`QUEST_COMMANDS`) einfügen. Der `spielgruppe`-Case (Inhaber) gehört dazu.
+`future-update/shop.js` (`SHOP_COMMANDS`), `future-update/quests.js`
+(`QUEST_COMMANDS`) und `future-update/events.js` (`EVENT_COMMANDS`) einfügen.
+Der `spielgruppe`-Case (Inhaber) gehört dazu.
 
 **Inhaber-Freigabe pro Gruppe** – zentrale Sperre direkt vor allen Spiel-/Wirtschaftscases
 (außer `spielgruppe` selbst):
@@ -51,7 +54,8 @@ const GAME_CMDS = ['balance','vermögen','networth','kaufen','verkaufen','invent
   'lotterie','jackpot','slots','coinflip','cf','würfelwette','dicebet','roulette','hl',
   'higherlower','bj','blackjack','duell','annehmen','rauben','rob','shop','kaufenitem',
   'buyitem','verkaufenitem','sellitem','items','meineitems','einkommen','tagesdeal',
-  'quests','aufgaben','claim'];
+  'quests','aufgaben','claim','event','ereignis','glücksrad','wheel','rubbellos',
+  'scratch','box'];
 if (GAME_CMDS.includes(cmd)) {
   if (!economy) { await reply('🎮 Spielmodus nicht verfügbar (keine Datenbank).'); break; }
   if (!isGameGroup(config, jid)) { await reply('🚫 Spiele sind hier nicht freigeschaltet. Der Inhaber kann sie mit !spielgruppe an aktivieren.'); break; }

@@ -871,20 +871,37 @@ function keyOf(req) {
 }
 
 const STYLE = `
+  :root{
+    --bg:#0a0b10; --panel:rgba(255,255,255,.045); --panel-2:rgba(255,255,255,.06);
+    --panel-brd:rgba(255,255,255,.09); --txt:#e9ecf3; --muted:#98a2b6;
+    --accent:#6366f1; --accent2:#a855f7; --accent3:#22d3ee;
+    --good:#34d399; --bad:#fb7185; --warn:#fbbf24; --radius:20px;
+    --shadow:0 18px 50px rgba(0,0,0,.45);
+  }
   *{box-sizing:border-box}
-  body{font-family:system-ui,-apple-system,sans-serif;color:#eef2f7;margin:0;min-height:100vh;
+  ::selection{background:rgba(139,92,246,.35);color:#fff}
+  body{font-family:'SF Pro Display',-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,system-ui,sans-serif;
+    color:var(--txt);margin:0;min-height:100vh;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
     display:flex;flex-direction:column;align-items:center;padding:24px;position:relative;overflow-x:hidden;
-    background:linear-gradient(-45deg,#1a2a6c,#2a5298,#0f8b8d,#26a96c);background-size:400% 400%;
-    animation:bg 20s ease infinite}
-  @keyframes bg{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
-  .leaf{position:fixed;font-size:2.4rem;opacity:.16;pointer-events:none;z-index:0;animation:float 9s ease-in-out infinite}
-  @keyframes float{0%,100%{transform:translateY(0) rotate(0)}50%{transform:translateY(-16px) rotate(8deg)}}
-  .card{background:rgba(17,21,30,.72);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
-    border:1px solid rgba(255,255,255,.12);border-radius:18px;padding:24px;max-width:600px;width:100%;
-    margin:12px 0;box-shadow:0 8px 32px rgba(0,0,0,.35);position:relative;z-index:1;animation:rise .5s ease both}
-  @keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
-  h1{font-size:clamp(1.25rem,4vw,1.55rem);margin:0 0 4px} h2{font-size:1.1rem;margin:0 0 12px}
-  .muted{color:#aeb8c6;font-size:.9rem} a{color:#7fd1ff;text-decoration:none} a:hover{text-decoration:underline}
+    background:
+      radial-gradient(900px 520px at 10% -10%,rgba(99,102,241,.22),transparent 60%),
+      radial-gradient(820px 600px at 112% 0%,rgba(168,85,247,.17),transparent 55%),
+      radial-gradient(760px 520px at 50% 120%,rgba(34,211,238,.10),transparent 60%),
+      var(--bg);
+    background-attachment:fixed;animation:fadein .6s ease}
+  @keyframes fadein{from{opacity:0}to{opacity:1}}
+  /* dekorative, weich verlaufende Farb-Orbs im Hintergrund (ersetzt die alten Blätter) */
+  .leaf{position:fixed;width:340px;height:340px;border-radius:50%;pointer-events:none;z-index:0;
+    filter:blur(90px);opacity:.55;animation:drift 20s ease-in-out infinite}
+  @keyframes drift{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(0,-34px) scale(1.08)}}
+  .card{background:var(--panel);backdrop-filter:blur(22px) saturate(1.5);-webkit-backdrop-filter:blur(22px) saturate(1.5);
+    border:1px solid var(--panel-brd);border-radius:var(--radius);padding:24px;max-width:640px;width:100%;
+    margin:12px 0;box-shadow:var(--shadow);position:relative;z-index:1;animation:rise .55s cubic-bezier(.2,.7,.2,1) both}
+  .card:hover{border-color:rgba(255,255,255,.14)}
+  @keyframes rise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+  h1{font-size:clamp(1.3rem,4vw,1.7rem);margin:0 0 4px;letter-spacing:-.02em;font-weight:750}
+  h2{font-size:1.12rem;margin:0 0 12px;letter-spacing:-.01em;font-weight:700}
+  .muted{color:var(--muted);font-size:.9rem} a{color:#c4b5fd;text-decoration:none;transition:color .15s} a:hover{color:#ddd6fe}
   img{max-width:100%;height:auto;display:block}
   .qr{background:#fff;padding:16px;border-radius:14px;display:inline-block;max-width:100%}
   .qr img{width:320px;max-width:100%;margin:0 auto}
@@ -892,25 +909,28 @@ const STYLE = `
   .on{background:rgba(34,197,94,.2);color:#86efac} .off{background:rgba(248,113,113,.18);color:#fca5a5}
   .grp{display:flex;align-items:center;gap:12px;padding:12px;border:1px solid rgba(255,255,255,.1);
     border-radius:12px;margin:8px 0;background:rgba(255,255,255,.04);cursor:pointer;transition:border-color .2s,transform .1s;color:inherit}
-  .grp:hover{border-color:#38ef7d;transform:translateY(-1px)}
+  .grp:hover{border-color:rgba(139,92,246,.55);transform:translateY(-2px);box-shadow:0 10px 26px rgba(0,0,0,.3)}
   .grp .avatar{width:48px;height:48px;border-radius:50%;flex-shrink:0;object-fit:cover;background:rgba(255,255,255,.1)}
   .grp .meta{flex:1;min-width:0}
   .grp .name{font-weight:600;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .badge{font-size:.7rem;background:rgba(127,209,255,.18);color:#bfe3ff;padding:2px 8px;border-radius:999px;margin-left:6px}
   .opt{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 13px;
     border:1px solid rgba(255,255,255,.1);border-radius:10px;margin:8px 0;background:rgba(255,255,255,.04)}
-  .opt input[type=checkbox]{width:24px;height:24px;accent-color:#38ef7d;flex-shrink:0}
+  .opt input[type=checkbox]{width:24px;height:24px;accent-color:var(--accent);flex-shrink:0}
   .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px}
-  .stat{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:14px}
-  .stat .k{color:#aeb8c6;font-size:.8rem} .stat .v{font-size:1.3rem;font-weight:700;margin-top:2px}
-  button{background:linear-gradient(135deg,#0f8b8d,#38ef7d);color:#06231a;border:0;border-radius:12px;
-    padding:13px 20px;font-size:1rem;font-weight:700;cursor:pointer;width:100%;margin-top:12px;
-    transition:transform .12s ease,filter .2s}
-  button:hover{filter:brightness(1.08)} button:active{transform:scale(.97)}
-  .input{width:100%;padding:13px;border-radius:10px;border:1px solid rgba(255,255,255,.14);
-    background:rgba(255,255,255,.06);color:#eef2f7;font-size:1rem;margin-top:4px;
+  .stat{background:linear-gradient(160deg,rgba(255,255,255,.07),rgba(255,255,255,.025));
+    border:1px solid var(--panel-brd);border-radius:16px;padding:16px;transition:transform .18s,border-color .18s}
+  .stat:hover{transform:translateY(-3px);border-color:rgba(139,92,246,.4)}
+  .stat .k{color:var(--muted);font-size:.74rem;text-transform:uppercase;letter-spacing:.6px}
+  .stat .v{font-size:1.45rem;font-weight:750;margin-top:4px;letter-spacing:-.01em}
+  button{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border:0;border-radius:14px;
+    padding:13px 20px;font-size:1rem;font-weight:700;cursor:pointer;width:100%;margin-top:12px;letter-spacing:.01em;
+    box-shadow:0 8px 22px rgba(99,102,241,.32);transition:transform .12s ease,filter .2s,box-shadow .2s}
+  button:hover{filter:brightness(1.08);box-shadow:0 12px 30px rgba(139,92,246,.45)} button:active{transform:scale(.97)}
+  .input{width:100%;padding:13px;border-radius:12px;border:1px solid var(--panel-brd);
+    background:rgba(255,255,255,.05);color:var(--txt);font-size:1rem;margin-top:4px;
     transition:box-shadow .2s,border-color .2s}
-  .input:focus{outline:none;border-color:#7fd1ff;box-shadow:0 0 0 4px rgba(127,209,255,.25)}
+  .input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 4px rgba(99,102,241,.25)}
   textarea.input{min-height:64px;resize:vertical}
   .pwwrap{position:relative} .pwwrap .input{padding-right:50px}
   .eye{position:absolute;right:6px;bottom:6px;width:auto;margin:0;padding:6px 9px;background:rgba(255,255,255,.08);
@@ -960,36 +980,49 @@ const STYLE = `
   .lb-rank{font-size:1.2rem;width:28px;text-align:center;font-weight:700}
   .lb-num{flex:1;font-weight:600} .lb-count{color:#aeb8c6;font-size:.85rem}
   /* ---- Navigationsleiste ---- */
-  .nav{position:sticky;top:0;z-index:5;display:flex;gap:6px;flex-wrap:nowrap;overflow-x:auto;
-    max-width:600px;width:100%;margin:0 0 12px;padding:10px;border-radius:14px;
-    background:rgba(13,17,24,.78);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
-    border:1px solid rgba(255,255,255,.1);box-shadow:0 6px 22px rgba(0,0,0,.3);
-    scrollbar-width:thin;-webkit-overflow-scrolling:touch}
-  .nav::-webkit-scrollbar{height:5px} .nav::-webkit-scrollbar-thumb{background:rgba(255,255,255,.2);border-radius:99px}
-  .nav a{flex:0 0 auto;display:inline-flex;align-items:center;gap:5px;padding:8px 13px;border-radius:10px;
-    font-size:.85rem;font-weight:600;color:#cdd6e3;white-space:nowrap;transition:background .18s,color .18s,transform .1s}
-  .nav a:hover{background:rgba(255,255,255,.08);text-decoration:none;transform:translateY(-1px)}
-  .nav a.active{background:linear-gradient(135deg,#0f8b8d,#38ef7d);color:#06231a}
+  .nav{position:sticky;top:14px;z-index:5;display:flex;gap:5px;flex-wrap:nowrap;overflow-x:auto;
+    max-width:640px;width:100%;margin:0 0 16px;padding:8px;border-radius:18px;
+    background:rgba(14,16,24,.72);backdrop-filter:blur(20px) saturate(1.5);-webkit-backdrop-filter:blur(20px) saturate(1.5);
+    border:1px solid var(--panel-brd);box-shadow:0 10px 30px rgba(0,0,0,.35);
+    scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  .nav::-webkit-scrollbar{display:none}
+  .nav a{flex:0 0 auto;display:inline-flex;align-items:center;gap:5px;padding:9px 14px;border-radius:12px;
+    font-size:.85rem;font-weight:600;color:#c3cad8;white-space:nowrap;transition:background .18s,color .18s,transform .1s}
+  .nav a:hover{background:rgba(255,255,255,.07);text-decoration:none;transform:translateY(-1px);color:#fff}
+  .nav a.active{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;box-shadow:0 6px 18px rgba(99,102,241,.4)}
   /* ---- Toolbar & Segmented-Control ---- */
   .toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
   .seg{display:inline-flex;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);
     border-radius:11px;padding:3px;gap:2px}
   .seg-btn{padding:7px 13px;border-radius:9px;font-size:.82rem;font-weight:600;color:#cdd6e3;
     cursor:pointer;width:auto;margin:0;background:transparent;border:0;transition:background .15s,color .15s}
-  .seg-btn.active{background:linear-gradient(135deg,#0f8b8d,#38ef7d);color:#06231a}
+  .seg-btn.active{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff}
   .seg-btn:hover:not(.active){background:rgba(255,255,255,.08)}
   .chip{display:inline-flex;align-items:center;gap:4px;font-size:.72rem;font-weight:600;
     padding:3px 10px;border-radius:999px;background:rgba(127,209,255,.15);color:#bfe3ff}
   .chip.on{background:rgba(34,197,94,.2);color:#86efac} .chip.off{background:rgba(248,113,113,.18);color:#fca5a5}
   .toast{animation:pop .4s ease both}
   @keyframes pop{0%{opacity:0;transform:scale(.9)}60%{transform:scale(1.03)}100%{opacity:1;transform:scale(1)}}
+  /* ---- moderne Zusatz-Utilities ---- */
+  .gradient-text{background:linear-gradient(135deg,#a5b4fc,#c4b5fd 40%,#67e8f9);
+    -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent}
+  .hero{text-align:center;padding:30px 22px 26px}
+  .hero .logo{font-size:3rem;line-height:1;filter:drop-shadow(0 8px 22px rgba(99,102,241,.5));animation:rise .6s ease both}
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:.78rem;font-weight:600;padding:6px 13px;
+    border-radius:999px;background:rgba(255,255,255,.06);border:1px solid var(--panel-brd);color:var(--muted)}
+  .pill .dot{width:8px;height:8px;border-radius:50%;background:var(--good);box-shadow:0 0 10px var(--good);animation:blink 2s infinite}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.4}}
+  .divider{height:1px;background:linear-gradient(90deg,transparent,var(--panel-brd),transparent);margin:18px 0}
+  .glow-btn{position:relative;overflow:hidden}
+  .glow-btn::after{content:"";position:absolute;inset:0;background:radial-gradient(120px 60px at var(--mx,50%) var(--my,50%),rgba(255,255,255,.25),transparent 60%);opacity:0;transition:opacity .2s}
+  .glow-btn:hover::after{opacity:1}
 `;
 
+// Weiche, animierte Farb-Orbs als moderner Hintergrund (ersetzt die alten Pflanzen-Emojis).
 const LEAVES =
-  '<div class="leaf" style="top:8%;left:5%">🌿</div>' +
-  '<div class="leaf" style="top:68%;left:9%;animation-delay:2s">🪴</div>' +
-  '<div class="leaf" style="top:22%;right:7%;animation-delay:1s">🌱</div>' +
-  '<div class="leaf" style="top:82%;right:6%;animation-delay:3s">🍃</div>';
+  '<div class="leaf" style="top:-90px;left:-60px;background:radial-gradient(circle,#6366f1,transparent 70%)"></div>' +
+  '<div class="leaf" style="top:34%;right:-110px;background:radial-gradient(circle,#a855f7,transparent 70%);animation-delay:4s"></div>' +
+  '<div class="leaf" style="bottom:-110px;left:18%;background:radial-gradient(circle,#22d3ee,transparent 70%);animation-delay:8s"></div>';
 
 function page(title, body, opts = {}) {
   const refresh = opts.refresh
@@ -1048,11 +1081,13 @@ app.get('/', (_req, res) => {
     e.addEventListener('click',function(){if(p.type==='password'){p.type='text';e.textContent='🙈';}
     else{p.type='password';e.textContent='👁️';}p.focus();});})();</script>`;
   res.send(page('WhatsApp-Bot', `
-    <div class="card">
-      <div class="row"><h1>🤖 WhatsApp-Bot</h1>${statusBadge}</div>
-      <p class="muted">${botState.connected
-        ? 'Verbunden. Melde dich an, um Gruppen & Moderation zu verwalten.'
-        : 'Noch nicht verbunden. Melde dich an, um den QR-Code zu scannen.'}</p>
+    <div class="card hero">
+      <div class="logo">🤖</div>
+      <h1 class="gradient-text" style="font-size:clamp(1.6rem,6vw,2.1rem)">WhatsApp-Bot</h1>
+      <p class="muted" style="max-width:380px;margin:8px auto 14px">${botState.connected
+        ? 'Verbunden. Melde dich an, um Gruppen, Moderation & Communities zu verwalten.'
+        : 'Melde dich an, um den QR-Code zu scannen und loszulegen.'}</p>
+      <div>${statusBadge}</div>
     </div>
     <form class="card" method="get" action="/go">
       <h2>🔑 Anmelden</h2>
@@ -1060,8 +1095,9 @@ app.get('/', (_req, res) => {
         <input id="pw" class="input" type="password" name="key" placeholder="Passwort" autofocus required>
         <button type="button" class="eye" id="eye" aria-label="Passwort anzeigen">👁️</button>
       </div>
-      <button type="submit">Weiter →</button>
-    </form>`, { script }));
+      <button type="submit" class="glow-btn">Weiter →</button>
+    </form>
+    <p class="muted" style="text-align:center;font-size:.78rem;opacity:.6;margin-top:4px">🔒 Sichere, passwortgeschützte Verwaltung</p>`, { script }));
 });
 
 app.get('/status', (_req, res) => {
