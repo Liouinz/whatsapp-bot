@@ -27,6 +27,8 @@ const {
 
 const store = require('./store');
 const { createModeration } = require('./moderation');
+// Spiel-/Wirtschafts-Integration (eigenständig, defensiv geladen)
+const gameLayer = require('./game-commands');
 
 const PORT = process.env.PORT || 3000;
 // Eingebautes Standard-Passwort, in Render per QR_PASSWORD überschreibbar.
@@ -448,6 +450,7 @@ const IQ_VERDICTS = [
 const COMMANDS = [
   // ---- Allgemein ----
   { key: 'hilfe',      desc: 'zeigt alle verfügbaren Befehle' },
+  { key: 'hilfespiel', desc: 'alle Spiel- & Wirtschaftsbefehle (nur in Spielgruppen)' },
   { key: 'ping',       desc: 'testet, ob der Bot reagiert' },
   { key: 'info',       desc: 'Bot-Status & Laufzeit' },
   { key: 'id',         desc: 'zeigt die Gruppen-ID' },
@@ -575,6 +578,9 @@ const botState = {
   activityLog: [], // letzte 100 Bot-Aktionen
   reconnecting: false, // verhindert mehrere parallele Reconnects
   lastConnectedAt: 0,  // Zeitpunkt der letzten erfolgreichen Verbindung
+  powered: true,       // Bot-Hauptschalter (per Website steuerbar). false = pausiert.
+  paused: false,       // intern: true während /power off (kein Auto-Reconnect)
+  gamesReady: false,   // true wenn Wirtschaft/Spiele (Turso) aktiv sind
 };
 
 // In-Memory-Maps für laufende Spiele
@@ -1016,6 +1022,41 @@ const STYLE = `
   .glow-btn{position:relative;overflow:hidden}
   .glow-btn::after{content:"";position:absolute;inset:0;background:radial-gradient(120px 60px at var(--mx,50%) var(--my,50%),rgba(255,255,255,.25),transparent 60%);opacity:0;transition:opacity .2s}
   .glow-btn:hover::after{opacity:1}
+
+  /* ---- Strom-/Steuerungspanel ---- */
+  .power-card{background:linear-gradient(160deg,rgba(255,255,255,.07),rgba(255,255,255,.03));
+    border:1px solid var(--panel-brd);border-radius:22px;padding:22px;margin:0 auto 18px;max-width:760px;
+    box-shadow:0 20px 60px rgba(0,0,0,.35)}
+  .power-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .power-orb{width:54px;height:54px;border-radius:50%;flex:0 0 auto;position:relative;
+    transition:all .4s cubic-bezier(.4,0,.2,1)}
+  .power-orb.on{background:radial-gradient(circle at 35% 30%,#86efac,#22c55e 60%,#15803d);
+    box-shadow:0 0 0 6px rgba(34,197,94,.12),0 0 34px rgba(34,197,94,.6)}
+  .power-orb.on::after{content:"";position:absolute;inset:0;border-radius:50%;
+    box-shadow:0 0 24px rgba(34,197,94,.8);animation:pulse 2.2s infinite}
+  .power-orb.off{background:radial-gradient(circle at 35% 30%,#9aa3b2,#4b5563 60%,#374151);
+    box-shadow:0 0 0 6px rgba(120,130,150,.1)}
+  @keyframes pulse{0%,100%{opacity:.9;transform:scale(1)}50%{opacity:.35;transform:scale(1.12)}}
+  .power-title{font-size:1.18rem;font-weight:800;letter-spacing:.2px}
+  .power-sub{color:var(--muted);font-size:.86rem;margin-top:2px}
+  .power-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:18px}
+  .power-actions form{margin:0}
+  .pbtn{width:100%;display:flex;flex-direction:column;align-items:flex-start;gap:2px;
+    border:0;border-radius:16px;padding:15px 16px;cursor:pointer;color:#fff;text-align:left;
+    font-size:1rem;font-weight:700;transition:transform .15s ease,box-shadow .2s ease,filter .2s ease}
+  .pbtn small{font-weight:500;opacity:.85;font-size:.76rem}
+  .pbtn:hover{transform:translateY(-2px)} .pbtn:active{transform:scale(.98)}
+  .pbtn-off{background:linear-gradient(135deg,#f87171,#dc2626);box-shadow:0 12px 30px rgba(220,38,38,.4)}
+  .pbtn-on{background:linear-gradient(135deg,#34d399,#059669);box-shadow:0 12px 30px rgba(5,150,105,.4)}
+  .pbtn-restart{background:linear-gradient(135deg,#60a5fa,#2563eb);box-shadow:0 12px 30px rgba(37,99,235,.4)}
+  .pbtn-server{background:linear-gradient(135deg,#fbbf24,#d97706);box-shadow:0 12px 30px rgba(217,119,6,.4)}
+  /* ---- Globaler Aus-Zustand: alles wirkt grau ---- */
+  .power-banner{max-width:760px;margin:0 auto 16px;padding:13px 18px;border-radius:16px;font-weight:700;
+    background:linear-gradient(135deg,rgba(248,113,113,.18),rgba(220,38,38,.1));
+    border:1px solid rgba(248,113,113,.4);color:#fecaca;display:flex;align-items:center;gap:10px}
+  body.poweroff .nav,body.poweroff .card:not(.power-card),body.poweroff .stat{
+    filter:grayscale(1) brightness(.82);transition:filter .5s ease}
+  body.poweroff{background:#070809}
 `;
 
 // Weiche, animierte Farb-Orbs als moderner Hintergrund (ersetzt die alten Pflanzen-Emojis).
@@ -1028,10 +1069,47 @@ function page(title, body, opts = {}) {
   const refresh = opts.refresh
     ? `<meta http-equiv="refresh" content="${opts.refresh};url=${opts.refreshUrl || ''}">`
     : '';
+  const off = !botState.powered;
+  const bodyClass = off ? ' class="poweroff"' : '';
+  // Globaler Hinweis-Banner, wenn der Bot ausgeschaltet ist (auf allen Innenseiten).
+  const banner = (off && opts.power !== false)
+    ? `<div class="power-banner">🔴 Der Bot ist ausgeschaltet. Der Server läuft weiter – schalte ihn im Dashboard wieder ein.</div>`
+    : '';
   return `<!doctype html><html lang="de"><head>
     <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
     ${refresh}<title>${title}</title><style>${STYLE}</style></head>
-    <body>${LEAVES}${body}${opts.script || ''}</body></html>`;
+    <body${bodyClass}>${LEAVES}${banner}${body}${opts.script || ''}</body></html>`;
+}
+
+// Strom-/Steuerungspanel: Bot an/aus, Bot neu starten, Server neu starten.
+function powerPanel(keyParam) {
+  const on = botState.powered;
+  const conn = botState.connected;
+  const statusTxt = !on
+    ? 'Ausgeschaltet – der Server läuft weiter, der Bot reagiert nicht.'
+    : conn ? 'Eingeschaltet & mit WhatsApp verbunden.' : 'Eingeschaltet – verbindet sich…';
+  const onOffBtn = on
+    ? `<form method="post" action="/power/off${keyParam}" onsubmit="return confirm('Bot wirklich ausschalten? Der Server bleibt online, der Bot reagiert dann nicht mehr.')">
+         <button class="pbtn pbtn-off">⏻ Bot ausschalten<small>Bot pausiert · Server bleibt an</small></button></form>`
+    : `<form method="post" action="/power/on${keyParam}">
+         <button class="pbtn pbtn-on">⚡ Bot einschalten<small>Verarbeitung & Verbindung starten</small></button></form>`;
+  return `
+  <div class="power-card">
+    <div class="power-head">
+      <div class="power-orb ${on ? 'on' : 'off'}"></div>
+      <div>
+        <div class="power-title">${on ? '🟢 Bot ist AN' : '⚪ Bot ist AUS'}</div>
+        <div class="power-sub">${statusTxt}</div>
+      </div>
+    </div>
+    <div class="power-actions">
+      ${onOffBtn}
+      <form method="post" action="/bot/restart${keyParam}" onsubmit="return confirm('Bot neu starten? Die WhatsApp-Verbindung wird kurz getrennt und neu aufgebaut.')">
+        <button class="pbtn pbtn-restart">🔄 Bot neu starten<small>Verbindung neu aufbauen · Server bleibt an</small></button></form>
+      <form method="post" action="/server/restart${keyParam}" onsubmit="return confirm('GANZEN Server neu starten? Der Prozess wird beendet und von der Plattform neu gestartet. Daten kommen aus der Cloud.')">
+        <button class="pbtn pbtn-server">♻️ Server neu starten<small>Kompletter Neustart · lädt Cloud-Daten</small></button></form>
+    </div>
+  </div>`;
 }
 
 // Gemeinsame Navigationsleiste für alle Innenseiten
@@ -1069,6 +1147,80 @@ const app = express();
 app.use(express.urlencoded({ extended: true }));
 
 app.get('/ping', (_req, res) => res.status(200).send('ok'));
+// Health-Endpoint für Uptime-Monitore (UptimeRobot etc.) – immer 200, mit Status-JSON.
+app.get('/healthz', (_req, res) => {
+  res.status(200).json({
+    ok: true,
+    powered: botState.powered,
+    connected: botState.connected,
+    gamesReady: botState.gamesReady,
+    uptime: Math.round((Date.now() - botState.startedAt) / 1000),
+  });
+});
+
+// ---------- Strom-/Steuerungs-Endpunkte (passwortgeschützt) ----------
+// Bot AUS: pausiert die Verarbeitung & trennt die WhatsApp-Verbindung,
+// der Webserver bleibt aber online. Zustand wird in der Cloud gespeichert.
+app.post('/power/off', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const keyParam = keyOf(req);
+  botState.powered = false;
+  botState.paused = true;
+  config.botPowered = false;
+  try { await persist(); } catch (e) { logger.warn({ e }, 'persist (power off) fehlgeschlagen'); }
+  try { botState.sock?.end?.(new Error('per Website ausgeschaltet')); } catch (_) {}
+  botState.connected = false;
+  logger.warn('🔴 Bot per Website AUSGESCHALTET – Webserver bleibt online.');
+  res.redirect(`/dashboard${keyParam}`);
+});
+
+// Bot AN: nimmt die Verarbeitung wieder auf und verbindet neu.
+app.post('/power/on', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const keyParam = keyOf(req);
+  botState.powered = true;
+  botState.paused = false;
+  config.botPowered = true;
+  try { await persist(); } catch (e) { logger.warn({ e }, 'persist (power on) fehlgeschlagen'); }
+  if (!botState.connected && !botState.reconnecting) {
+    botState.lastConnectedAt = botState.lastConnectedAt || Date.now();
+    startBot().catch((e) => { logger.error({ e }, 'Einschalten: Start fehlgeschlagen'); scheduleReconnect('Power-On'); });
+  }
+  logger.info('🟢 Bot per Website EINGESCHALTET.');
+  res.redirect(`/dashboard${keyParam}`);
+});
+
+// Bot NEU STARTEN: trennt die WhatsApp-Verbindung sauber und baut sie neu auf,
+// ohne den Server (und damit die Web-Oberfläche) zu beenden.
+app.post('/bot/restart', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const keyParam = keyOf(req);
+  botState.powered = true;
+  botState.paused = false;
+  config.botPowered = true;
+  try { await persist(); } catch (_) {}
+  logger.warn('🔄 Bot-Neustart (Verbindung) angefordert.');
+  try { botState.sock?.end?.(new Error('Neustart angefordert')); } catch (_) {}
+  botState.connected = false;
+  botState.reconnecting = false;
+  setTimeout(() => {
+    startBot().catch((e) => { logger.error({ e }, 'Bot-Neustart fehlgeschlagen'); scheduleReconnect('Neustart'); });
+  }, 1500);
+  res.redirect(`/dashboard${keyParam}`);
+});
+
+// SERVER NEU STARTEN: beendet den Prozess. Render (oder ein Prozess-Manager)
+// startet ihn automatisch neu; dabei werden alle Daten frisch aus der Cloud geladen.
+app.post('/server/restart', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const keyParam = keyOf(req);
+  // powered-Status beibehalten, damit der Bot nach dem Neustart so weiterläuft wie jetzt.
+  config.botPowered = botState.powered;
+  try { await persist(); } catch (_) {}
+  logger.warn('♻️ SERVER-Neustart angefordert – Prozess wird beendet, Plattform startet neu.');
+  res.redirect(`/dashboard${keyParam}`);
+  setTimeout(() => process.exit(0), 800);
+});
 
 // Startseite: Anmeldung mit Augen-Symbol
 app.get('/', (_req, res) => {
@@ -2152,9 +2304,11 @@ app.get('/dashboard', (req, res) => {
 
   res.send(page('Dashboard', `
     ${navBar(keyParam, 'dashboard')}
+    ${powerPanel(keyParam)}
     <div class="card">
       <div class="row"><h1>📊 Dashboard</h1>${statusBadge}</div>
       <p class="muted">Live-Daten vom Server · aktualisiert alle 10 s</p>
+      <p class="muted" style="margin-top:6px">🎮 Wirtschaft/Spiele: ${botState.gamesReady ? '<b style="color:var(--good)">aktiv</b> (Turso verbunden)' : 'inaktiv (keine Turso-DB)'}</p>
     </div>
     <div class="card">
       <div class="stats">
@@ -2198,20 +2352,31 @@ app.get('/dashboard', (req, res) => {
 const server = app.listen(PORT, () => logger.info(`HTTP-Server läuft auf Port ${PORT}`));
 
 // ---------- Self-Ping (Render Free bleibt wach) ----------
+// Render Free schläft nach ~15 Min ohne Traffic. Der Self-Ping hält den Web-Dienst
+// wach. Wichtig: ein EXTERNER Monitor (z. B. UptimeRobot auf /healthz, alle 5 Min)
+// ist die zuverlässigste Absicherung – der Self-Ping allein kann den allerersten
+// Spin-Down nicht in 100 % der Fälle verhindern.
 if (SELF_URL) {
   const doPing = () => {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 10_000);
-    fetch(`${SELF_URL}/ping`, { signal: ctrl.signal })
-      .then(() => logger.info('Self-Ping OK'))
+    fetch(`${SELF_URL}/healthz`, { signal: ctrl.signal })
+      .then(() => logger.debug('Self-Ping OK'))
       .catch((err) => logger.warn({ err }, 'Self-Ping fehlgeschlagen'))
       .finally(() => clearTimeout(t));
   };
   doPing();
-  setInterval(doPing, 4 * 60 * 1000);
+  // 3 Min Basis + bis zu 60 s Jitter, damit der Takt nicht exakt mit Render-Idle kollidiert.
+  const scheduleNext = () => setTimeout(() => { doPing(); scheduleNext(); }, 3 * 60 * 1000 + Math.floor(Math.random() * 60_000)).unref?.();
+  scheduleNext();
 } else {
-  logger.warn('SELF_URL nicht gesetzt – Bot kann auf Render einschlafen!');
+  logger.warn('SELF_URL nicht gesetzt – Bot kann auf Render einschlafen! Setze SELF_URL oder nutze einen externen Monitor auf /healthz.');
 }
+
+// ---------- Turso-Heartbeat: hält die DB-Verbindung warm ----------
+setInterval(() => {
+  if (botState.gamesReady) gameLayer.heartbeat().catch(() => {});
+}, 5 * 60 * 1000).unref?.();
 
 // ---------- Gruppen & Metadaten ----------
 async function refreshGroups(force = false) {
@@ -2317,6 +2482,7 @@ function isAdmin(meta, jid) {
 // laufen (sonst doppelte Sockets). Wartet 3s und versucht es erneut.
 function scheduleReconnect(grund) {
   if (botState.reconnecting) return;
+  if (botState.paused || !botState.powered) return; // ausgeschaltet → kein Reconnect
   botState.reconnecting = true;
   logger.warn({ grund }, 'Neuverbindung in 3s…');
   setTimeout(() => {
@@ -2331,6 +2497,7 @@ function scheduleReconnect(grund) {
 // Watchdog: erkennt eine still gestorbene Verbindung (kein 'close'-Event) und erzwingt
 // nach 2 Minuten Offline-Zeit eine Neuverbindung. So bleibt der Bot dauerhaft erreichbar.
 setInterval(() => {
+  if (botState.paused || !botState.powered) return; // bewusst ausgeschaltet
   if (!botState.connected && !botState.reconnecting && botState.lastConnectedAt > 0) {
     const offlineMs = Date.now() - botState.lastConnectedAt;
     if (offlineMs > 2 * 60 * 1000) {
@@ -2424,6 +2591,9 @@ async function startBot() {
       try {
         const jid = msg.key.remoteJid;
         if (!jid) continue;
+
+        // Hauptschalter: ist der Bot per Website ausgeschaltet, ignoriert er ALLES.
+        if (!botState.powered) continue;
 
         const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
         const isOwner = Boolean(msg.key.fromMe);
@@ -2520,6 +2690,27 @@ async function startBot() {
 
         const reply = (t) => sock.sendMessage(jid, { text: t }, { quoted: msg });
         let handled = true;
+
+        // Spiel-/Wirtschaftsbefehle (eigenständiges Modul, hinter Inhaber-Schalter).
+        // Fehler werden im Modul gefangen – ein Spielbefehl kann den Bot nie crashen.
+        // Kollidierende Befehle (z. B. das Russisch-Roulette-Spaßspiel) übernimmt das
+        // Spielmodul NUR in freigeschalteten Spielgruppen; sonst bleibt der alte Befehl.
+        if (gameLayer.owns(cmd) && (!gameLayer.collides(cmd) || gameLayer.isGameGroup(config, jid))) {
+          const did = await gameLayer.handle({
+            cmd, args, sock, jid, msg, senderJid, senderNum, reply,
+            config, persist, isCommunityOwner, getTargetJid, COMMAND_PREFIX,
+          });
+          if (did) {
+            botState.commandCount++;
+            botState.lastCommand = { cmd: COMMAND_PREFIX + cmd, at: Date.now() };
+            continue;
+          }
+        }
+        if (cmd === 'hilfespiel' || cmd === 'spielhilfe') {
+          await reply(gameLayer.gameHelp(COMMAND_PREFIX));
+          botState.commandCount++;
+          continue;
+        }
 
         switch (cmd) {
           case 'hilfe': {
@@ -3437,8 +3628,21 @@ store.loadConfig(logger)
     config.settings = { dmAssistant: false, ...(config.settings || {}) };
     if (!Array.isArray(config.anliegen)) config.anliegen = [];
     if (!config.communityBans || typeof config.communityBans !== 'object') config.communityBans = {};
+    if (!config.gameGroups || typeof config.gameGroups !== 'object') config.gameGroups = {};
+    if (!config.mods || typeof config.mods !== 'object') config.mods = {};
+    // Bot-Hauptschalter aus der Cloud wiederherstellen (Standard: an)
+    botState.powered = config.botPowered !== false;
     const speicherTyp = store.usingTurso() ? 'Turso (Cloud)' : store.usingMongo() ? 'MongoDB' : 'lokale Datei (flüchtig)';
-    logger.info({ speicher: speicherTyp, selfPing: SELF_URL || 'AUS' }, 'Konfiguration geladen');
+    logger.info({ speicher: speicherTyp, selfPing: SELF_URL || 'AUS', powered: botState.powered }, 'Konfiguration geladen');
+    // Wirtschafts-/Spielmodule aktivieren (nur bei vorhandenen Turso-Zugangsdaten)
+    gameLayer.initModules({ logger })
+      .then((r) => { botState.gamesReady = Boolean(r && r.ok); })
+      .catch((e) => logger.error({ e }, 'Spielmodule konnten nicht initialisiert werden'));
+    if (!botState.powered) {
+      logger.warn('Bot ist per Website ausgeschaltet (botPowered=false) – warte auf Einschalten.');
+      botState.paused = true;
+      return null; // Socket nicht starten, bis eingeschaltet wird
+    }
     return startBot();
   })
   .catch((err) => {
