@@ -317,6 +317,115 @@ const ACTIONS = {
   ],
 };
 
+// Quiz-Fragen ({q: Frage, a: Antwort in Kleinbuchstaben})
+const QUIZ = [
+  { q: 'Wie viele Kontinente gibt es?', a: '7' },
+  { q: 'Welches ist das größte Säugetier der Welt?', a: 'blauwal' },
+  { q: 'Wie heißt die Hauptstadt von Australien?', a: 'canberra' },
+  { q: 'Wie viele Beine hat eine Spinne?', a: '8' },
+  { q: 'Welches chemische Element hat das Symbol „O"?', a: 'sauerstoff' },
+  { q: 'In welchem Jahr fiel die Berliner Mauer?', a: '1989' },
+  { q: 'Wie heißt der längste Fluss der Welt?', a: 'nil' },
+  { q: 'Wie viele Saiten hat eine klassische Gitarre?', a: '6' },
+  { q: 'Welcher Planet ist der Sonne am nächsten?', a: 'merkur' },
+  { q: 'Wie nennt man ein Vieleck mit fünf Ecken?', a: 'fünfeck' },
+  { q: 'Welches Tier ist das schnellste an Land?', a: 'gepard' },
+  { q: 'Wie viele Minuten hat ein Tag? (in Stunden gerechnet wären es…)', a: '1440' },
+  { q: 'Wie heißt die Hauptstadt von Japan?', a: 'tokio' },
+  { q: 'Welche Farbe entsteht aus Blau und Gelb?', a: 'grün' },
+  { q: 'Wie viele Spieler stehen bei Fußball pro Team auf dem Feld?', a: '11' },
+  { q: 'Welches Metall ist bei Raumtemperatur flüssig?', a: 'quecksilber' },
+  { q: 'Wie heißt der höchste Berg der Welt?', a: 'mount everest' },
+  { q: 'Wie viele Zähne hat ein erwachsener Mensch normalerweise?', a: '32' },
+  { q: 'Welcher Ozean ist der größte?', a: 'pazifik' },
+  { q: 'Wie nennt man die Wissenschaft der Sterne?', a: 'astronomie' },
+  { q: 'Wie viele Farben hat ein Regenbogen?', a: '7' },
+  { q: 'Welches Land hat die meisten Einwohner?', a: 'indien' },
+  { q: 'Wie heißt das Sonnensystem unserer Galaxie?', a: 'milchstraße' },
+  { q: 'Aus wie vielen Bundesländern besteht Deutschland?', a: '16' },
+  { q: 'Wie viele Herzen hat ein Oktopus?', a: '3' },
+];
+
+// „Würdest du eher…"
+const WOULD = [
+  'Würdest du eher fliegen können oder unsichtbar sein?',
+  'Würdest du eher nie wieder Pizza oder nie wieder Schokolade essen?',
+  'Würdest du eher im Lotto gewinnen oder den perfekten Job finden?',
+  'Würdest du eher Gedanken lesen oder in die Zukunft sehen können?',
+  'Würdest du eher immer zu spät oder immer zu früh sein?',
+  'Würdest du eher ohne Musik oder ohne Filme leben?',
+  'Würdest du eher in der Stadt oder auf dem Land leben?',
+  'Würdest du eher berühmt oder reich sein?',
+  'Würdest du eher nie wieder dein Handy oder nie wieder den Fernseher nutzen?',
+  'Würdest du eher mit Haien oder mit Löwen schwimmen?',
+  'Würdest du eher immer die Wahrheit sagen müssen oder immer lügen müssen?',
+  'Würdest du eher ewig leben oder ein perfektes Leben für 50 Jahre?',
+  'Würdest du eher überall hin teleportieren oder die Zeit anhalten können?',
+  'Würdest du eher der lustigste oder der klügste Mensch im Raum sein?',
+  'Würdest du eher 1 Million heute oder 100.000 jeden Monat ein Jahr lang?',
+  'Würdest du eher nie wieder frieren oder nie wieder schwitzen?',
+  'Würdest du eher im Sommer Winterkleidung oder im Winter Sommerkleidung tragen?',
+  'Würdest du eher dauerhaft tanzen oder dauerhaft singen müssen?',
+  'Würdest du eher jede Sprache sprechen oder jedes Instrument spielen können?',
+  'Würdest du eher auf dem Mars oder auf dem Meeresgrund leben?',
+  'Würdest du eher Superkräfte ohne Kontrolle oder gar keine haben?',
+  'Würdest du eher immer barfuß oder immer mit Handschuhen leben?',
+];
+
+// „Ich hab noch nie…"
+const NHIE = [
+  'Ich hab noch nie eine ganze Nacht durchgemacht.',
+  'Ich hab noch nie ein Bußgeld bekommen.',
+  'Ich hab noch nie heimlich Essen von jemandem geklaut.',
+  'Ich hab noch nie verschlafen und einen wichtigen Termin verpasst.',
+  'Ich hab noch nie jemanden aus Versehen mit falschem Namen angesprochen.',
+  'Ich hab noch nie einen Film im Kino verschlafen.',
+  'Ich hab noch nie eine Lüge erzählt, um mich rauszureden.',
+  'Ich hab noch nie ein Karaoke-Mikrofon in der Hand gehabt.',
+  'Ich hab noch nie etwas zurückgegeben, das ich schon benutzt hatte.',
+  'Ich hab noch nie jemandem heimlich durch Social Media gestalkt.',
+  'Ich hab noch nie einen Wecker 5-mal auf Schlummern gestellt.',
+  'Ich hab noch nie in der Öffentlichkeit hingefallen.',
+  'Ich hab noch nie etwas gegoogelt, um in einer Diskussion recht zu haben.',
+  'Ich hab noch nie ein Geschenk weiterverschenkt.',
+  'Ich hab noch nie so getan, als hätte ich eine Nachricht nicht gesehen.',
+  'Ich hab noch nie beim Spielen geschummelt.',
+  'Ich hab noch nie meinen eigenen Namen falsch geschrieben.',
+  'Ich hab noch nie ein Lied komplett falsch mitgesungen.',
+  'Ich hab noch nie das letzte Stück Kuchen heimlich gegessen.',
+  'Ich hab noch nie aus Faulheit etwas Wichtiges aufgeschoben.',
+  'Ich hab noch nie jemandem versprochen zurückzurufen und es vergessen.',
+  'Ich hab noch nie eine Serie ohne meinen Partner heimlich weitergeschaut.',
+];
+
+// Tageshoroskop-Bausteine (zufällig kombiniert, seeded pro Zeichen + Tag)
+const HOROSKOP = {
+  mood: [
+    'Heute strahlst du pure Energie aus. ⚡', 'Ein ruhiger, ausgeglichener Tag erwartet dich. 🧘',
+    'Deine Laune steckt heute alle an. 😄', 'Sei achtsam – heute zählt das Bauchgefühl. 🌙',
+    'Ein Funke Abenteuerlust begleitet dich. 🔥', 'Heute ist Geduld dein bester Freund. 🌱',
+    'Kreativität sprudelt nur so aus dir heraus. 🎨', 'Ein Hauch Nostalgie liegt in der Luft. 🍂',
+  ],
+  love: [
+    'In der Liebe stehen die Sterne günstig. 💕', 'Ein altes Gefühl könnte wieder aufflammen. 🔥',
+    'Zeig deinen Liebsten, dass du sie schätzt. 🥰', 'Heute ist kein Tag für Liebesdrama – bleib locker. 😌',
+    'Ein nettes Kompliment öffnet heute Türen. 💌', 'Single? Halte die Augen offen. 👀',
+  ],
+  work: [
+    'Beruflich läuft heute vieles wie am Schnürchen. 💼', 'Ein Kollege braucht heute deine Hilfe. 🤝',
+    'Trau dich, deine Idee auszusprechen. 💡', 'Konzentration zahlt sich heute besonders aus. 🎯',
+    'Vermeide voreilige Entscheidungen im Job. ⏳', 'Eine kleine Pause bringt heute große Klarheit. ☕',
+  ],
+  luck: [
+    'Glückszahl des Tages: ', 'Deine Glücksfarbe heute: ', 'Heutiges Glückssymbol: ',
+  ],
+};
+
+const IQ_VERDICTS = [
+  'Einstein wäre neidisch! 🧠', 'Ziemlich schlau! 🤓', 'Solide Köpfchen! 👍',
+  'Geht doch! 🙂', 'Naja… es zählt der Charakter. 😅', 'Ähm… frag lieber Google. 🤡',
+];
+
 // Verfügbare Befehle (für Hilfe-Text und Pro-Gruppen-Schalter)
 // adminDefault: true → Standard "nur Admins" für neue Gruppen
 const COMMANDS = [
@@ -353,6 +462,18 @@ const COMMANDS = [
   { key: 'setregeln',  desc: 'Gruppenregeln festlegen', adminDefault: true },
   { key: 'setwelcome', desc: 'Willkommensnachricht festlegen', adminDefault: true },
   { key: 'welcome',    desc: 'Willkommensnachrichten an/aus', adminDefault: true },
+  { key: 'lock',       desc: '🔒 Chat sperren – nur Admins dürfen schreiben', adminDefault: true },
+  { key: 'unlock',     desc: '🔓 Chat entsperren – alle dürfen schreiben', adminDefault: true },
+  { key: 'infolock',   desc: 'nur Admins dürfen Gruppeninfo ändern', adminDefault: true },
+  { key: 'infounlock', desc: 'alle dürfen Gruppeninfo ändern', adminDefault: true },
+  { key: 'setname',    desc: 'Gruppennamen ändern', adminDefault: true },
+  { key: 'setdesc',    desc: 'Gruppenbeschreibung ändern', adminDefault: true },
+  { key: 'del',        desc: 'zitierte Nachricht löschen', adminDefault: true },
+  { key: 'admins',     desc: 'alle Admins markieren', adminDefault: true },
+  { key: 'ephemeral',  desc: 'verschwindende Nachrichten setzen', adminDefault: true },
+  { key: 'addmode',    desc: 'wer darf Mitglieder hinzufügen (admin/all)', adminDefault: true },
+  { key: 'slowmode',   desc: 'Slowmode setzen (Sekunden, off)', adminDefault: true },
+  { key: 'remind',     desc: 'geplante Erinnerung mit Text', adminDefault: true },
   // ---- Spiele & Spaß ----
   { key: 'marry',      desc: 'heiraten oder Ehestatus anzeigen' },
   { key: 'divorce',    desc: 'Ehe beenden 💔' },
@@ -376,6 +497,17 @@ const COMMANDS = [
   { key: 'reverse',    desc: 'Text umkehren' },
   { key: 'timer',      desc: 'Countdown starten (max. 60 Min.)' },
   { key: 'poll',       desc: 'Abstimmung starten' },
+  { key: 'quiz',       desc: 'Quizfrage – mit !antwort lösen' },
+  { key: 'would',      desc: 'Würdest du eher…?' },
+  { key: 'nhie',       desc: 'Ich hab noch nie…' },
+  { key: 'mostlikely', desc: 'Wer am ehesten…? (zufälliges Mitglied)' },
+  { key: 'iq',         desc: 'IQ-Test (just for fun) 🧠' },
+  { key: 'simp',       desc: 'Simp-Meter 😍' },
+  { key: 'vibe',       desc: 'Vibe-Check ✨' },
+  { key: 'mock',       desc: 'tExT vErSpOtTeN' },
+  { key: 'emojify',    desc: 'Text in Emoji-Buchstaben' },
+  { key: 'roll',       desc: 'Würfel-Roller, z. B. 2d6 🎲' },
+  { key: 'horoskop',   desc: 'Tageshoroskop für dein Sternzeichen ♈' },
   // ---- Soziale Aktionen ----
   { key: 'kiss',       desc: 'jemanden küssen 💋' },
   { key: 'hug',        desc: 'jemanden umarmen 🤗' },
@@ -398,6 +530,10 @@ const ALIAS = {
   umkehren: 'reverse',
   abstimmung: 'poll',
   profil2: 'profil',
+  sperren: 'lock', entsperren: 'unlock',
+  loeschen: 'del', löschen: 'del', delete: 'del',
+  erinnerung: 'remind', erinnere: 'remind',
+  würfeln: 'roll',
 };
 
 // Gemeinsamer Zustand
@@ -420,7 +556,14 @@ const botState = {
 // In-Memory-Maps für laufende Spiele
 const activeRiddles = new Map(); // `${groupJid}:${senderJid}` -> { riddle, expiresAt }
 const activeTimers  = new Map(); // timerId -> { groupJid, senderJid, label }
+const slowmodeLast  = new Map(); // `${groupJid}:${senderJid}` -> timestamp letzter Nachricht
 let _persistTimer   = null;      // Debounced-persist Handle
+
+// Slowmode-Cleanup: alte Einträge regelmäßig entfernen
+setInterval(() => {
+  const cutoff = Date.now() - 60 * 60 * 1000;
+  for (const [k, t] of slowmodeLast) if (t < cutoff) slowmodeLast.delete(k);
+}, 30 * 60 * 1000).unref?.();
 
 const moderation = createModeration({
   logger,
@@ -765,6 +908,7 @@ const STYLE = `
   .log-warn{border-color:#fde68a} .log-mute{border-color:#c084fc}
   .log-pin{border-color:#38bdf8} .log-unpin{border-color:#94a3b8}
   .log-anliegen{border-color:#a78bfa}
+  .log-lock{border-color:#fb7185} .log-del{border-color:#f43f5e} .log-slowmode{border-color:#facc15}
   .leaderboard{counter-reset:rank}
   .lb-row{display:flex;align-items:center;gap:10px;padding:9px 12px;
     border:1px solid rgba(255,255,255,.08);border-radius:10px;margin:5px 0;background:rgba(255,255,255,.03)}
@@ -1110,6 +1254,8 @@ app.get('/group', async (req, res) => {
           <input type="checkbox" name="mod_links" ${chk(gc.moderation.links)}></label>
         <label class="opt"><span>Verwarnungen bis Stummschaltung</span>
           <input class="input" style="width:80px" type="number" min="1" max="10" name="warnLimit" value="${gc.moderation.warnLimit}"></label>
+        <label class="opt"><span>🐌 Slowmode (Sekunden, 0 = aus)<br><span class="muted">max. 1 Nachricht/Nutzer pro X Sek. (gilt nicht für Admins)</span></span>
+          <input class="input" style="width:80px" type="number" min="0" max="3600" name="slowmode" value="${Number(gc.moderation.slowmode) || 0}"></label>
         <p class="muted" style="margin-top:12px">Zusätzliche verbotene Wörter (kommagetrennt):</p>
         <textarea class="input" name="extraBadwords" placeholder="z. B. idiot, depp">${escapeHtml((gc.moderation.extraBadwords || []).join(', '))}</textarea>
       </div>
@@ -1158,6 +1304,7 @@ app.post('/group/save', async (req, res) => {
       badwords: req.body.mod_badwords !== undefined,
       links: req.body.mod_links !== undefined,
       warnLimit: Math.min(10, Math.max(1, Number(req.body.warnLimit) || 3)),
+      slowmode: Math.min(3600, Math.max(0, Number(req.body.slowmode) || 0)),
       extraBadwords: extra,
     },
     welcome: {
@@ -2066,6 +2213,22 @@ async function startBot() {
           if (moderated) continue;
         }
 
+        // 1b) Slowmode – zu schnelle Nachrichten von Nicht-Admins löschen
+        const slow = Number(group.moderation.slowmode) || 0;
+        if (!isOwner && slow > 0 && !text.startsWith(COMMAND_PREFIX)) {
+          const metaS = await getGroupMeta(jid);
+          if (!isAdmin(metaS, senderJid)) {
+            const sk = `${jid}:${senderJid}`;
+            const last = slowmodeLast.get(sk) || 0;
+            const now = Date.now();
+            if (now - last < slow * 1000) {
+              try { await sock.sendMessage(jid, { delete: msg.key }); } catch { /* Bot evtl. kein Admin */ }
+              continue;
+            }
+            slowmodeLast.set(sk, now);
+          }
+        }
+
         // 2a) Heiratsbestätigung prüfen (vor Befehl-Check)
         if (text.trim().toLowerCase() === 'ja') {
           const proposalKey = `${jid}:${senderJid}`;
@@ -2489,6 +2652,122 @@ async function startBot() {
             break;
           }
 
+          // ---- Erweiterte Admin-Befehle ----
+          case 'lock':
+          case 'unlock': {
+            try {
+              await sock.groupSettingUpdate(jid, cmd === 'lock' ? 'announcement' : 'not_announcement');
+              activityLogPush({ type: 'lock', groupJid: jid, senderNum });
+              await reply(cmd === 'lock'
+                ? '🔒 Chat gesperrt – nur Admins können jetzt schreiben.'
+                : '🔓 Chat entsperrt – alle dürfen wieder schreiben.');
+            } catch { await reply('Aktion fehlgeschlagen. Bin ich Admin?'); }
+            break;
+          }
+          case 'infolock':
+          case 'infounlock': {
+            try {
+              await sock.groupSettingUpdate(jid, cmd === 'infolock' ? 'locked' : 'unlocked');
+              await reply(cmd === 'infolock'
+                ? '🔐 Nur Admins können jetzt die Gruppeninfo ändern.'
+                : '🔓 Alle dürfen jetzt die Gruppeninfo ändern.');
+            } catch { await reply('Aktion fehlgeschlagen. Bin ich Admin?'); }
+            break;
+          }
+          case 'setname': {
+            const newName = args.join(' ').trim();
+            if (!newName) { await reply(`Nutzung: ${COMMAND_PREFIX}setname <neuer Name>`); break; }
+            if (newName.length > 100) { await reply('Der Name darf höchstens 100 Zeichen haben.'); break; }
+            try {
+              await sock.groupUpdateSubject(jid, newName);
+              botState.groupMeta[jid] = null; // Cache invalidieren
+              await reply(`✏️ Gruppenname geändert zu: *${newName}*`);
+            } catch { await reply('Aktion fehlgeschlagen. Bin ich Admin?'); }
+            break;
+          }
+          case 'setdesc': {
+            const newDesc = args.join(' ').trim();
+            try {
+              await sock.groupUpdateDescription(jid, newDesc || undefined);
+              await reply(newDesc ? '📝 Gruppenbeschreibung aktualisiert.' : '📝 Gruppenbeschreibung gelöscht.');
+            } catch { await reply('Aktion fehlgeschlagen. Bin ich Admin?'); }
+            break;
+          }
+          case 'del': {
+            const ctxD = msg.message?.extendedTextMessage?.contextInfo;
+            if (!ctxD || !ctxD.stanzaId) { await reply(`Antworte auf eine Nachricht und schreibe ${COMMAND_PREFIX}del.`); break; }
+            const botJidD = jidNormalizedUser(botState.me?.id || '');
+            const delKey = {
+              remoteJid: jid,
+              fromMe: jidNormalizedUser(ctxD.participant || '') === botJidD,
+              id: ctxD.stanzaId,
+              participant: ctxD.participant || undefined,
+            };
+            try {
+              await sock.sendMessage(jid, { delete: delKey });
+              activityLogPush({ type: 'del', groupJid: jid, senderNum, targetNum: (ctxD.participant || '').split('@')[0] });
+            } catch { await reply('Löschen fehlgeschlagen. Bin ich Admin?'); }
+            break;
+          }
+          case 'admins': {
+            const metaA = await getGroupMeta(jid);
+            if (!metaA) { await reply('Konnte die Gruppe nicht laden.'); break; }
+            const adminJids = metaA.participants.filter((p) => p.admin === 'admin' || p.admin === 'superadmin').map((p) => p.id);
+            if (!adminJids.length) { await reply('Keine Admins gefunden.'); break; }
+            await sock.sendMessage(jid, {
+              text: `🛡️ *Admin-Ruf*\n${adminJids.map((m) => '@' + m.split('@')[0]).join(' ')}`,
+              mentions: adminJids,
+            });
+            break;
+          }
+          case 'ephemeral': {
+            const opt = args[0]?.toLowerCase();
+            const MAP = { off: 0, '0': 0, '1': 86400, '7': 604800, '90': 7776000 };
+            if (!(opt in MAP)) { await reply(`Nutzung: ${COMMAND_PREFIX}ephemeral off|1|7|90 (Tage)`); break; }
+            try {
+              await sock.groupToggleEphemeral(jid, MAP[opt]);
+              await reply(MAP[opt] === 0 ? '⏳ Verschwindende Nachrichten ausgeschaltet.' : `⏳ Verschwindende Nachrichten: ${opt} Tag(e).`);
+            } catch { await reply('Aktion fehlgeschlagen. Bin ich Admin?'); }
+            break;
+          }
+          case 'addmode': {
+            const mode = args[0]?.toLowerCase();
+            if (mode !== 'admin' && mode !== 'all') { await reply(`Nutzung: ${COMMAND_PREFIX}addmode admin|all`); break; }
+            try {
+              await sock.groupMemberAddMode(jid, mode === 'admin' ? 'admin_add' : 'all_member_add');
+              await reply(mode === 'admin' ? '👥 Nur Admins dürfen jetzt Mitglieder hinzufügen.' : '👥 Alle dürfen jetzt Mitglieder hinzufügen.');
+            } catch { await reply('Aktion fehlgeschlagen (von WhatsApp evtl. nicht unterstützt). Bin ich Admin?'); }
+            break;
+          }
+          case 'slowmode': {
+            const opt = args[0]?.toLowerCase();
+            if (!opt) {
+              const cur = Number(group.moderation.slowmode) || 0;
+              await reply(cur > 0 ? `🐌 Slowmode aktuell: ${cur} Sekunden.\nÄndern: ${COMMAND_PREFIX}slowmode <Sek>|off` : `Slowmode ist aus. Aktivieren: ${COMMAND_PREFIX}slowmode <Sekunden>`);
+              break;
+            }
+            const secs = opt === 'off' ? 0 : Math.min(3600, Math.max(0, parseInt(opt, 10) || 0));
+            if (!config.groups[jid]) config.groups[jid] = defaultGroupConfig();
+            config.groups[jid].moderation = { ...(config.groups[jid].moderation || {}), slowmode: secs };
+            await persist();
+            activityLogPush({ type: 'slowmode', groupJid: jid, senderNum });
+            await reply(secs > 0 ? `🐌 Slowmode aktiviert: max. 1 Nachricht alle ${secs} Sekunden (gilt nicht für Admins).` : '🐌 Slowmode ausgeschaltet.');
+            break;
+          }
+          case 'remind': {
+            const mins = Math.min(1440, Math.max(1, parseInt(args[0], 10) || 0));
+            const remindText = args.slice(1).join(' ').trim();
+            if (!mins || !remindText) { await reply(`Nutzung: ${COMMAND_PREFIX}remind <Minuten> <Text>`); break; }
+            await reply(`⏰ Erinnerung gesetzt – in ${mins} Minute(n) melde ich mich.`);
+            const rt = setTimeout(async () => {
+              try {
+                await sock.sendMessage(jid, { text: `⏰ *Erinnerung* (von @${senderNum}):\n${remindText}`, mentions: [senderJid] });
+              } catch (e) { logger.warn({ e }, 'Remind-Nachricht fehlgeschlagen'); }
+            }, mins * 60 * 1000);
+            if (rt.unref) rt.unref();
+            break;
+          }
+
           // ---- Statistik-Befehle ----
           case 'top': {
             const n = Math.min(10, Math.max(1, Number(args[0]) || 5));
@@ -2681,6 +2960,99 @@ async function startBot() {
             const emojis2 = ['1️⃣', '2️⃣', '3️⃣', '4️⃣'];
             const optLines2 = pollOpts.slice(0, 4).map((o, i) => `${emojis2[i]} ${o}`).join('\n');
             await reply(`📊 *Abstimmung:*\n\n❓ ${pollQ}\n\n${optLines2}\n\nReagiere mit dem Emoji deiner Wahl!`);
+            break;
+          }
+          case 'quiz': {
+            const rk = `${jid}:${senderJid}`;
+            if (activeRiddles.has(rk)) {
+              const ar = activeRiddles.get(rk);
+              await reply(`❓ Du hast schon eine offene Frage:\n${ar.riddle.q}\n\nAntworte mit ${COMMAND_PREFIX}antwort <text>`);
+              break;
+            }
+            const qz = QUIZ[Math.floor(Math.random() * QUIZ.length)];
+            activeRiddles.set(rk, { riddle: qz, expiresAt: Date.now() + 5 * 60 * 1000 });
+            setTimeout(() => activeRiddles.delete(rk), 5 * 60 * 1000);
+            await reply(`🧠 *Quiz:*\n\n${qz.q}\n\nDu hast 5 Minuten! Antworte mit: ${COMMAND_PREFIX}antwort <text>`);
+            break;
+          }
+          case 'would':
+            await reply(`🤔 *Würdest du eher…*\n\n${WOULD[Math.floor(Math.random() * WOULD.length)]}`);
+            break;
+          case 'nhie':
+            await reply(`🙊 *Ich hab noch nie…*\n\n${NHIE[Math.floor(Math.random() * NHIE.length)]}`);
+            break;
+          case 'mostlikely': {
+            const thingM = args.join(' ').trim();
+            if (!thingM) { await reply(`Nutzung: ${COMMAND_PREFIX}mostlikely <etwas>\nz. B. ${COMMAND_PREFIX}mostlikely verschläft morgen`); break; }
+            const metaM = await getGroupMeta(jid);
+            if (!metaM || !metaM.participants.length) { await reply('Konnte die Gruppe nicht laden.'); break; }
+            const pick = metaM.participants[Math.floor(Math.random() * metaM.participants.length)].id;
+            await sock.sendMessage(jid, {
+              text: `🎯 Wer am ehesten *${thingM}*?\n\n→ @${pick.split('@')[0]} 😏`,
+              mentions: [pick],
+            }, { quoted: msg });
+            break;
+          }
+          case 'iq':
+          case 'simp':
+          case 'vibe': {
+            const mentionedG = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+            const targetG = mentionedG[0] || senderJid;
+            const tnumG = targetG.split('@')[0];
+            const seedG = tnumG.split('').reduce((a, c) => a + c.charCodeAt(0), 0) + new Date().getDate();
+            if (cmd === 'iq') {
+              const iq = 50 + (seedG * 7) % 151; // 50–200
+              await sock.sendMessage(jid, { text: `🧠 @${tnumG} hat einen IQ von *${iq}*\n${IQ_VERDICTS[Math.min(IQ_VERDICTS.length - 1, Math.floor((200 - iq) / 26))]}`, mentions: [targetG] }, { quoted: msg });
+            } else if (cmd === 'simp') {
+              const pct = (seedG * 13) % 101;
+              const bar = '█'.repeat(Math.floor(pct / 10)) + '░'.repeat(10 - Math.floor(pct / 10));
+              await sock.sendMessage(jid, { text: `😍 *Simp-Meter*\n@${tnumG}: [${bar}] ${pct}% Simp`, mentions: [targetG] }, { quoted: msg });
+            } else {
+              const pct = (seedG * 17) % 101;
+              const emo = pct >= 80 ? '🤩 immaculate vibes' : pct >= 60 ? '✨ gute Vibes' : pct >= 40 ? '🙂 solide Vibes' : pct >= 20 ? '😐 meh' : '💀 negative Vibes';
+              await sock.sendMessage(jid, { text: `🔮 *Vibe-Check*\n@${tnumG}: ${pct}% – ${emo}`, mentions: [targetG] }, { quoted: msg });
+            }
+            break;
+          }
+          case 'mock': {
+            const mockText = args.join(' ').trim();
+            if (!mockText) { await reply(`Nutzung: ${COMMAND_PREFIX}mock <Text>`); break; }
+            const mocked = mockText.split('').map((c, i) => i % 2 ? c.toUpperCase() : c.toLowerCase()).join('');
+            await reply(`🧽 ${mocked}`);
+            break;
+          }
+          case 'emojify': {
+            const eText = args.join(' ').trim().toLowerCase();
+            if (!eText) { await reply(`Nutzung: ${COMMAND_PREFIX}emojify <Text>`); break; }
+            const out = eText.split('').map((c) => {
+              if (c >= 'a' && c <= 'z') return String.fromCodePoint(0x1F1E6 + (c.charCodeAt(0) - 97)) + ' ';
+              if (c >= '0' && c <= '9') return ['0️⃣','1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣'][c.charCodeAt(0) - 48] + ' ';
+              if (c === ' ') return '   ';
+              return c;
+            }).join('');
+            await reply(out.slice(0, 600) || '🤷');
+            break;
+          }
+          case 'roll': {
+            const spec = (args[0] || '1d6').toLowerCase();
+            const m = spec.match(/^(\d{1,2})d(\d{1,4})$/);
+            if (!m) { await reply(`Nutzung: ${COMMAND_PREFIX}roll <Anzahl>d<Seiten>, z. B. ${COMMAND_PREFIX}roll 2d6`); break; }
+            const n = Math.min(20, Math.max(1, Number(m[1])));
+            const sides = Math.min(1000, Math.max(2, Number(m[2])));
+            const rolls = Array.from({ length: n }, () => Math.floor(Math.random() * sides) + 1);
+            const sum = rolls.reduce((a, b) => a + b, 0);
+            await reply(`🎲 ${n}d${sides}: ${rolls.join(' + ')}${n > 1 ? ` = *${sum}*` : ` = *${sum}*`}`);
+            break;
+          }
+          case 'horoskop': {
+            const sign = args.join(' ').trim() || 'dein Zeichen';
+            const seedH = (sign.toLowerCase().split('').reduce((a, c) => a + c.charCodeAt(0), 0) + new Date().getDate() * 31 + new Date().getMonth());
+            const pick = (arr) => arr[seedH % arr.length];
+            const luckLabel = pick(HOROSKOP.luck);
+            const luckVal = luckLabel.includes('zahl') ? String((seedH % 49) + 1)
+              : luckLabel.includes('farbe') ? pick(['Rot', 'Blau', 'Grün', 'Gelb', 'Lila', 'Türkis', 'Orange'])
+              : pick(['🍀', '⭐', '🌙', '🔥', '💎', '🦋']);
+            await reply(`♈ *Tageshoroskop – ${sign}*\n\n${pick(HOROSKOP.mood)}\n💕 ${pick(HOROSKOP.love)}\n💼 ${pick(HOROSKOP.work)}\n\n🎁 ${luckLabel}${luckVal}`);
             break;
           }
 
