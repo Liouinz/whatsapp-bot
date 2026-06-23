@@ -174,9 +174,12 @@ function createModeration({ logger, botState, loadWarn, saveWarn }) {
         await deleteMessage(sock, remoteJid, msg);
         const warnLimit = Number(mod.warnLimit) || 3;
         const state = getState(remoteJid);
-        const w = state.warnings.get(senderJid) || { count: 0, lastAt: 0 };
+        const w = state.warnings.get(senderJid) || { count: 0, lastAt: 0, reasons: [] };
         w.count += 1;
         w.lastAt = Date.now();
+        w.reasons = w.reasons || [];
+        w.reasons.push({ reason: `Beleidigung: ${badword}`, by: 'auto', at: Date.now() });
+        if (w.reasons.length > 10) w.reasons.shift();
         state.warnings.set(senderJid, w);
         recordAction(`Beleidigung von ${senderJid.split('@')[0]}`);
         if (w.count >= warnLimit) {
@@ -247,13 +250,31 @@ function createModeration({ logger, botState, loadWarn, saveWarn }) {
       return isMuted(groupJid, targetJid);
     },
     getWarnings(groupJid, targetJid) {
-      return getState(groupJid).warnings.get(targetJid) || { count: 0, lastAt: 0 };
+      const w = getState(groupJid).warnings.get(targetJid);
+      return w ? { reasons: [], ...w } : { count: 0, lastAt: 0, reasons: [] };
     },
-    addWarning(groupJid, targetJid) {
+    addWarning(groupJid, targetJid, reason) {
       const s = getState(groupJid);
-      const w = s.warnings.get(targetJid) || { count: 0, lastAt: 0 };
+      const w = s.warnings.get(targetJid) || { count: 0, lastAt: 0, reasons: [] };
       w.count += 1;
       w.lastAt = Date.now();
+      w.reasons = w.reasons || [];
+      if (reason) {
+        w.reasons.push({ reason, by: 'admin', at: Date.now() });
+        if (w.reasons.length > 10) w.reasons.shift();
+      }
+      s.warnings.set(targetJid, w);
+      flush(groupJid);
+      return w;
+    },
+    // Nimmt genau eine (die letzte) Verwarnung zurück.
+    removeWarning(groupJid, targetJid) {
+      const s = getState(groupJid);
+      const w = s.warnings.get(targetJid);
+      if (!w) return { count: 0, lastAt: 0, reasons: [] };
+      w.count = Math.max(0, w.count - 1);
+      if (w.reasons && w.reasons.length) w.reasons.pop();
+      if (w.count <= 0) { s.warnings.delete(targetJid); flush(groupJid); return { count: 0, lastAt: 0, reasons: [] }; }
       s.warnings.set(targetJid, w);
       flush(groupJid);
       return w;
