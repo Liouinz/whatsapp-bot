@@ -1054,9 +1054,58 @@ const STYLE = `
   .power-banner{max-width:760px;margin:0 auto 16px;padding:13px 18px;border-radius:16px;font-weight:700;
     background:linear-gradient(135deg,rgba(248,113,113,.18),rgba(220,38,38,.1));
     border:1px solid rgba(248,113,113,.4);color:#fecaca;display:flex;align-items:center;gap:10px}
-  body.poweroff .nav,body.poweroff .card:not(.power-card),body.poweroff .stat{
+  body.poweroff .sidebar,body.poweroff .card:not(.power-card),body.poweroff .stat,body.poweroff .topbar{
     filter:grayscale(1) brightness(.82);transition:filter .5s ease}
   body.poweroff{background:#070809}
+
+  /* ================= APP-SHELL (Sidebar-Layout) ================= */
+  .content{position:relative;z-index:2;width:100%;align-self:stretch}
+  .content.bare{max-width:520px;margin:24px auto}
+  .content.has-shell{padding:6px 12px 60px 268px;max-width:1340px;margin-right:auto}
+  .content.has-shell .card{max-width:none}
+  @media(max-width:880px){.content.has-shell{padding:78px 4px 48px}}
+
+  .sidebar{position:fixed;top:0;left:0;bottom:0;width:256px;z-index:40;display:flex;flex-direction:column;
+    background:linear-gradient(180deg,rgba(20,22,34,.96),rgba(12,13,20,.96));
+    border-right:1px solid var(--panel-brd);backdrop-filter:blur(18px);overflow-y:auto;
+    padding:18px 14px;gap:6px;box-shadow:6px 0 40px rgba(0,0,0,.35)}
+  .sidebar::-webkit-scrollbar{width:7px}.sidebar::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:10px}
+  .sb-brand{display:flex;align-items:center;gap:12px;padding:8px 10px 14px}
+  .sb-logo{width:42px;height:42px;border-radius:13px;display:grid;place-items:center;font-size:1.35rem;
+    background:linear-gradient(135deg,var(--accent),var(--accent2));box-shadow:0 8px 22px rgba(99,102,241,.45)}
+  .sb-brand b{font-size:1.05rem;letter-spacing:.2px;display:block;line-height:1.1}
+  .sb-brand span{font-size:.72rem;color:var(--muted)}
+  .sb-status{display:flex;align-items:center;gap:8px;margin:2px 6px 12px;padding:9px 12px;border-radius:12px;
+    background:rgba(255,255,255,.04);border:1px solid var(--panel-brd);font-size:.8rem;font-weight:600}
+  .sb-status .d{width:9px;height:9px;border-radius:50%;flex:0 0 auto}
+  .sb-status .d.on{background:#22c55e;box-shadow:0 0 12px #22c55e;animation:blink 2s infinite}
+  .sb-status .d.off{background:#9aa3b2}
+  .sb-group{margin-top:10px}
+  .sb-cap{font-size:.66rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);
+    padding:6px 12px 4px;opacity:.7;font-weight:700}
+  .sb-link{display:flex;align-items:center;gap:11px;padding:10px 12px;border-radius:11px;color:var(--muted);
+    text-decoration:none;font-weight:600;font-size:.92rem;transition:all .16s ease;position:relative}
+  .sb-link .ic{width:20px;text-align:center;font-size:1rem;flex:0 0 auto}
+  .sb-link:hover{background:rgba(255,255,255,.06);color:#fff;transform:translateX(2px)}
+  .sb-link.active{background:linear-gradient(135deg,rgba(99,102,241,.9),rgba(168,85,247,.85));color:#fff;
+    box-shadow:0 8px 22px rgba(99,102,241,.4)}
+  .sb-link.active::before{content:"";position:absolute;left:-14px;top:50%;transform:translateY(-50%);
+    width:4px;height:22px;border-radius:0 4px 4px 0;background:#fff}
+  .sb-foot{margin-top:auto;padding:12px 8px 2px}
+  .sb-foot a{display:flex;align-items:center;justify-content:center;gap:8px;padding:10px;border-radius:11px;
+    background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.25);color:#fca5a5;
+    text-decoration:none;font-weight:700;font-size:.85rem}
+  .sb-foot a:hover{background:rgba(248,113,113,.2)}
+  /* Mobile: Sidebar wird zur horizontalen Topbar */
+  @media(max-width:880px){
+    .sidebar{flex-direction:row;bottom:auto;width:100%;height:auto;overflow-x:auto;overflow-y:hidden;
+      padding:10px 12px;gap:6px;align-items:center;border-right:0;border-bottom:1px solid var(--panel-brd)}
+    .sb-brand{padding:4px 8px;flex:0 0 auto}.sb-brand span{display:none}
+    .sb-status,.sb-cap,.sb-foot{display:none}
+    .sb-group{margin:0;display:flex;gap:6px}
+    .sb-link{padding:8px 12px;white-space:nowrap}.sb-link.active::before{display:none}
+    .sb-link .lbl{display:none}.sb-link .ic{font-size:1.15rem}
+  }
 `;
 
 // Weiche, animierte Farb-Orbs als moderner Hintergrund (ersetzt die alten Pflanzen-Emojis).
@@ -1075,10 +1124,14 @@ function page(title, body, opts = {}) {
   const banner = (off && opts.power !== false)
     ? `<div class="power-banner">🔴 Der Bot ist ausgeschaltet. Der Server läuft weiter – schalte ihn im Dashboard wieder ein.</div>`
     : '';
+  // Innenseiten enthalten die Sidebar (via navBar) → App-Shell-Layout mit
+  // linkem Innenabstand. Login/QR/Fehlerseiten haben keine Sidebar → zentriert.
+  const hasShell = /class="sidebar"/.test(body);
+  const contentClass = hasShell ? 'content has-shell' : 'content bare';
   return `<!doctype html><html lang="de"><head>
     <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
     ${refresh}<title>${title}</title><style>${STYLE}</style></head>
-    <body${bodyClass}>${LEAVES}${banner}${body}${opts.script || ''}</body></html>`;
+    <body${bodyClass}>${LEAVES}<div class="${contentClass}">${banner}${body}${opts.script || ''}</div></body></html>`;
 }
 
 // Strom-/Steuerungspanel: Bot an/aus, Bot neu starten, Server neu starten.
@@ -1113,24 +1166,52 @@ function powerPanel(keyParam) {
 }
 
 // Gemeinsame Navigationsleiste für alle Innenseiten
+// Seitenleiste (App-Shell). Gruppierte Navigation + Live-Status + Logout.
+// Signatur bleibt navBar(keyParam, active), damit alle Routen unverändert funktionieren.
 function navBar(keyParam, active = '') {
-  const items = [
-    ['settings', '⚙️', 'Gruppen'],
-    ['community', '🏘️', 'Communities'],
-    ['befehle', '📖', 'Befehle'],
-    ['dashboard', '📊', 'Dashboard'],
-    ['lookup', '🔎', 'Nummer'],
-    ['search', '🔍', 'Suche'],
-    ['reports', '📋', 'Meldungen'],
-    ['anliegen', '📨', 'Anliegen'],
-    ['banlog', '🚫', 'Ban-Log'],
-    ['activity', '📡', 'Aktivität'],
-    ['qr', '📲', 'QR'],
+  const groups = [
+    ['Übersicht', [
+      ['dashboard', '📊', 'Dashboard'],
+      ['activity', '📡', 'Aktivität'],
+    ]],
+    ['Verwaltung', [
+      ['settings', '⚙️', 'Gruppen'],
+      ['community', '🏘️', 'Communities'],
+      ['befehle', '📖', 'Befehle'],
+    ]],
+    ['Sicherheit', [
+      ['reports', '📋', 'Meldungen'],
+      ['banlog', '🚫', 'Ban-Log'],
+    ]],
+    ['Werkzeuge', [
+      ['lookup', '🔎', 'Nummer'],
+      ['search', '🔍', 'Suche'],
+      ['anliegen', '📨', 'Anliegen'],
+    ]],
+    ['Verbindung', [
+      ['qr', '📲', 'QR-Code'],
+    ]],
   ];
-  const links = items.map(([path, icon, label]) =>
-    `<a href="/${path}${keyParam}" class="${active === path ? 'active' : ''}">${icon} ${label}</a>`
-  ).join('');
-  return `<nav class="nav">${links}</nav>`;
+  const renderGroup = ([cap, items]) => {
+    const links = items.map(([path, icon, label]) =>
+      `<a href="/${path}${keyParam}" class="sb-link ${active === path ? 'active' : ''}">` +
+      `<span class="ic">${icon}</span><span class="lbl">${label}</span></a>`
+    ).join('');
+    return `<div class="sb-group"><div class="sb-cap">${cap}</div>${links}</div>`;
+  };
+  const connected = botState.connected;
+  const statusDot = !botState.powered ? '<span class="d off"></span> Bot aus'
+    : connected ? '<span class="d on"></span> Verbunden'
+    : '<span class="d off"></span> Getrennt';
+  return `<aside class="sidebar">
+    <div class="sb-brand">
+      <div class="sb-logo">🤖</div>
+      <div><b>WA-Bot</b><span>Steuerzentrale</span></div>
+    </div>
+    <div class="sb-status">${statusDot}</div>
+    ${groups.map(renderGroup).join('')}
+    <div class="sb-foot"><a href="/${keyParam}">⎋ Abmelden</a></div>
+  </aside>`;
 }
 
 function requireAuth(req, res) {
