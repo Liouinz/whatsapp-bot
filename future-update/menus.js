@@ -13,87 +13,198 @@ const CATEGORIES = {
     label: '👤 Benutzer',
     desc: 'Für alle nutzbar',
     commands: [
-      ['hilfe', 'alle Befehle'], ['ping', 'reagiert der Bot?'], ['info', 'Status & Laufzeit'],
-      ['regeln', 'Gruppenregeln'], ['stats', 'deine Statistik'], ['profil', 'Profilkarte'],
+      ['hilfe', 'alle Befehle'],
+      ['ping', 'reagiert der Bot?'],
+      ['info', 'Status & Laufzeit'],
+      ['regeln', 'Gruppenregeln'],
+      ['stats', 'deine Statistik'],
+      ['profil', 'Profilkarte'],
+      ['statistik', 'deine vollständige Statistik'],
     ],
   },
+
   fun: {
     label: '🎮 Spaß',
     desc: 'Spiele & Unterhaltung',
     commands: [
-      ['marry', 'heiraten 💍'], ['ship', 'Kompatibilität'], ['8ball', 'Magic 8-Ball'],
-      ['joke', 'Witz'], ['quote', 'Zitat'], ['rps', 'Schere-Stein-Papier'], ['horoskop', 'Horoskop'],
+      ['marry', 'heiraten 💍'],
+      ['ship', 'Kompatibilität'],
+      ['8ball', 'Magic 8-Ball'],
+      ['joke', 'Witz'],
+      ['quote', 'Zitat'],
+      ['rps', 'Schere-Stein-Papier'],
+      ['horoskop', 'Horoskop'],
     ],
   },
+
   economy: {
     label: '🏠 Wirtschaft',
     desc: 'Coins & Häuser (nur freigegebene Gruppen)',
     commands: [
-      ['balance', 'Kontostand'], ['vermögen', 'Gesamtvermögen'], ['daily', 'Tagesbonus'],
-      ['arbeiten', 'Coins verdienen'], ['markt', 'Häuser-Markt'], ['kaufen', 'Haus kaufen'],
-      ['verkaufen', 'Haus verkaufen'], ['inventar', 'deine Häuser'], ['miete', 'Mieteinnahmen'],
-      ['angebot', 'Tagesangebote'], ['reich', 'Rangliste'], ['pay', 'Coins überweisen'],
-      ['level', 'dein Level/XP'], ['achievements', 'Erfolge'],
+      ['balance', 'Kontostand'],
+      ['vermögen', 'Gesamtvermögen'],
+      ['daily', 'Tagesbonus'],
+      ['saisonbonus', 'saisonaler Bonus'],
+      ['arbeiten', 'Coins verdienen'],
+      ['markt', 'Häuser-Markt'],
+      ['kaufen', 'Haus kaufen'],
+      ['verkaufen', 'Haus verkaufen'],
+      ['inventar', 'deine Häuser'],
+      ['miete', 'Mieteinnahmen'],
+      ['angebot', 'Tagesangebote'],
+      ['reich', 'Rangliste'],
+      ['pay', 'Coins überweisen'],
+      ['level', 'dein Level/XP'],
+      ['prestige', 'Prestige durchführen (ab Lv 50)'],
+      ['achievements', 'Erfolge'],
     ],
   },
+
   bank: {
     label: '🏦 Bank',
     desc: 'Sicheres Konto mit Zinsen',
     commands: [
-      ['einzahlen', 'Geld einzahlen'], ['auszahlen', 'Geld abheben'], ['zinsen', 'Tageszins abholen'],
+      ['einzahlen', 'Geld einzahlen'],
+      ['auszahlen', 'Geld abheben'],
+      ['zinsen', 'Tageszins abholen'],
     ],
   },
+
   shop: {
     label: '🛒 Shop',
     desc: 'Autos, Haustiere & Boosts',
     commands: [
-      ['shop', 'Shop ansehen'], ['kaufenitem', 'Item kaufen'], ['verkaufenitem', 'Item verkaufen'],
-      ['items', 'deine Items'], ['einkommen', 'Tageseinkommen'], ['tagesdeal', 'Item-Angebot'],
+      ['shop', 'Shop ansehen'],
+      ['kaufenitem', 'Item kaufen'],
+      ['items', 'deine Items'],
+      ['einkommen', 'Tageseinkommen'],
+      ['tagesdeal', 'Tages-Sonderangebot'],
+      ['crafting', 'Crafting-Rezepte'],
+      ['craften', 'Items craften'],
+      ['itemposter', 'Item auf Marktplatz stellen'],
+      ['itemkaufen', 'Item vom Marktplatz kaufen'],
+      ['itemmarkt', 'Marktplatz anzeigen'],
+      ['itemabbruch', 'eigenes Angebot zurückziehen'],
+      ['schenken', 'Item verschenken'],
     ],
   },
+
   quests: {
     label: '🎯 Quests',
-    desc: 'Tägliche Aufgaben',
+    desc: 'Tägliche & wöchentliche Aufgaben',
     commands: [
-      ['quests', 'Tagesquests'], ['claim', 'Belohnung abholen'],
+      ['quests', 'Tages- & Wochenquests'],
+      ['claim', 'Belohnung abholen'],
+      ['community', 'Community-Challenge'],
     ],
   },
+
   games: {
     label: '🎲 Casino',
     desc: 'Wettspiele (nur freigegebene Gruppen)',
     commands: [
-      ['slots', 'Einarmiger Bandit 🎰'], ['coinflip', 'Kopf oder Zahl'],
-      ['würfelwette', 'Würfeln gegen den Bot'], ['roulette', 'Roulette 🎡'],
-      ['blackjack', 'Blackjack 🃏'], ['hl', 'Higher-Lower'],
-      ['duell', 'Würfelduell gegen Spieler'], ['lotto', 'Lotterie-Los'],
-      ['glücksrad', 'Glücksrad drehen 🎡'], ['rubbellos', 'Rubbellos kaufen 🎫'],
-      ['box', 'Mystery-Box öffnen 📦'], ['event', 'Zufallsereignis 🎲'],
+      ['slots', 'Einarmiger Bandit 🎰'],
+      ['coinflip', 'Kopf oder Zahl'],
+      ['würfelwette', 'Würfeln gegen den Bot'],
+      ['roulette', 'Roulette 🎡'],
+      ['blackjack', 'Blackjack 🃏'],
+      ['poker', 'Poker (5 Cards gegen Bot) 🂡'],
+      ['hl', 'Higher-Lower'],
+      ['crash', 'Crash-Spiel 🚀'],
+      ['keno', 'Keno (5 aus 20 Zahlen) 🔢'],
+      ['baccarat', 'Baccarat 🎴'],
+      ['rennen', 'Pferderennen 🏇'],
+      ['mines', 'Minenfeld 💣'],
+      ['turm', 'Würfelturm 🎲'],
+      ['duell', 'Würfelduell gegen Spieler'],
+      ['lotto', 'Lotterie-Los'],
+      ['glücksrad', 'Glücksrad drehen 🎡'],
+      ['rubbellos', 'Rubbellos kaufen 🎫'],
+      ['box', 'Mystery-Box öffnen 📦'],
+      ['tagesbox', 'Kostenlose Tagesbox 🎁'],
+      ['event', 'Zufallsereignis 🎲'],
       ['rauben', 'jemanden ausrauben 🦹'],
     ],
   },
+
+  tournament: {
+    label: '🏆 Turnier',
+    desc: 'Gruppen-Turniere (nur Admins können starten)',
+    commands: [
+      ['turnier start <spiel>', 'Turnier starten'],
+      ['turnier status', 'aktueller Stand'],
+      ['turnier ende', 'Turnier beenden & Sieger küren'],
+    ],
+  },
+
+  clan: {
+    label: '⚔️ Clan',
+    desc: 'Clans gründen, beitreten & aufsteigen',
+    commands: [
+      ['clan info', 'dein Clan-Profil'],
+      ['clan erstellen <name>', 'neuen Clan gründen (5.000 Coins)'],
+      ['clan suche <name>', 'Clan suchen'],
+      ['clan beitritt <name>', 'Clan beitreten'],
+      ['clan verlassen', 'Clan verlassen'],
+      ['clan spenden <betrag>', 'Coins in Schatzkammer einzahlen'],
+      ['clan kick @person', 'Mitglied kicken (nur Leader)'],
+      ['clan übertragen @person', 'Leadership übergeben'],
+      ['clan beschreibung <text>', 'Clan-Beschreibung setzen'],
+      ['clan top', 'Clan-Rangliste'],
+      ['clan auflösen', 'Clan auflösen (nur Leader)'],
+    ],
+  },
+
+  handel: {
+    label: '🤝 Handel',
+    desc: 'Häuser zwischen Spielern tauschen',
+    commands: [
+      ['handel angebot @person <häuser> <preis>', 'Tauschangebot senden'],
+      ['handel annehmen <id>', 'Angebot annehmen'],
+      ['handel liste', 'offene Angebote anzeigen'],
+      ['handel abbrechen <id>', 'eigenes Angebot zurückziehen'],
+    ],
+  },
+
   moderation: {
     label: '🛡️ Moderation',
     desc: 'Für Admins & freigegebene Moderatoren',
     commands: [
-      ['kick', 'entfernen'], ['ban', 'bannen'], ['mute', 'stummschalten'], ['unmute', 'freischalten'],
-      ['warn', 'verwarnen'], ['unwarn', 'Verwarnung zurück'], ['lock', 'Chat sperren'], ['unlock', 'Chat öffnen'],
+      ['kick', 'entfernen'],
+      ['ban', 'bannen'],
+      ['mute', 'stummschalten'],
+      ['unmute', 'freischalten'],
+      ['warn', 'verwarnen'],
+      ['unwarn', 'Verwarnung zurück'],
+      ['lock', 'Chat sperren'],
+      ['unlock', 'Chat öffnen'],
     ],
   },
+
   admin: {
     label: '⚙️ Admin',
     desc: 'Gruppenverwaltung',
     commands: [
-      ['setname', 'Name ändern'], ['setdesc', 'Beschreibung'], ['setregeln', 'Regeln setzen'],
-      ['setwelcome', 'Willkommen'], ['link', 'Einladungslink'], ['revoke', 'Link neu'], ['slowmode', 'Slowmode'],
+      ['setname', 'Name ändern'],
+      ['setdesc', 'Beschreibung'],
+      ['setregeln', 'Regeln setzen'],
+      ['setwelcome', 'Willkommen'],
+      ['link', 'Einladungslink'],
+      ['revoke', 'Link neu'],
+      ['slowmode', 'Slowmode'],
     ],
   },
+
   owner: {
     label: '👑 Inhaber',
     desc: 'Nur für den Community-Inhaber',
     commands: [
-      ['communitykick', 'aus ALLEN Gruppen bannen'], ['communityunban', 'Bann aufheben'],
-      ['communitybanlist', 'Bannliste'], ['spielgruppe', 'Spiele hier an/aus'],
-      ['modallow', 'Moderator-Rechte vergeben'], ['moddeny', 'Moderator-Rechte entziehen'],
+      ['communitykick', 'aus ALLEN Gruppen bannen'],
+      ['communityunban', 'Bann aufheben'],
+      ['communitybanlist', 'Bannliste'],
+      ['spielgruppe', 'Spiele hier an/aus'],
+      ['modallow', 'Moderator-Rechte vergeben'],
+      ['moddeny', 'Moderator-Rechte entziehen'],
       ['modlist', 'Moderatoren anzeigen'],
     ],
   },
@@ -126,18 +237,40 @@ function renderCategory(prefix, cat) {
   return `*${cat.label}* _(${cat.desc})_\n${lines}`;
 }
 
+// Gibt Kurzübersicht einer Kategorie zurück (nur Befehlsnamen)
+function renderCategoryCompact(prefix, cat) {
+  const cmds = cat.commands.map(([k]) => `${prefix}${k}`).join('  ');
+  return `*${cat.label}*\n${cmds}`;
+}
+
 // Hauptmenü: zeigt je nach Rolle nur die erlaubten Kategorien.
 function buildMenu(prefix, { isOwner = false, isAdmin = false, modCats = [] } = {}) {
-  const blocks = [renderCategory(prefix, CATEGORIES.user), renderCategory(prefix, CATEGORIES.fun)];
-  blocks.push(renderCategory(prefix, CATEGORIES.economy));
-  blocks.push(renderCategory(prefix, CATEGORIES.bank));
-  blocks.push(renderCategory(prefix, CATEGORIES.shop));
-  blocks.push(renderCategory(prefix, CATEGORIES.quests));
-  blocks.push(renderCategory(prefix, CATEGORIES.games));
+  const blocks = [
+    renderCategory(prefix, CATEGORIES.user),
+    renderCategory(prefix, CATEGORIES.fun),
+    renderCategory(prefix, CATEGORIES.economy),
+    renderCategory(prefix, CATEGORIES.bank),
+    renderCategory(prefix, CATEGORIES.shop),
+    renderCategory(prefix, CATEGORIES.quests),
+    renderCategory(prefix, CATEGORIES.games),
+    renderCategory(prefix, CATEGORIES.tournament),
+    renderCategory(prefix, CATEGORIES.clan),
+    renderCategory(prefix, CATEGORIES.handel),
+  ];
   if (isAdmin || modCats.includes('moderation')) blocks.push(renderCategory(prefix, CATEGORIES.moderation));
   if (isAdmin) blocks.push(renderCategory(prefix, CATEGORIES.admin));
   if (isOwner) blocks.push(renderCategory(prefix, CATEGORIES.owner));
   return `🤖 *Bot-Menü*\n\n${blocks.join('\n\n')}\n\n_Tippe einen Befehl, um ihn zu nutzen._`;
+}
+
+// Kompaktes Menü (kürzere Ausgabe für Gruppen mit vielen Befehlen)
+function buildCompactMenu(prefix, { isOwner = false, isAdmin = false, modCats = [] } = {}) {
+  const cats = ['user', 'fun', 'economy', 'bank', 'shop', 'quests', 'games', 'tournament', 'clan', 'handel'];
+  const blocks = cats.map((c) => renderCategoryCompact(prefix, CATEGORIES[c]));
+  if (isAdmin || modCats.includes('moderation')) blocks.push(renderCategoryCompact(prefix, CATEGORIES.moderation));
+  if (isAdmin) blocks.push(renderCategoryCompact(prefix, CATEGORIES.admin));
+  if (isOwner) blocks.push(renderCategoryCompact(prefix, CATEGORIES.owner));
+  return `🤖 *Bot-Menü (kompakt)*\n\n${blocks.join('\n\n')}\n\n_${prefix}menü voll – für ausführliche Beschreibungen_`;
 }
 
 function buildAdminMenu(prefix) {
@@ -152,6 +285,28 @@ function buildOwnerMenu(prefix) {
   return `👑 *Inhaber-Menü*\n\n${renderCategory(prefix, CATEGORIES.owner)}`;
 }
 
+// Gibt Kategorie-spezifisches Hilfe-Menü zurück
+function buildCategoryHelp(prefix, categoryKey) {
+  const cat = CATEGORIES[categoryKey];
+  if (!cat) return `Unbekannte Kategorie. Verfügbar: ${Object.keys(CATEGORIES).join(', ')}`;
+  return `${cat.label} *Hilfe*\n\n${renderCategory(prefix, cat)}`;
+}
+
+// Suche in allen Befehlen
+function searchCommands(prefix, query) {
+  const q = query.toLowerCase();
+  const results = [];
+  for (const [, cat] of Object.entries(CATEGORIES)) {
+    for (const [cmd, desc] of cat.commands) {
+      if (cmd.toLowerCase().includes(q) || desc.toLowerCase().includes(q)) {
+        results.push(`${prefix}${cmd} – ${desc} _(${cat.label})_`);
+      }
+    }
+  }
+  if (!results.length) return `Keine Befehle für "*${query}*" gefunden.`;
+  return `🔍 *Suchergebnisse für "${query}"*\n\n${results.join('\n')}`;
+}
+
 // ====================================================================
 // MENU_COMMANDS – Vorlage für index.js (siehe INTEGRATION.md)
 // ====================================================================
@@ -162,7 +317,12 @@ function buildOwnerMenu(prefix) {
     const meta = await getGroupMeta(jid);
     const admin = isAdmin(meta, senderJid);
     const modCats = getModCategories(config, senderNum);
-    await reply(buildMenu(COMMAND_PREFIX, { isOwner: owner, isAdmin: admin, modCats }));
+    const compact = args[0] === 'kompakt' || args[0] === 'kurz';
+    if (compact) {
+      await reply(buildCompactMenu(COMMAND_PREFIX, { isOwner: owner, isAdmin: admin, modCats }));
+    } else {
+      await reply(buildMenu(COMMAND_PREFIX, { isOwner: owner, isAdmin: admin, modCats }));
+    }
     break;
   }
   case 'adminmenu': case 'adminmenü': {
@@ -173,6 +333,15 @@ function buildOwnerMenu(prefix) {
   }
   case 'modmenu': case 'modmenü': {
     await reply(buildModMenu(COMMAND_PREFIX, getModCategories(config, senderNum)));
+    break;
+  }
+  case 'hilfesuche': {
+    if (!args[0]) { await reply(`Nutzung: ${COMMAND_PREFIX}hilfesuche <Suchbegriff>`); break; }
+    await reply(searchCommands(COMMAND_PREFIX, args.join(' ')));
+    break;
+  }
+  case 'kategorie': {
+    await reply(buildCategoryHelp(COMMAND_PREFIX, (args[0] || '').toLowerCase()));
     break;
   }
 
@@ -214,7 +383,11 @@ module.exports = {
   isModeratorFor,
   setModCategory,
   buildMenu,
+  buildCompactMenu,
   buildAdminMenu,
   buildModMenu,
   buildOwnerMenu,
+  buildCategoryHelp,
+  searchCommands,
+  renderCategory,
 };

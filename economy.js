@@ -163,18 +163,38 @@ function levelFromXp(xp) { return Math.floor(Math.sqrt(Math.max(0, xp) / 100)); 
 
 // ---- Achievements: Bedingung (test) + optionale Coin-Belohnung ----
 const ACHIEVEMENTS = [
-  { id: 'first_house', name: '🏠 Eigenheim', desc: 'Kaufe dein erstes Haus.', reward: 1000, test: (c) => c.houses >= 1 },
-  { id: 'five_houses', name: '🏘️ Immobilienhai', desc: 'Besitze 5 Häuser.', reward: 5000, test: (c) => c.houses >= 5 },
-  { id: 'ten_houses', name: '🏙️ Bauunternehmer', desc: 'Besitze 10 Häuser.', reward: 15000, test: (c) => c.houses >= 10 },
-  { id: 'rich_50k', name: '💰 Wohlhabend', desc: 'Erreiche 50.000 Vermögen.', reward: 2500, test: (c) => c.net >= 50000 },
-  { id: 'rich_100k', name: '💎 Reich', desc: 'Erreiche 100.000 Vermögen.', reward: 5000, test: (c) => c.net >= 100000 },
-  { id: 'rich_1m', name: '👑 Millionär', desc: 'Erreiche 1.000.000 Vermögen.', reward: 50000, test: (c) => c.net >= 1000000 },
-  { id: 'cash_25k', name: '🤑 Bargeld-König', desc: 'Halte 25.000 Bargeld.', reward: 2000, test: (c) => c.cash >= 25000 },
-  { id: 'cash_100k', name: '💵 Geldspeicher', desc: 'Halte 100.000 Bargeld.', reward: 8000, test: (c) => c.cash >= 100000 },
-  { id: 'twenty_houses', name: '🌆 Immobilien-Mogul', desc: 'Besitze 20 Häuser.', reward: 40000, test: (c) => c.houses >= 20 },
-  { id: 'rich_500k', name: '💷 Großverdiener', desc: 'Erreiche 500.000 Vermögen.', reward: 20000, test: (c) => c.net >= 500000 },
-  { id: 'rich_5m', name: '🏦 Multimillionär', desc: 'Erreiche 5.000.000 Vermögen.', reward: 200000, test: (c) => c.net >= 5000000 },
-  { id: 'rich_10m', name: '🌍 Tycoon', desc: 'Erreiche 10.000.000 Vermögen.', reward: 500000, test: (c) => c.net >= 10000000 },
+  // Haus-Meilensteine
+  { id: 'first_house',    name: '🏠 Eigenheim',         desc: 'Kaufe dein erstes Haus.',        reward: 1000,   test: (c) => c.houses >= 1 },
+  { id: 'five_houses',    name: '🏘️ Immobilienhai',     desc: 'Besitze 5 Häuser.',              reward: 5000,   test: (c) => c.houses >= 5 },
+  { id: 'ten_houses',     name: '🏙️ Bauunternehmer',    desc: 'Besitze 10 Häuser.',             reward: 15000,  test: (c) => c.houses >= 10 },
+  { id: 'twenty_houses',  name: '🌆 Immobilien-Mogul',  desc: 'Besitze 20 Häuser.',             reward: 40000,  test: (c) => c.houses >= 20 },
+  { id: 'fifty_houses',   name: '🌇 Stadtentwickler',   desc: 'Besitze 50 Häuser.',             reward: 150000, test: (c) => c.houses >= 50 },
+  { id: 'all_houses',     name: '🗺️ Monopoly-König',    desc: 'Besitze alle 130 Häuser.',       reward: 999999, test: (c) => c.houses >= 130 },
+  // Vermögens-Meilensteine
+  { id: 'rich_50k',       name: '💰 Wohlhabend',        desc: 'Erreiche 50.000 Vermögen.',      reward: 2500,   test: (c) => c.net >= 50000 },
+  { id: 'rich_100k',      name: '💎 Reich',              desc: 'Erreiche 100.000 Vermögen.',     reward: 5000,   test: (c) => c.net >= 100000 },
+  { id: 'rich_500k',      name: '💷 Großverdiener',      desc: 'Erreiche 500.000 Vermögen.',     reward: 20000,  test: (c) => c.net >= 500000 },
+  { id: 'rich_1m',        name: '👑 Millionär',          desc: 'Erreiche 1.000.000 Vermögen.',   reward: 50000,  test: (c) => c.net >= 1000000 },
+  { id: 'rich_5m',        name: '🏦 Multimillionär',     desc: 'Erreiche 5.000.000 Vermögen.',   reward: 200000, test: (c) => c.net >= 5000000 },
+  { id: 'rich_10m',       name: '🌍 Tycoon',             desc: 'Erreiche 10.000.000 Vermögen.',  reward: 500000, test: (c) => c.net >= 10000000 },
+  { id: 'rich_50m',       name: '🚀 Weltraumreich',      desc: 'Erreiche 50.000.000 Vermögen.',  reward: 2000000, test: (c) => c.net >= 50000000 },
+  // Bargeld-Meilensteine
+  { id: 'cash_25k',       name: '🤑 Bargeld-König',      desc: 'Halte 25.000 Bargeld.',          reward: 2000,   test: (c) => c.cash >= 25000 },
+  { id: 'cash_100k',      name: '💵 Geldspeicher',       desc: 'Halte 100.000 Bargeld.',         reward: 8000,   test: (c) => c.cash >= 100000 },
+  { id: 'cash_500k',      name: '💴 Schatzmeister',      desc: 'Halte 500.000 Bargeld.',         reward: 30000,  test: (c) => c.cash >= 500000 },
+  // Bank-Meilensteine
+  { id: 'bank_100k',      name: '🏦 Banker',             desc: 'Lege 100.000 auf die Bank.',     reward: 5000,   test: (c) => c.bankAmount >= 100000 },
+  { id: 'bank_1m',        name: '🏛️ Investmenthai',      desc: 'Lege 1.000.000 auf die Bank.',   reward: 25000,  test: (c) => c.bankAmount >= 1000000 },
+  // Level-Meilensteine
+  { id: 'level_10',       name: '⭐ Aufsteiger',          desc: 'Erreiche Level 10.',             reward: 5000,   test: (c) => c.level >= 10 },
+  { id: 'level_25',       name: '🌟 Erfahrener',          desc: 'Erreiche Level 25.',             reward: 15000,  test: (c) => c.level >= 25 },
+  { id: 'level_50',       name: '💫 Meister',             desc: 'Erreiche Level 50.',             reward: 50000,  test: (c) => c.level >= 50 },
+  // Prestige
+  { id: 'prestige_1',     name: '✨ Prestige I',          desc: 'Führe deinen ersten Prestige durch.', reward: 100000, test: (c) => c.prestige >= 1 },
+  { id: 'prestige_3',     name: '🌠 Prestige III',        desc: 'Erreiche Prestige 3.',           reward: 300000, test: (c) => c.prestige >= 3 },
+  // Sozial
+  { id: 'generous',       name: '💝 Großzügig',           desc: 'Überweise insgesamt 100.000 Coins.', reward: 5000, test: (c) => c.totalGiven >= 100000 },
+  { id: 'whale',          name: '🐋 Wal',                 desc: 'Gib insgesamt 1.000.000 Coins aus.', reward: 25000, test: (c) => c.totalSpent >= 1000000 },
 ];
 
 // ====================================================================
@@ -291,14 +311,145 @@ class EconomyManager {
   async checkAchievements(userId) {
     const net = await this.getNetWorth(userId);
     const inv = await this.getInventory(userId);
+    const levelInfo = await this.getLevelInfo(userId);
+    const bankAmount = await this.getBank(userId);
+    const totalGiven = await this.getMeta(userId, 'total_given');
+    const totalSpent = await this.getMeta(userId, 'total_spent');
+    const prestige = await this.getMeta(userId, 'prestige');
     const already = new Set((await this.getAchievements(userId)).map((a) => a.id));
-    const ctx = { net: net.total, cash: net.cash, houses: inv.length };
+    const ctx = {
+      net: net.total, cash: net.cash, houses: inv.length,
+      bankAmount, level: levelInfo.level, prestige, totalGiven, totalSpent,
+    };
     const newly = [];
     for (const a of ACHIEVEMENTS) {
       if (already.has(a.id)) continue;
       if (a.test(ctx)) { const r = await this.unlock(userId, a.id); if (r.ok) newly.push(r); }
     }
     return newly;
+  }
+
+  // ================================================================
+  // Prestige-System – ab Level 50 zurücksetzen für doppelten XP-Bonus
+  // ================================================================
+  async prestige(userId) {
+    const level = await this.getLevelInfo(userId);
+    if (level.level < 50) return { ok: false, reason: `Du brauchst Level 50 für Prestige. Du bist Level ${level.level}.` };
+    const p = await this.getMeta(userId, 'prestige');
+    const newP = p + 1;
+    // XP zurücksetzen, Prestige erhöhen
+    await this.setMeta(userId, 'xp', 0);
+    await this.setMeta(userId, 'prestige', newP);
+    // Belohnung: 100.000 × Prestige-Stufe
+    const reward = 100000 * newP;
+    const balance = await this.addBalance(userId, reward);
+    return { ok: true, prestige: newP, reward, balance };
+  }
+
+  async getPrestige(userId) {
+    return this.getMeta(userId, 'prestige');
+  }
+
+  // ================================================================
+  // Statistik-Tracking
+  // ================================================================
+  async addStat(userId, key, amount = 1) {
+    const cur = await this.getMeta(userId, key);
+    await this.setMeta(userId, key, cur + amount);
+    return cur + amount;
+  }
+
+  async getStats(userId) {
+    const keys = ['total_games', 'total_wins', 'total_earned', 'total_spent', 'total_given',
+                  'total_robbed', 'total_daily', 'total_work', 'total_houses_bought'];
+    const vals = await Promise.all(keys.map((k) => this.getMeta(userId, k)));
+    return Object.fromEntries(keys.map((k, i) => [k, vals[i]]));
+  }
+
+  // ================================================================
+  // Handels-System – Spieler bieten Häuser zum Tausch an
+  // ================================================================
+  async createTradeOffer(fromId, houseId, askingPrice) {
+    askingPrice = Math.floor(askingPrice);
+    if (askingPrice <= 0) return { ok: false, reason: 'Preis muss positiv sein.' };
+    const house = HOUSES.find((h) => h.id === houseId);
+    if (!house) return { ok: false, reason: 'Haus nicht gefunden.' };
+    const owned = await this.db.execute({ sql: 'SELECT 1 FROM owned_houses WHERE user_id=? AND house_id=?', args: [fromId, houseId] });
+    if (!owned.rows.length) return { ok: false, reason: 'Du besitzt dieses Haus nicht.' };
+    await this.db.execute({
+      sql: 'INSERT OR REPLACE INTO trade_offers(seller_id,house_id,asking_price,created_at) VALUES(?,?,?,?)',
+      args: [fromId, houseId, askingPrice, Date.now()],
+    });
+    return { ok: true, house, askingPrice };
+  }
+
+  async acceptTradeOffer(buyerId, houseId) {
+    const rs = await this.db.execute({ sql: 'SELECT * FROM trade_offers WHERE house_id=?', args: [houseId] });
+    if (!rs.rows.length) return { ok: false, reason: 'Kein Angebot für dieses Haus.' };
+    const offer = rs.rows[0];
+    if (offer.seller_id === buyerId) return { ok: false, reason: 'Du kannst dein eigenes Angebot nicht kaufen.' };
+    const remaining = await this.deductBalance(buyerId, Number(offer.asking_price));
+    if (remaining === null) return { ok: false, reason: 'Nicht genug Coins.' };
+    const house = HOUSES.find((h) => h.id === houseId);
+    // Haus übertragen
+    await this.db.execute({ sql: 'DELETE FROM owned_houses WHERE user_id=? AND house_id=?', args: [offer.seller_id, houseId] });
+    await this.db.execute({ sql: 'INSERT OR IGNORE INTO owned_houses(user_id,house_id,bought_at) VALUES(?,?,?)', args: [buyerId, houseId, Date.now()] });
+    await this.addBalance(offer.seller_id, Number(offer.asking_price));
+    await this.db.execute({ sql: 'DELETE FROM trade_offers WHERE house_id=?', args: [houseId] });
+    return { ok: true, house, price: Number(offer.asking_price), sellerId: offer.seller_id, buyerBalance: remaining };
+  }
+
+  async listTradeOffers() {
+    const rs = await this.db.execute('SELECT * FROM trade_offers ORDER BY created_at DESC LIMIT 20');
+    return rs.rows.map((r) => ({
+      sellerId: r.seller_id,
+      house: HOUSES.find((h) => h.id === r.house_id),
+      askingPrice: Number(r.asking_price),
+      createdAt: Number(r.created_at),
+    })).filter((o) => o.house);
+  }
+
+  async cancelTradeOffer(userId, houseId) {
+    const rs = await this.db.execute({ sql: 'SELECT 1 FROM trade_offers WHERE seller_id=? AND house_id=?', args: [userId, houseId] });
+    if (!rs.rows.length) return { ok: false, reason: 'Kein Angebot von dir für dieses Haus.' };
+    await this.db.execute({ sql: 'DELETE FROM trade_offers WHERE seller_id=? AND house_id=?', args: [userId, houseId] });
+    return { ok: true };
+  }
+
+  // ================================================================
+  // Saisonale Boni – Datum-basierte Sonder-Events
+  // ================================================================
+  static currentSeason() {
+    const d = new Date();
+    const m = d.getMonth() + 1, day = d.getDate();
+    if (m === 12 && day >= 24 && day <= 26) return { id: 'xmas', name: '🎄 Weihnachten', bonus: 3 };
+    if (m === 1 && day === 1) return { id: 'newyear', name: '🎆 Neujahr', bonus: 5 };
+    if (m === 10 && day === 31) return { id: 'halloween', name: '🎃 Halloween', bonus: 2 };
+    if (m === 2 && day === 14) return { id: 'valentine', name: '💝 Valentinstag', bonus: 2 };
+    if (m === 4 && day === 1) return { id: 'april', name: '🃏 April', bonus: 1.5 };
+    return null;
+  }
+
+  async claimSeasonalBonus(userId) {
+    const season = EconomyManager.currentSeason();
+    if (!season) return { ok: false, reason: 'Heute gibt es kein saisonales Event.' };
+    const key = `season_${season.id}_${new Date().getFullYear()}`;
+    const already = await this.getMeta(userId, key);
+    if (already) return { ok: false, reason: `Du hast den ${season.name}-Bonus schon abgeholt.` };
+    await this.setMeta(userId, key, 1);
+    const base = 1000;
+    const reward = Math.floor(base * season.bonus);
+    const balance = await this.addBalance(userId, reward);
+    return { ok: true, season, reward, balance };
+  }
+
+  // ================================================================
+  // Erweiterte init() mit neuen Tabellen
+  // ================================================================
+  async initExtra() {
+    await this.db.batch([
+      'CREATE TABLE IF NOT EXISTS trade_offers (seller_id TEXT NOT NULL, house_id TEXT NOT NULL, asking_price INTEGER NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (seller_id, house_id))',
+    ], 'write');
   }
 
   // ================================================================
@@ -366,10 +517,26 @@ class EconomyManager {
       { t: 'Du hast Pfandflaschen gesammelt', min: 50, max: 250 },
       { t: 'Du hast als DJ aufgelegt', min: 200, max: 600 },
       { t: 'Du hast Nachhilfe gegeben', min: 250, max: 500 },
+      { t: 'Du hast Pakete ausgeliefert', min: 180, max: 450 },
+      { t: 'Du hast als Barista gearbeitet', min: 120, max: 380 },
+      { t: 'Du hast Fotos für Instagram bearbeitet', min: 200, max: 800 },
+      { t: 'Du hast beim Supermarkt ausgeholfen', min: 100, max: 350 },
+      { t: 'Du hast ein Haus gestrichen', min: 300, max: 900 },
+      { t: 'Du hast Musik produziert', min: 150, max: 1200 },
+      { t: 'Du hast als Tierarzthelfer gejobbt', min: 250, max: 550 },
+      { t: 'Du hast Autos gewaschen', min: 80, max: 300 },
+      { t: 'Du hast ein YouTube-Video hochgeladen', min: 50, max: 2000 },
+      { t: 'Du hast Aktien-Tipps gegeben (illegal?)', min: 100, max: 1500 },
+      { t: 'Du hast auf einem Festival gearbeitet', min: 300, max: 1000 },
+      { t: 'Du hast als Fotograf gearbeitet', min: 200, max: 800 },
+      { t: 'Du hast Websites gebaut', min: 400, max: 1200 },
+      { t: 'Du hast als Sicherheitsmitarbeiter gejobbt', min: 200, max: 500 },
     ];
     const job = jobs[Math.floor(Math.random() * jobs.length)];
     const earned = job.min + Math.floor(Math.random() * (job.max - job.min + 1));
     await this.setMeta(userId, 'last_work', now);
+    await this.addStat(userId, 'total_work');
+    await this.addStat(userId, 'total_earned', earned);
     const balance = await this.addBalance(userId, earned);
     return { ok: true, text: job.t, earned, balance };
   }
@@ -611,11 +778,631 @@ function marketPage(page = 0, tierFilter = null) {
     break;
   }
 
+  // ---- Prestige ----
+  case 'prestige': {
+    if (args[0] === 'info') {
+      const p = await economy.getPrestige(senderJid);
+      const l = await economy.getLevelInfo(senderJid);
+      await reply(`✨ *Prestige-Info*\nDein Prestige: ${p} ⭐\nLevel: ${l.level} (brauchst Level 50)\nBelohnung: ${formatBalance(100000 * (p + 1))} + Doppel-XP-Bonus`);
+      break;
+    }
+    const r = await economy.prestige(senderJid);
+    if (!r.ok) { await reply(`❌ ${r.reason}`); break; }
+    await reply(`✨ *PRESTIGE ${r.prestige}!* XP zurückgesetzt.\nBelohnung: ${formatBalance(r.reward)}\nDu erhältst jetzt doppelte XP!\nKontostand: ${formatBalance(r.balance)}`);
+    break;
+  }
+
+  // ---- Statistiken ----
+  case 'stats': case 'statistik': {
+    const s = await economy.getStats(senderJid);
+    const l = await economy.getLevelInfo(senderJid);
+    const p = await economy.getPrestige(senderJid);
+    await reply(`📊 *Deine Statistik*\n\n⭐ Level: ${l.level} | Prestige: ${p}\n🎮 Spiele: ${s.total_games}\n🏆 Gewonnen: ${s.total_wins}\n💸 Verdient: ${formatBalance(s.total_earned)}\n💰 Ausgegeben: ${formatBalance(s.total_spent)}\n💝 Verschenkt: ${formatBalance(s.total_given)}\n🦹 Geraubt: ${formatBalance(s.total_robbed)}\n🏡 Häuser gekauft: ${s.total_houses_bought}`);
+    break;
+  }
+
+  // ---- Handel ----
+  case 'anbieten': case 'handelsangebot': {
+    const houseId = (args[0] || '').toLowerCase();
+    const price = Number(args[1]);
+    if (!houseId || !price) { await reply(`Nutzung: ${COMMAND_PREFIX}anbieten <Haus-ID> <Preis>`); break; }
+    const r = await economy.createTradeOffer(senderJid, houseId, price);
+    if (!r.ok) { await reply(`❌ ${r.reason}`); break; }
+    await reply(`🤝 *${r.house.name}* wird zum Handel angeboten für ${formatBalance(r.askingPrice)}.\nAndere können es mit ${COMMAND_PREFIX}handel ${houseId} kaufen.`);
+    break;
+  }
+  case 'handel': case 'kaufen-handel': {
+    const houseId = (args[0] || '').toLowerCase();
+    if (!houseId) { await reply(`Nutzung: ${COMMAND_PREFIX}handel <Haus-ID>`); break; }
+    const r = await economy.acceptTradeOffer(senderJid, houseId);
+    if (!r.ok) { await reply(`❌ ${r.reason}`); break; }
+    await sock.sendMessage(jid, { text: `🤝 *${r.house.name}* erworben für ${formatBalance(r.price)} von @${r.sellerId.split('@')[0]}!\nKontostand: ${formatBalance(r.buyerBalance)}`, mentions: [r.sellerId] });
+    break;
+  }
+  case 'handelsmarkt': case 'trade': {
+    const offers = await economy.listTradeOffers();
+    if (!offers.length) { await reply('🤝 Kein Angebot auf dem Handelsmarkt.'); break; }
+    const lines = offers.slice(0, 10).map((o) => `▸ [${o.house.id}] ${o.house.name} – ${formatBalance(o.askingPrice)}\nVerkäufer: @${o.sellerId.split('@')[0]}`);
+    await reply(`🏪 *Handelsmarkt*\n\n${lines.join('\n\n')}\nKaufen mit: ${COMMAND_PREFIX}handel <ID>`);
+    break;
+  }
+  case 'handelabbrechen': {
+    const houseId = (args[0] || '').toLowerCase();
+    if (!houseId) { await reply(`Nutzung: ${COMMAND_PREFIX}handelabbrechen <Haus-ID>`); break; }
+    const r = await economy.cancelTradeOffer(senderJid, houseId);
+    if (!r.ok) { await reply(`❌ ${r.reason}`); break; }
+    await reply('✅ Handelsangebot zurückgezogen.');
+    break;
+  }
+
+  // ---- Saisonaler Bonus ----
+  case 'saisonbonus': case 'event-bonus': {
+    const r = await economy.claimSeasonalBonus(senderJid);
+    if (!r.ok) { await reply(`❌ ${r.reason}`); break; }
+    await reply(`${r.season.name} Bonus! +${formatBalance(r.reward)}\nKontostand: ${formatBalance(r.balance)}`);
+    break;
+  }
+
 */
+
+// ====================================================================
+// Investitions-System – Spieler kaufen "Aktien" und warten auf Rendite
+// ====================================================================
+const STOCKS = [
+  { id: 'tech', name: '💻 TechCorp', minPrice: 500, maxPrice: 2000, volatility: 0.3, baseReturn: 0.08 },
+  { id: 'food', name: '🍔 FastFood AG', minPrice: 200, maxPrice: 800, volatility: 0.15, baseReturn: 0.05 },
+  { id: 'energy', name: '⚡ EnergyPlus', minPrice: 300, maxPrice: 1500, volatility: 0.25, baseReturn: 0.07 },
+  { id: 'crypto', name: '🪙 CryptoCoin', minPrice: 100, maxPrice: 5000, volatility: 0.6, baseReturn: 0.12 },
+  { id: 'realty', name: '🏗️ Immo GmbH', minPrice: 1000, maxPrice: 3000, volatility: 0.1, baseReturn: 0.04 },
+  { id: 'health', name: '💊 MedPharm', minPrice: 400, maxPrice: 1200, volatility: 0.2, baseReturn: 0.06 },
+  { id: 'auto', name: '🚗 AutoWerk', minPrice: 600, maxPrice: 2500, volatility: 0.22, baseReturn: 0.065 },
+  { id: 'space', name: '🚀 SpaceVenture', minPrice: 800, maxPrice: 8000, volatility: 0.7, baseReturn: 0.15 },
+];
+
+// Tages-Seed für Aktienkurse (deterministisch pro Tag)
+function stockDaySeed() {
+  const d = new Date();
+  return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+}
+
+// Seeded PRNG (Mulberry32)
+function seededRng(seed) {
+  let s = seed;
+  return () => {
+    s |= 0; s = s + 0x6D2B79F5 | 0;
+    let t = Math.imul(s ^ s >>> 15, 1 | s);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+function getStockPrice(stock) {
+  const rng = seededRng(stockDaySeed() + stock.id.charCodeAt(0));
+  const t = rng();
+  return Math.floor(stock.minPrice + t * (stock.maxPrice - stock.minPrice));
+}
+
+// ====================================================================
+// Tages-Challenge – zufällige Aufgabe, einmal pro Tag einlösbar
+// ====================================================================
+const DAILY_CHALLENGES = [
+  { id: 'dc_slots', desc: 'Spiele 5x Slots', event: 'slots', target: 5, reward: 500 },
+  { id: 'dc_work', desc: 'Arbeite 3x', event: 'work', target: 3, reward: 400 },
+  { id: 'dc_win', desc: 'Gewinne 3 Casinospiele', event: 'win', target: 3, reward: 600 },
+  { id: 'dc_roulette', desc: 'Spiele 3x Roulette', event: 'roulette', target: 3, reward: 450 },
+  { id: 'dc_blackjack', desc: 'Spiele 4x Blackjack', event: 'blackjack', target: 4, reward: 500 },
+  { id: 'dc_daily', desc: 'Claime den Daily-Bonus', event: 'daily', target: 1, reward: 300 },
+  { id: 'dc_spend', desc: 'Gib 1.000 Coins aus', event: 'spend', target: 1000, reward: 350 },
+  { id: 'dc_earn', desc: 'Verdiene 2.000 Coins', event: 'earn', target: 2000, reward: 400 },
+  { id: 'dc_poker', desc: 'Spiele 3x Poker', event: 'poker', target: 3, reward: 700 },
+  { id: 'dc_keno', desc: 'Spiele 5x Keno', event: 'keno', target: 5, reward: 450 },
+  { id: 'dc_horse', desc: 'Setze auf 3 Pferderennen', event: 'horserace', target: 3, reward: 500 },
+  { id: 'dc_crash', desc: 'Spiele 4x Crash', event: 'crash', target: 4, reward: 550 },
+];
+
+function todaysChallenge() {
+  const seed = stockDaySeed();
+  const rng = seededRng(seed + 999);
+  const idx = Math.floor(rng() * DAILY_CHALLENGES.length);
+  return DAILY_CHALLENGES[idx];
+}
+
+// ====================================================================
+// Schatz-System – verborgene Schätze (zufällige Fundorte, einmal täglich)
+// ====================================================================
+const TREASURE_SPOTS = [
+  '🏝️ einer einsamen Insel', '🌋 dem Krater eines Vulkans', '🏔️ einem Berggipfel',
+  '🏚️ einer verlassenen Villa', '🌊 dem Meeresgrund', '🗺️ einem alten Kartenarchiv',
+  '⛏️ einer aufgelassenen Mine', '🏜️ der Wüste', '🌲 dem alten Wald', '🏰 einem Burgkeller',
+];
+
+// ====================================================================
+// Passive-Income-Tracking – Gesamtrendite des Spielers berechnen
+// ====================================================================
+function calcPassiveIncome(houses, items) {
+  // Basis: Mieteinnahmen
+  let rental = 0;
+  for (const h of houses) {
+    const tier = h.tier || 1;
+    rental += tier * 50; // 50/100/150/200/250 pro Stufe
+  }
+  // Item-Boni werden in ShopManager.getEffects() berechnet
+  return rental;
+}
+
+// ====================================================================
+// Reichtums-Klassen – Titel basierend auf Gesamtvermögen
+// ====================================================================
+const WEALTH_TIERS = [
+  { label: '🪨 Mittellos', threshold: 0 },
+  { label: '🥉 Arbeiter', threshold: 1000 },
+  { label: '🥈 Kaufmann', threshold: 10000 },
+  { label: '🥇 Händler', threshold: 50000 },
+  { label: '💎 Unternehmer', threshold: 200000 },
+  { label: '👑 Millionär', threshold: 1000000 },
+  { label: '🌟 Oligarch', threshold: 5000000 },
+  { label: '🚀 Magnit', threshold: 20000000 },
+];
+
+function getWealthTier(netWorth) {
+  let tier = WEALTH_TIERS[0];
+  for (const t of WEALTH_TIERS) {
+    if (netWorth >= t.threshold) tier = t;
+  }
+  return tier;
+}
+
+// ====================================================================
+// Steuer-System – automatische Steuer bei Überweisungen > 10k
+// ====================================================================
+const TAX_THRESHOLD = 10000;
+const TAX_RATE = 0.05; // 5 %
+
+function calcTax(amount) {
+  if (amount <= TAX_THRESHOLD) return 0;
+  return Math.floor(amount * TAX_RATE);
+}
+
+// ====================================================================
+// Lotterie-Ziehung – einmal täglich (manuell oder via Cron auslösen)
+// ====================================================================
+async function drawLottery(eco) {
+  const seed = EconomyManager.lotterySeed();
+  const rs = await eco.db.execute({ sql: 'SELECT user_id, tickets FROM lottery WHERE draw_seed=?', args: [seed] });
+  if (!rs.rows.length) return { ok: false, reason: 'Keine Teilnehmer.' };
+  const pool = [];
+  for (const row of rs.rows) {
+    const count = Number(row.tickets);
+    for (let i = 0; i < count; i++) pool.push(row.user_id);
+  }
+  const winnerId = pool[Math.floor(Math.random() * pool.length)];
+  const pot = pool.length * LOTTERY_TICKET_PRICE;
+  await eco.addBalance(winnerId, pot);
+  return { ok: true, winnerId, pot, participants: rs.rows.length };
+}
+
+// ====================================================================
+// Rang-Belohnungen – wöchentliche Auszahlung für Top-10-Spieler
+// ====================================================================
+const RANK_REWARDS = [500000, 200000, 100000, 50000, 30000, 20000, 15000, 10000, 7000, 5000];
+
+async function distributeRankRewards(eco) {
+  const top = await eco.getLeaderboard(10);
+  const results = [];
+  for (let i = 0; i < top.length; i++) {
+    const reward = RANK_REWARDS[i] || 0;
+    if (reward > 0) {
+      await eco.addBalance(top[i].userId, reward);
+      results.push({ userId: top[i].userId, rank: i + 1, reward });
+    }
+  }
+  return results;
+}
+
+// ====================================================================
+// Inflations-Mechanismus – Häuserpreise steigen leicht mit der Zeit
+// ====================================================================
+function inflatedPrice(basePrice, monthsSinceLaunch) {
+  const rate = 0.02; // 2 % pro Monat
+  return Math.floor(basePrice * Math.pow(1 + rate, Math.min(monthsSinceLaunch, 24)));
+}
+
+// ====================================================================
+// Wirtschaftsbericht – tägliche Zusammenfassung für den Chat
+// ====================================================================
+async function generateEconomyReport(eco) {
+  const now = Date.now();
+  const yesterday = now - 24 * 60 * 60 * 1000;
+  // Aktive Spieler der letzten 24h (grobe Schätzung via player_meta)
+  const rs = await eco.db.execute({ sql: 'SELECT COUNT(*) as c FROM player_meta WHERE key=? AND value>?', args: ['last_work', yesterday] });
+  const activeWorkers = Number(rs.rows[0]?.c || 0);
+  const top = await eco.getLeaderboard(3);
+  const topStr = top.map((p, i) => `${['🥇','🥈','🥉'][i]} @${p.userId.split('@')[0]}: ${formatBalance(p.balance)}`).join('\n');
+  const pot = await eco.getLotteryPot();
+  return {
+    activeWorkers,
+    topStr,
+    lotteryPot: pot.pot,
+    lotteryCandidates: pot.players,
+  };
+}
+
+// ====================================================================
+// Geldhahn-Logik – verhindert zu viele Coins im Umlauf (Sink-Mechanismen)
+// Sinks: Käufe, Lotterie, Craft-Kosten, Verzauberungen, Steuern, Clan-Gründung
+// ====================================================================
+const ECONOMIC_SINKS = [
+  { name: 'Hauskauf', estimatedDaily: 50000 },
+  { name: 'Item-Kauf', estimatedDaily: 30000 },
+  { name: 'Lotterie-Einsätze', estimatedDaily: 20000 },
+  { name: 'Verzauberungen', estimatedDaily: 10000 },
+  { name: 'Clan-Gründung', estimatedDaily: 5000 },
+  { name: 'Steuer (>10k-Überweisungen)', estimatedDaily: 3000 },
+];
+
+// Gibt eine Zusammenfassung aller Geld-Quellen & Senken zurück (für Admin-Dashboard)
+function economyBalance() {
+  const sources = [
+    { name: 'Tagesbonus (Streak)', perPlayer: 500 },
+    { name: 'Arbeit (30min CD)', perPlayer: 400 },
+    { name: 'Mieteinnahmen', perPlayer: 200 },
+    { name: 'Passivincome (Items)', perPlayer: 500 },
+    { name: 'Casino-Gewinne (netto)', perPlayer: -100 },
+  ];
+  return { sources, sinks: ECONOMIC_SINKS };
+}
+
+// ====================================================================
+// ADDITIONAL ECONOMY COMMANDS (Vorlage für index.js)
+// ====================================================================
+/*
+
+  // ---- Aktien ----
+  case 'aktien': case 'stocks': {
+    const sub = (args[0] || '').toLowerCase();
+    if (sub === 'kaufen') {
+      const stockId = (args[1] || '').toLowerCase();
+      const anzahl = Math.max(1, Number(args[2]) || 1);
+      const stock = STOCKS.find((s) => s.id === stockId);
+      if (!stock) { await reply(`Unbekannte Aktie. IDs: ${STOCKS.map((s) => s.id).join(', ')}`); break; }
+      const price = getStockPrice(stock);
+      const total = price * anzahl;
+      const r = await economy.deductBalance(senderJid, total);
+      if (r === null) { await reply(`❌ Nicht genug Coins. Kurs: ${formatBalance(price)}/Aktie, gesamt: ${formatBalance(total)}`); break; }
+      // Speichere Kauf in player_meta
+      const key = `stock_${stock.id}`;
+      const have = await economy.getMeta(senderJid, key);
+      await economy.setMeta(senderJid, key, have + anzahl);
+      const costKey = `stockcost_${stock.id}`;
+      const haveCost = await economy.getMeta(senderJid, costKey);
+      await economy.setMeta(senderJid, costKey, haveCost + total);
+      await reply(`📈 ${anzahl}x ${stock.name} für je ${formatBalance(price)} gekauft. Gesamt: ${formatBalance(total)}`);
+      break;
+    }
+    if (sub === 'verkaufen') {
+      const stockId = (args[1] || '').toLowerCase();
+      const anzahl = Math.max(1, Number(args[2]) || 1);
+      const stock = STOCKS.find((s) => s.id === stockId);
+      if (!stock) { await reply(`Unbekannte Aktie.`); break; }
+      const key = `stock_${stock.id}`;
+      const have = await economy.getMeta(senderJid, key);
+      if (have < anzahl) { await reply(`Du hast nur ${have} Aktien von ${stock.name}.`); break; }
+      const price = getStockPrice(stock);
+      const total = price * anzahl;
+      await economy.setMeta(senderJid, key, have - anzahl);
+      const balance = await economy.addBalance(senderJid, total);
+      await reply(`📉 ${anzahl}x ${stock.name} für je ${formatBalance(price)} verkauft. +${formatBalance(total)}\nKontostand: ${formatBalance(balance)}`);
+      break;
+    }
+    if (sub === 'depot') {
+      const lines = [];
+      for (const stock of STOCKS) {
+        const key = `stock_${stock.id}`;
+        const have = await economy.getMeta(senderJid, key);
+        if (have > 0) {
+          const price = getStockPrice(stock);
+          lines.push(`${stock.name}: ${have} Stk. × ${formatBalance(price)} = ${formatBalance(have * price)}`);
+        }
+      }
+      if (!lines.length) { await reply('Du besitzt keine Aktien. Schau dir den !aktien markt an.'); break; }
+      await reply(`📊 *Dein Depot*\n\n${lines.join('\n')}`);
+      break;
+    }
+    // Default: Marktübersicht
+    const mLines = STOCKS.map((s) => {
+      const p = getStockPrice(s);
+      const trend = s.volatility > 0.4 ? '🔴 Risiko' : s.volatility > 0.2 ? '🟡 Mittel' : '🟢 Stabil';
+      return `${s.name} [${s.id}]\nKurs: ${formatBalance(p)} | ${trend}`;
+    });
+    await reply(`📈 *Aktienmarkt* (Kurse gültig heute)\n\n${mLines.join('\n\n')}\nKaufen: ${COMMAND_PREFIX}aktien kaufen <id> <anzahl>\nVerkaufen: ${COMMAND_PREFIX}aktien verkaufen <id> <anzahl>\nDepot: ${COMMAND_PREFIX}aktien depot`);
+    break;
+  }
+
+  // ---- Tages-Challenge ----
+  case 'challenge': case 'aufgabe': {
+    const ch = todaysChallenge();
+    const key = `challenge_progress_${ch.id}_${EconomyManager.lotterySeed()}`;
+    const progress = await economy.getMeta(senderJid, key);
+    const claimed = await economy.getMeta(senderJid, `challenge_claimed_${EconomyManager.lotterySeed()}`);
+    if (claimed) { await reply(`✅ Tages-Challenge bereits abgeholt!\nMorgen gibt es eine neue.`); break; }
+    const done = progress >= ch.target;
+    await reply(`🎯 *Tages-Challenge*\n\n${ch.desc}\nFortschritt: ${Math.min(progress, ch.target)}/${ch.target}\nBelohnung: ${formatBalance(ch.reward)}\n\n${done ? `Tippe ${COMMAND_PREFIX}challenge claim zum Einlösen!` : 'Noch nicht fertig.'}`);
+    break;
+  }
+  case 'challenge-claim': {
+    const ch = todaysChallenge();
+    const key = `challenge_progress_${ch.id}_${EconomyManager.lotterySeed()}`;
+    const progress = await economy.getMeta(senderJid, key);
+    const claimedKey = `challenge_claimed_${EconomyManager.lotterySeed()}`;
+    if (await economy.getMeta(senderJid, claimedKey)) { await reply('Du hast die Challenge heute schon eingelöst.'); break; }
+    if (progress < ch.target) { await reply(`❌ Noch nicht fertig! ${progress}/${ch.target}`); break; }
+    await economy.setMeta(senderJid, claimedKey, 1);
+    const balance = await economy.addBalance(senderJid, ch.reward);
+    await reply(`🎉 Challenge abgeschlossen! +${formatBalance(ch.reward)}\nKontostand: ${formatBalance(balance)}`);
+    break;
+  }
+
+  // ---- Reichtums-Klasse ----
+  case 'titel': case 'klasse': {
+    const b = await economy.getBalance(senderJid);
+    const h = await economy.getHouses(senderJid);
+    const houseWorth = h.reduce((s, hs) => s + (HOUSES.find((hd) => hd.id === hs.houseId)?.price || 0), 0);
+    const net = b + houseWorth;
+    const tier = getWealthTier(net);
+    await reply(`${tier.label}\nGesamtvermögen: ${formatBalance(net)}`);
+    break;
+  }
+
+  // ---- Schatz finden ----
+  case 'suchen': case 'erkunden': {
+    const last = await economy.getMeta(senderJid, 'last_explore');
+    const now = Date.now();
+    const CD = 8 * 60 * 60 * 1000; // 8 Stunden
+    if (now - last < CD) { await reply(`⏳ Du bist noch erschöpft vom letzten Ausflug. Warte noch ${fmtWait(CD - (now - last))}.`); break; }
+    await economy.setMeta(senderJid, 'last_explore', now);
+    const chance = Math.random();
+    const spot = TREASURE_SPOTS[Math.floor(Math.random() * TREASURE_SPOTS.length)];
+    if (chance < 0.05) {
+      const reward = 5000 + Math.floor(Math.random() * 15000);
+      const balance = await economy.addBalance(senderJid, reward);
+      await reply(`🗺️ Du erkundest ${spot} und findest einen versteckten Schatz!\n💰 *${formatBalance(reward)}* gefunden!\nKontostand: ${formatBalance(balance)}`);
+    } else if (chance < 0.35) {
+      const reward = 200 + Math.floor(Math.random() * 800);
+      const balance = await economy.addBalance(senderJid, reward);
+      await reply(`🗺️ Du erkundest ${spot}...\nDu findest etwas Kleingeld: ${formatBalance(reward)}\nKontostand: ${formatBalance(balance)}`);
+    } else {
+      await reply(`🗺️ Du erkundest ${spot}... und findest – nichts. Besser nächstes Mal!`);
+    }
+    break;
+  }
+
+  // ---- Überweisung mit Steuer ----
+  case 'pay': case 'überweisen': {
+    const target = getTargetJid(msg);
+    const amount = Number(args.find((a) => /^\d+$/.test(a)));
+    if (!target || !amount) { await reply(`Nutzung: ${COMMAND_PREFIX}pay @person <Betrag>`); break; }
+    const tax = calcTax(amount);
+    const r = await economy.pay(senderJid, target, amount);
+    if (!r.ok) { await reply(`❌ ${r.reason}`); break; }
+    if (tax > 0) {
+      // Steuer geht in den Lotterie-Topf
+      await economy.addBalance('jackpot_system', tax);
+      await sock.sendMessage(jid, {
+        text: `💸 Du hast @${target.split('@')[0]} ${formatBalance(amount)} überwiesen.\n🏛️ Steuer (5%): ${formatBalance(tax)} → Jackpot`,
+        mentions: [target],
+      }, { quoted: msg });
+    } else {
+      await sock.sendMessage(jid, { text: `💸 Du hast @${target.split('@')[0]} ${formatBalance(amount)} überwiesen.`, mentions: [target] }, { quoted: msg });
+    }
+    break;
+  }
+
+  // ---- Vermögensstatus ----
+  case 'networth': case 'vermögen': {
+    const b = await economy.getBalance(senderJid);
+    const houses = await economy.getHouses(senderJid);
+    const houseWorth = houses.reduce((s, h) => s + (HOUSES.find((hd) => hd.id === h.houseId)?.price || 0), 0);
+    const stockWorth = (await Promise.all(STOCKS.map(async (s) => {
+      const held = await economy.getMeta(senderJid, `stock_${s.id}`);
+      return held * getStockPrice(s);
+    }))).reduce((a, b) => a + b, 0);
+    const net = b + houseWorth + stockWorth;
+    const tier = getWealthTier(net);
+    const l = await economy.getLevelInfo(senderJid);
+    await reply(`💰 *Gesamtvermögen*\n\n${tier.label}\n\n💵 Coins: ${formatBalance(b)}\n🏠 Häuser: ${formatBalance(houseWorth)} (${houses.length} Stk.)\n📈 Aktien: ${formatBalance(stockWorth)}\n─────────────\n🌟 Gesamt: ${formatBalance(net)}\n⭐ Level: ${l.level}`);
+    break;
+  }
+
+*/
+
+// ====================================================================
+// Freundschafts-Bonus – zwei Spieler spielen zusammen oft = Bonus
+// ====================================================================
+async function checkFriendBonus(eco, userA, userB) {
+  const key = `friend_${[userA, userB].sort().join('_')}`;
+  const interactions = await eco.getMeta(userA, key);
+  const bonusTiers = [
+    { at: 10, bonus: 500, label: '🤝 Kumpel' },
+    { at: 25, bonus: 1500, label: '👫 Guter Freund' },
+    { at: 50, bonus: 3000, label: '💫 Bester Freund' },
+    { at: 100, bonus: 5000, label: '🌟 Unzertrennlich' },
+  ];
+  const tier = bonusTiers.slice().reverse().find((t) => interactions >= t.at);
+  return { interactions, tier };
+}
+
+async function recordFriendInteraction(eco, userA, userB) {
+  const key = `friend_${[userA, userB].sort().join('_')}`;
+  const current = await eco.getMeta(userA, key);
+  await eco.setMeta(userA, key, current + 1);
+  await eco.setMeta(userB, key, current + 1);
+}
+
+// ====================================================================
+// Münz-Multiplikator-Events – zeitlich begrenzter globaler Bonus
+// ====================================================================
+let globalMultiplierEvent = null;
+
+function setGlobalMultiplier(multiplier, durationMs, label) {
+  globalMultiplierEvent = { multiplier, endTime: Date.now() + durationMs, label };
+}
+
+function getGlobalMultiplier() {
+  if (!globalMultiplierEvent) return 1;
+  if (Date.now() > globalMultiplierEvent.endTime) { globalMultiplierEvent = null; return 1; }
+  return globalMultiplierEvent.multiplier;
+}
+
+function getGlobalMultiplierInfo() {
+  if (!globalMultiplierEvent || Date.now() > globalMultiplierEvent.endTime) return null;
+  const mins = Math.ceil((globalMultiplierEvent.endTime - Date.now()) / 60000);
+  return { ...globalMultiplierEvent, remainingMins: mins };
+}
+
+// ====================================================================
+// COMPLETE ECONOMY CORE COMMANDS (Vorlage für index.js)
+// ====================================================================
+/*
+
+  // ---- Balance & Vermögen ----
+  case 'balance': case 'kontostand': case 'geld': {
+    const b = await economy.getBalance(senderJid);
+    const bank = await economy.getBankBalance(senderJid);
+    const l = await economy.getLevelInfo(senderJid);
+    await reply(`💰 *Dein Konto*\n\nBrieftasche: ${formatBalance(b)}\nBank: ${formatBalance(bank)}\n⭐ Level ${l.level} (${l.intoLevel}/${l.levelSpan} XP)`);
+    break;
+  }
+
+  // ---- Markt (Häuser) ----
+  case 'markt': case 'immobilien': {
+    const sub = (args[0] || 'all').toLowerCase();
+    const tierMap = { '1': 1, '2': 2, '3': 3, '4': 4, '5': 5 };
+    const tier = tierMap[sub];
+    const page = Number(args[1]) || 1;
+    const { pages, items } = marketPage(HOUSES, tier, page);
+    const lines = items.map((h) => `[${h.id}] ${h.name} – ${formatBalance(h.price)} (Tier ${h.tier})`).join('\n');
+    await reply(`🏠 *Immobilienmarkt* ${tier ? `Tier ${tier}` : ''}(Seite ${page}/${pages})\n\n${lines}\nKaufen: ${COMMAND_PREFIX}kaufen <id>`);
+    break;
+  }
+
+  // ---- Haus kaufen ----
+  case 'kaufen': {
+    const houseId = (args[0] || '').toLowerCase();
+    if (!houseId) { await reply(`Nutzung: ${COMMAND_PREFIX}kaufen <haus-id>. Markt: ${COMMAND_PREFIX}markt`); break; }
+    const r = await economy.buyHouse(senderJid, houseId);
+    if (!r.ok) { await reply(`❌ ${r.reason}`); break; }
+    await quest.track(senderJid, 'buyhouse');
+    await quest.trackAchievementQuest(senderJid, 'buyhouse');
+    await reply(`🏠 *${r.house.name}* gekauft für ${formatBalance(r.price)}!\nKontostand: ${formatBalance(r.balance)}`);
+    await economy.checkAchievements(senderJid);
+    break;
+  }
+
+  // ---- Haus verkaufen ----
+  case 'verkaufen': {
+    const houseId = (args[0] || '').toLowerCase();
+    if (!houseId) { await reply(`Nutzung: ${COMMAND_PREFIX}verkaufen <haus-id>`); break; }
+    const r = await economy.sellHouse(senderJid, houseId);
+    if (!r.ok) { await reply(`❌ ${r.reason}`); break; }
+    await reply(`✅ *${r.house.name}* verkauft für ${formatBalance(r.sellPrice)}.\nKontostand: ${formatBalance(r.balance)}`);
+    break;
+  }
+
+  // ---- Inventar ----
+  case 'inventar': case 'häuser': {
+    const houses = await economy.getHouses(senderJid);
+    if (!houses.length) { await reply('Du besitzt noch keine Häuser. Schau dir den !markt an!'); break; }
+    const lines = houses.map((h) => {
+      const hd = HOUSES.find((hd) => hd.id === h.houseId);
+      return hd ? `[${hd.id}] ${hd.name} (Tier ${hd.tier})` : h.houseId;
+    }).join('\n');
+    const totalWorth = houses.reduce((s, h) => {
+      const hd = HOUSES.find((hd) => hd.id === h.houseId);
+      return s + (hd ? hd.price : 0);
+    }, 0);
+    await reply(`🏡 *Deine Häuser* (${houses.length})\n\n${lines}\n\nGesamtwert: ${formatBalance(totalWorth)}`);
+    break;
+  }
+
+  // ---- Bank: einzahlen ----
+  case 'einzahlen': case 'deposit': {
+    const amount = Number(args[0]);
+    if (!amount || amount <= 0) { await reply(`Nutzung: ${COMMAND_PREFIX}einzahlen <betrag>`); break; }
+    const r = await economy.bankDeposit(senderJid, amount);
+    if (!r.ok) { await reply(`❌ ${r.reason}`); break; }
+    await reply(`🏦 ${formatBalance(r.amount)} eingezahlt.\nBrieftasche: ${formatBalance(r.walletBalance)} | Bank: ${formatBalance(r.bankBalance)}`);
+    await economy.checkAchievements(senderJid);
+    break;
+  }
+
+  // ---- Bank: auszahlen ----
+  case 'auszahlen': case 'withdraw': {
+    const amount = Number(args[0]);
+    if (!amount || amount <= 0) { await reply(`Nutzung: ${COMMAND_PREFIX}auszahlen <betrag>`); break; }
+    const r = await economy.bankWithdraw(senderJid, amount);
+    if (!r.ok) { await reply(`❌ ${r.reason}`); break; }
+    await reply(`💵 ${formatBalance(r.amount)} abgehoben.\nBrieftasche: ${formatBalance(r.walletBalance)} | Bank: ${formatBalance(r.bankBalance)}`);
+    break;
+  }
+
+  // ---- Zinsen ----
+  case 'zinsen': case 'interest': {
+    const r = await economy.claimInterest(senderJid);
+    if (!r.ok) { await reply(`⏳ Zinsen sind erst wieder verfügbar in ${fmtWait ? fmtWait(r.waitMs) : '...'}.`); break; }
+    await reply(`💹 Tages-Zinsen: *+${formatBalance(r.interest)}* (1% auf ${formatBalance(r.bankAmount)})\nBank: ${formatBalance(r.bankBalance)}`);
+    break;
+  }
+
+  // ---- Rangliste ----
+  case 'reich': case 'rangliste': case 'top': {
+    const top = await economy.getLeaderboard(10);
+    const medals = ['🥇', '🥈', '🥉'];
+    const lines = top.map((p, i) => `${medals[i] || `${i + 1}.`} @${p.userId.split('@')[0]}: ${formatBalance(p.balance)}`);
+    await reply(`💰 *Reichste Spieler*\n\n${lines.join('\n')}`);
+    break;
+  }
+
+*/
+
+// ====================================================================
+// Schnell-Abfrage-Helfer – für Index.js ohne vollen EconomyManager-Import
+// ====================================================================
+function fmtNumber(n) {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(Math.floor(n));
+}
+
+function fmtPercent(value, total) {
+  if (!total) return '0%';
+  return `${Math.round((value / total) * 100)}%`;
+}
+
+// Berechnet den Hauswert nach Tier
+function houseValue(house) {
+  return house.price;
+}
+
+// Gibt den Gesamt-Hauswert einer Liste zurück
+function totalHouseValue(houseIds) {
+  return houseIds.reduce((s, id) => {
+    const h = HOUSES.find((h) => h.id === id);
+    return s + (h ? h.price : 0);
+  }, 0);
+}
 
 module.exports = {
   EconomyManager, HOUSES, TIER_LABELS, ACHIEVEMENTS,
   STARTING_BALANCE, LOTTERY_TICKET_PRICE,
   formatBalance, houseCard, marketPage,
   xpForLevel, levelFromXp,
+  STOCKS, DAILY_CHALLENGES, WEALTH_TIERS, TREASURE_SPOTS, RANK_REWARDS, ECONOMIC_SINKS,
+  getStockPrice, getWealthTier, calcTax, todaysChallenge, calcPassiveIncome,
+  drawLottery, distributeRankRewards, inflatedPrice, generateEconomyReport, economyBalance,
+  checkFriendBonus, recordFriendInteraction,
+  setGlobalMultiplier, getGlobalMultiplier, getGlobalMultiplierInfo,
+  fmtNumber, fmtPercent, houseValue, totalHouseValue,
+  // Seasonal helper (static, no instance needed)
+  getCurrentSeason: EconomyManager.currentSeason,
+  getLotterySeed: EconomyManager.lotterySeed,
 };
