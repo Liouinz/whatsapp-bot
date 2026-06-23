@@ -339,7 +339,8 @@ const COMMANDS = [
   { key: 'mute',       desc: 'Mitglied stummschalten', adminDefault: true },
   { key: 'unmute',     desc: 'Stummschaltung aufheben', adminDefault: true },
   { key: 'warn',       desc: 'Mitglied manuell verwarnen', adminDefault: true },
-  { key: 'clearwarn',  desc: 'Verwarnungen eines Mitglieds löschen', adminDefault: true },
+  { key: 'unwarn',     desc: 'eine Verwarnung zurücknehmen', adminDefault: true },
+  { key: 'clearwarn',  desc: 'alle Verwarnungen eines Mitglieds löschen', adminDefault: true },
   { key: 'warninfo',   desc: 'Verwarnungsstand eines Mitglieds anzeigen', adminDefault: true },
   { key: 'warnlist',   desc: 'alle verwarnten Mitglieder auflisten', adminDefault: true },
   { key: 'promote',    desc: 'Mitglied zum Admin machen', adminDefault: true },
@@ -480,6 +481,43 @@ function effectiveGroupConfig(jid) {
 function activeGroupCount() {
   return Object.values(config.groups).filter((g) => g.active !== false).length;
 }
+
+// ---------- Community-Helfer ----------
+// Normalisiert das linkedParent-Feld (kann String oder Objekt sein) auf eine JID.
+function parentJidOf(g) {
+  const lp = g.community;
+  if (!lp) return null;
+  if (typeof lp === 'string') return lp;
+  return lp.id || lp.jid || null;
+}
+function communityName(parentJid) {
+  const g = botState.groups.find((x) => x.id === parentJid);
+  return g ? (g.subject || 'Community') : `Community ${(parentJid || '').split('@')[0].slice(-6)}`;
+}
+// Gruppiert alle bekannten Gruppen nach ihrer Community (linkedParent).
+function getCommunities() {
+  const map = new Map();
+  for (const g of botState.groups) {
+    const parent = parentJidOf(g);
+    if (!parent) continue;
+    if (!map.has(parent)) map.set(parent, { parent, name: communityName(parent), groups: [] });
+    map.get(parent).groups.push(g);
+  }
+  return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+// Setzt active für alle Gruppen einer Community.
+async function setCommunityActive(parentJid, enable) {
+  let n = 0;
+  for (const g of botState.groups) {
+    if (parentJidOf(g) !== parentJid) continue;
+    if (!config.groups[g.id]) config.groups[g.id] = defaultGroupConfig();
+    config.groups[g.id].active = enable;
+    n += 1;
+  }
+  if (n) await persist();
+  return n;
+}
+
 async function persist() {
   await store.saveConfig(config, logger);
 }
@@ -552,6 +590,58 @@ function safeCalc(expr) {
   } catch {
     return null;
   }
+}
+
+// ---------- DM-Assistent (Privatnachrichten) ----------
+// Standardmäßig aus. Wenn aktiv, nimmt der Bot per Privatchat Anliegen entgegen
+// (Nachricht muss mit dem Befehlspräfix beginnen).
+async function handleDmAssistant(sock, jid, text, msg) {
+  const num = jid.split('@')[0];
+  const body = text.slice(COMMAND_PREFIX.length).trim();
+  const first = (body.split(/\s+/)[0] || '').toLowerCase();
+  const reply = (t) => sock.sendMessage(jid, { text: t }, { quoted: msg });
+
+  if (!body || first === 'hilfe' || first === 'help' || first === 'start' || first === 'info') {
+    await reply(
+      `👋 Hallo! Ich bin der Assistent.\n\n` +
+      `Schreib mir dein Anliegen einfach mit einem ${COMMAND_PREFIX} davor, z. B.:\n` +
+      `${COMMAND_PREFIX}Ich habe ein Problem mit …\n\n` +
+      `Dein Anliegen wird gespeichert und an die Admins weitergeleitet. 📨`
+    );
+    return;
+  }
+
+  // Gemeinsame Gruppen/Communities der Nummer ermitteln (best effort, gecacht)
+  await Promise.allSettled(botState.groups.map((g) => getGroupMeta(g.id)));
+  const sharedGroups = [];
+  const communitySet = new Set();
+  for (const g of botState.groups) {
+    const meta = botState.groupMeta[g.id]?.meta;
+    if (meta && meta.participants.some((p) => p.id.split('@')[0] === num)) {
+      sharedGroups.push(g.subject || g.id);
+      const parent = parentJidOf(g);
+      if (parent) communitySet.add(communityName(parent));
+    }
+  }
+
+  if (!config.anliegen) config.anliegen = [];
+  config.anliegen.push({
+    id: Date.now(),
+    num,
+    text: body,
+    at: Date.now(),
+    groups: sharedGroups,
+    communities: [...communitySet],
+    status: 'offen',
+  });
+  if (config.anliegen.length > 300) config.anliegen = config.anliegen.slice(-300);
+  await persist();
+  activityLogPush({ type: 'anliegen', senderNum: num });
+
+  const ctxInfo = communitySet.size
+    ? `\n\n(Erkannt in: ${[...communitySet].join(', ')})`
+    : sharedGroups.length ? `\n\n(Gemeinsame Gruppen: ${sharedGroups.join(', ')})` : '';
+  await reply(`✅ Danke! Dein Anliegen wurde aufgenommen und an die Admins weitergeleitet.${ctxInfo}`);
 }
 
 // ---------- Ehe-Helfer ----------
@@ -674,6 +764,7 @@ const STYLE = `
   .log-kick{border-color:#f97316} .log-ban{border-color:#ef4444}
   .log-warn{border-color:#fde68a} .log-mute{border-color:#c084fc}
   .log-pin{border-color:#38bdf8} .log-unpin{border-color:#94a3b8}
+  .log-anliegen{border-color:#a78bfa}
   .leaderboard{counter-reset:rank}
   .lb-row{display:flex;align-items:center;gap:10px;padding:9px 12px;
     border:1px solid rgba(255,255,255,.08);border-radius:10px;margin:5px 0;background:rgba(255,255,255,.03)}
@@ -725,10 +816,12 @@ function page(title, body, opts = {}) {
 function navBar(keyParam, active = '') {
   const items = [
     ['settings', '⚙️', 'Gruppen'],
+    ['community', '🏘️', 'Communities'],
     ['dashboard', '📊', 'Dashboard'],
     ['lookup', '🔎', 'Nummer'],
     ['search', '🔍', 'Suche'],
     ['reports', '📋', 'Meldungen'],
+    ['anliegen', '📨', 'Anliegen'],
     ['banlog', '🚫', 'Ban-Log'],
     ['activity', '📡', 'Aktivität'],
     ['qr', '📲', 'QR'],
@@ -985,11 +1078,16 @@ app.get('/group', async (req, res) => {
       ${cmdSelect(c.key)}
     </div>`).join('');
 
+  const parentJ = parentJidOf(group);
+  const comBadge = parentJ
+    ? `<a href="/community${keyParam}" class="chip" style="text-decoration:none">🏘️ ${escapeHtml(communityName(parentJ))}</a>`
+    : '';
   res.send(page('Gruppe konfigurieren', `
+    ${navBar(keyParam, '')}
     <div class="card">
       <div class="row"><h1>⚙️ ${escapeHtml(group.subject || 'Gruppe')}</h1>
         <a href="/settings${keyParam}">← zurück</a></div>
-      <p class="muted">${group.size || 0} Mitglieder · <a href="/group/members?id=${encodeURIComponent(id)}&key=${encodeURIComponent(req.query.key)}">👥 Mitglieder anzeigen</a></p>
+      <p class="muted">${group.size || 0} Mitglieder ${comBadge} · <a href="/group/members?id=${encodeURIComponent(id)}&key=${encodeURIComponent(req.query.key)}">👥 Mitglieder anzeigen</a></p>
       ${saved}
     </div>
     <form method="POST" action="/group/save?id=${encodeURIComponent(id)}&key=${keyVal}">
@@ -1179,6 +1277,77 @@ app.get('/reports', (req, res) => {
     </div>`));
 });
 
+// Community-Übersicht – Gruppen nach Community gebündelt
+app.get('/community', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!requireAuth(req, res)) return;
+  const keyParam = keyOf(req);
+  const keyEnc = encodeURIComponent(req.query.key);
+
+  if (!botState.connected) {
+    return res.send(page('Communities', `${navBar(keyParam, 'community')}
+      <div class="card"><h1>⚠️ Nicht verbunden</h1><a href="/qr${keyParam}"><button>Zum QR-Code →</button></a></div>`));
+  }
+  await refreshGroups();
+  const communities = getCommunities();
+
+  let body = `${navBar(keyParam, 'community')}
+    <div class="card">
+      <div class="row"><h1>🏘️ Communities</h1><span class="status on">verbunden</span></div>
+      <p class="muted">Der Bot erkennt automatisch, welche Gruppen zu welcher Community gehören.
+        Du kannst eine ganze Community auf einmal ein- oder ausschalten und einzelne Gruppen weiter feinjustieren.</p>
+    </div>`;
+
+  if (!communities.length) {
+    body += `<div class="card"><p class="muted">Keine Communities gefunden. Der Bot ist in keiner Gruppe, die zu einer Community gehört
+      – oder die Community-Struktur wurde noch nicht geladen.</p></div>`;
+  } else {
+    for (const c of communities) {
+      const activeCount = c.groups.filter((g) => effectiveGroupConfig(g.id).active).length;
+      const grpHtml = c.groups.map((g) => {
+        const gc = effectiveGroupConfig(g.id);
+        const chip = gc.active ? '<span class="chip on">● aktiv</span>' : '<span class="chip off">○ inaktiv</span>';
+        return `<a class="grp" href="/group?id=${encodeURIComponent(g.id)}&key=${keyEnc}">
+          <span class="meta"><span class="name">${escapeHtml(g.subject || 'Unbenannt')} ${chip}</span>
+            <span class="muted">${g.size || 0} Mitglieder</span></span>
+          <span style="font-size:1.2rem">⚙️</span></a>`;
+      }).join('');
+      body += `
+        <div class="card">
+          <div class="row">
+            <h2 style="margin:0">🏘️ ${escapeHtml(c.name)}</h2>
+            <span class="chip">${activeCount}/${c.groups.length} aktiv</span>
+          </div>
+          <div class="row" style="gap:8px;margin:10px 0">
+            <form method="POST" action="/community/toggle?key=${keyEnc}" style="display:inline">
+              <input type="hidden" name="parent" value="${escapeHtml(c.parent)}"><input type="hidden" name="enable" value="1">
+              <button type="submit" class="action-btn btn-green">✅ Alle aktivieren</button>
+            </form>
+            <form method="POST" action="/community/toggle?key=${keyEnc}" style="display:inline">
+              <input type="hidden" name="parent" value="${escapeHtml(c.parent)}"><input type="hidden" name="enable" value="0">
+              <button type="submit" class="action-btn btn-red">⛔ Alle deaktivieren</button>
+            </form>
+          </div>
+          ${grpHtml}
+        </div>`;
+    }
+  }
+  res.send(page('Communities', body));
+});
+
+// Community komplett an/aus
+app.post('/community/toggle', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const keyParam = keyOf(req);
+  const parent = String(req.body.parent || '');
+  const enable = String(req.body.enable) === '1';
+  if (parent) {
+    const n = await setCommunityActive(parent, enable);
+    logger.info({ parent, enable, n }, 'Community umgeschaltet');
+  }
+  res.redirect(`/community${keyParam}`);
+});
+
 // Globale Nummern-Suche – alle Infos & gemeinsame Gruppen
 app.get('/lookup', async (req, res) => {
   res.set('Cache-Control', 'no-store');
@@ -1212,12 +1381,16 @@ app.get('/lookup', async (req, res) => {
   const targetJid = `${num}@s.whatsapp.net`;
   let totalMsg = 0, totalCmd = 0, totalWarn = 0;
   const groupCards = [];
+  const communitySet = new Set();
 
   for (const g of botState.groups) {
     const meta = botState.groupMeta[g.id]?.meta;
     if (!meta) continue;
     const member = meta.participants.find((p) => p.id.split('@')[0] === num);
     if (!member) continue;
+
+    const parent = parentJidOf(g);
+    if (parent) communitySet.add(communityName(parent));
 
     const stats = getMemberStats(g.id, num);
     const warn = moderation.getWarnings(g.id, targetJid);
@@ -1262,6 +1435,7 @@ app.get('/lookup', async (req, res) => {
       </div>`);
   }
 
+  const communityChips = [...communitySet].map((n) => `<span class="chip">🏘️ ${escapeHtml(n)}</span>`).join(' ');
   const summary = groupCards.length
     ? `<div class="card">
         <h1>👤 ${escapeHtml(num)}</h1>
@@ -1270,8 +1444,9 @@ app.get('/lookup', async (req, res) => {
           <div class="stat"><div class="k">Nachrichten gesamt</div><div class="v">${totalMsg}</div></div>
           <div class="stat"><div class="k">Befehle gesamt</div><div class="v">${totalCmd}</div></div>
           <div class="stat"><div class="k">Verwarnungen gesamt</div><div class="v">${totalWarn}</div></div>
-          <div class="stat"><div class="k">Gemeinsame Gruppen</div><div class="v">${groupCards.length}</div></div>
+          <div class="stat"><div class="k">Communities</div><div class="v">${communitySet.size}</div></div>
         </div>
+        ${communityChips ? `<p class="muted" style="margin-top:10px">Communities: ${communityChips}</p>` : ''}
       </div>`
     : `<div class="card"><h1>👤 ${escapeHtml(num)}</h1>
         <p class="muted">Diese Nummer wurde in keiner gemeinsamen Gruppe gefunden.</p></div>`;
@@ -1311,6 +1486,29 @@ app.get('/member', async (req, res) => {
     `<tr><td>${new Date(b.at).toLocaleString('de-DE')}</td><td>${escapeHtml(b.bannedBy || '–')}</td><td>${escapeHtml(b.reason || '–')}</td></tr>`
   ).join('') || '<tr><td colspan="3" class="muted">Keine Einträge</td></tr>';
 
+  const keyEnc = encodeURIComponent(req.query.key);
+  const grpEnc = encodeURIComponent(groupJid);
+  const jidEnc = encodeURIComponent(targetJid);
+  const warnReasons = (warnings.reasons && warnings.reasons.length)
+    ? warnings.reasons.map((r) =>
+        `<div class="log-entry log-warn"><b>${new Date(r.at).toLocaleString('de-DE')}</b> · ${escapeHtml(r.by || 'admin')}<br>${escapeHtml(r.reason)}</div>`
+      ).join('')
+    : '<p class="muted">Keine Verwarnungsgründe gespeichert.</p>';
+  const warnActions = `
+    <form method="POST" action="/member/action?key=${keyEnc}" style="display:inline">
+      <input type="hidden" name="action" value="warn"><input type="hidden" name="targetJid" value="${escapeHtml(targetJid)}"><input type="hidden" name="groupJid" value="${escapeHtml(groupJid)}">
+      <input type="text" name="reason" class="input" placeholder="Grund (optional)" style="width:auto;display:inline-block;min-width:160px;margin:0 6px 0 0">
+      <button type="submit" class="action-btn btn-yellow">⚠️ Verwarnen</button>
+    </form>
+    <form method="POST" action="/member/action?key=${keyEnc}" style="display:inline">
+      <input type="hidden" name="action" value="unwarn"><input type="hidden" name="targetJid" value="${escapeHtml(targetJid)}"><input type="hidden" name="groupJid" value="${escapeHtml(groupJid)}">
+      <button type="submit" class="action-btn btn-blue">↩️ −1 Verwarnung</button>
+    </form>
+    <form method="POST" action="/member/action?key=${keyEnc}" style="display:inline" onsubmit="return confirm('Alle Verwarnungen löschen?')">
+      <input type="hidden" name="action" value="clearwarn"><input type="hidden" name="targetJid" value="${escapeHtml(targetJid)}"><input type="hidden" name="groupJid" value="${escapeHtml(groupJid)}">
+      <button type="submit" class="action-btn btn-green">🧹 Alle löschen</button>
+    </form>`;
+
   res.send(page(`Profil – ${num}`, `
     ${navBar(keyParam, '')}
     <div class="card">
@@ -1328,6 +1526,11 @@ app.get('/member', async (req, res) => {
         <div class="stat"><div class="k">Status</div><div class="v" style="font-size:.95rem">${muted ? `🔇 Stumm noch ${formatDuration(muteLeft)}` : '✅ Aktiv'}</div></div>
       </div>
       ${stats.lastSeen ? `<p class="muted">Zuletzt aktiv: ${new Date(stats.lastSeen).toLocaleString('de-DE')}</p>` : ''}
+    </div>
+    <div class="card">
+      <h2>⚠️ Verwarnungen (${warnings.count || 0})</h2>
+      ${warnReasons}
+      <div class="row" style="margin-top:12px;gap:6px;justify-content:flex-start;flex-wrap:wrap">${warnActions}</div>
     </div>
     <div class="card">
       <h2>💍 Ehe</h2>
@@ -1352,24 +1555,46 @@ app.post('/member/action', async (req, res) => {
     return res.status(503).send(page('Fehler', `<div class="card"><h1>Bot nicht verbunden</h1><a href="/settings${keyParam}"><button>Zurück</button></a></div>`));
   }
 
+  const reason = String(req.body.reason || '').trim();
+  const tnum = targetJid.split('@')[0];
   try {
     if (action === 'kick') {
       await sock.groupParticipantsUpdate(groupJid, [targetJid], 'remove');
-      addBanLog(groupJid, { num: targetJid.split('@')[0], bannedBy: 'web', reason: 'Kick via Web' });
-      activityLogPush({ type: 'kick', groupJid, targetNum: targetJid.split('@')[0] });
+      addBanLog(groupJid, { num: tnum, bannedBy: 'web', reason: reason || 'Kick via Web' });
+      activityLogPush({ type: 'kick', groupJid, targetNum: tnum });
       await persist();
     } else if (action === 'mute') {
       moderation.muteUser(groupJid, targetJid, 60);
-      activityLogPush({ type: 'mute', groupJid, targetNum: targetJid.split('@')[0] });
+      activityLogPush({ type: 'mute', groupJid, targetNum: tnum });
     } else if (action === 'warn') {
-      moderation.addWarning(groupJid, targetJid);
-      activityLogPush({ type: 'warn', groupJid, targetNum: targetJid.split('@')[0] });
+      moderation.addWarning(groupJid, targetJid, reason || 'via Web');
+      const ms = config.groups[groupJid]?.memberStats?.[tnum];
+      if (ms) ms.warnings = (ms.warnings || 0) + 1;
+      activityLogPush({ type: 'warn', groupJid, targetNum: tnum, reason: reason || 'via Web' });
+      await persist();
+    } else if (action === 'unwarn') {
+      moderation.removeWarning(groupJid, targetJid);
+      const ms = config.groups[groupJid]?.memberStats?.[tnum];
+      if (ms && ms.warnings) ms.warnings = Math.max(0, ms.warnings - 1);
+      activityLogPush({ type: 'warn', groupJid, targetNum: tnum, reason: 'zurückgenommen (Web)' });
+      await persist();
+    } else if (action === 'clearwarn') {
+      moderation.clearWarnings(groupJid, targetJid);
+      const ms = config.groups[groupJid]?.memberStats?.[tnum];
+      if (ms) ms.warnings = 0;
+      activityLogPush({ type: 'warn', groupJid, targetNum: tnum, reason: 'alle gelöscht (Web)' });
+      await persist();
     }
   } catch (err) {
     logger.warn({ err }, 'Web-Aktion fehlgeschlagen');
   }
 
-  res.redirect(`/group/members?id=${encodeURIComponent(groupJid)}&key=${encodeURIComponent(req.query.key)}&done=${action}`);
+  // Warn-Aktionen führen zurück aufs Profil, Kick/Mute zurück zur Mitgliederliste
+  if (['warn', 'unwarn', 'clearwarn'].includes(action)) {
+    res.redirect(`/member?jid=${encodeURIComponent(targetJid)}&group=${encodeURIComponent(groupJid)}&key=${encodeURIComponent(req.query.key)}&done=${action}`);
+  } else {
+    res.redirect(`/group/members?id=${encodeURIComponent(groupJid)}&key=${encodeURIComponent(req.query.key)}&done=${action}`);
+  }
 });
 
 // Ban-Log (global)
@@ -1447,6 +1672,19 @@ app.get('/search', (req, res) => {
 
   let resultsHtml = '';
   if (q) {
+    // Communities suchen
+    const comHits = getCommunities().filter((c) => c.name.toLowerCase().includes(q));
+    if (comHits.length) {
+      resultsHtml += `<div class="card"><h2>🏘️ Communities (${comHits.length})</h2>`;
+      for (const c of comHits) {
+        const activeCount = c.groups.filter((g) => effectiveGroupConfig(g.id).active).length;
+        resultsHtml += `<a class="grp" href="/community${keyParam}">
+          <span class="meta"><span class="name">🏘️ ${escapeHtml(c.name)}</span>
+          <span class="muted">${c.groups.length} Gruppen · ${activeCount} aktiv</span></span><span>→</span></a>`;
+      }
+      resultsHtml += '</div>';
+    }
+
     // Gruppen suchen
     const grpHits = botState.groups.filter((g) =>
       (g.subject || '').toLowerCase().includes(q) || g.id.includes(q));
@@ -1454,8 +1692,10 @@ app.get('/search', (req, res) => {
       resultsHtml += `<div class="card"><h2>👥 Gruppen (${grpHits.length})</h2>`;
       for (const g of grpHits) {
         const gc = effectiveGroupConfig(g.id);
+        const parent = parentJidOf(g);
+        const comTag = parent ? `<span class="chip">🏘️ ${escapeHtml(communityName(parent))}</span>` : '';
         resultsHtml += `<a class="grp" href="/group?id=${encodeURIComponent(g.id)}&key=${encodeURIComponent(req.query.key)}">
-          <span class="meta"><span class="name">${escapeHtml(g.subject || 'Unbenannt')} ${gc.active ? '<span class="badge" style="background:rgba(34,197,94,.2);color:#86efac">aktiv</span>' : ''}</span>
+          <span class="meta"><span class="name">${escapeHtml(g.subject || 'Unbenannt')} ${gc.active ? '<span class="chip on">● aktiv</span>' : '<span class="chip off">○ inaktiv</span>'} ${comTag}</span>
           <span class="muted">${g.size || 0} Mitglieder</span></span><span>⚙️</span></a>`;
       }
       resultsHtml += '</div>';
@@ -1482,7 +1722,7 @@ app.get('/search', (req, res) => {
     ${navBar(keyParam, 'search')}
     <div class="card">
       <div class="row"><h1>🔍 Suche</h1><a href="/lookup${keyParam}">🔎 Nummer-Suche</a></div>
-      <p class="muted">Durchsuche Gruppen & Meldungen. Für eine bestimmte Nummer nutze die <a href="/lookup${keyParam}">Nummer-Suche</a>.</p>
+      <p class="muted">Durchsuche Communities, Gruppen & Meldungen. Für eine bestimmte Nummer nutze die <a href="/lookup${keyParam}">Nummer-Suche</a>.</p>
     </div>
     <form class="card" method="get" action="/search">
       <input type="hidden" name="key" value="${escapeHtml(req.query.key)}">
@@ -1518,6 +1758,76 @@ app.get('/group/stats', async (req, res) => {
       <p class="muted">${escapeHtml(group.subject)} · Top ${top.length} Mitglieder</p>
     </div>
     <div class="card leaderboard">${rows}</div>`));
+});
+
+// Anliegen (Privatnachrichten-Tickets)
+app.get('/anliegen', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!requireAuth(req, res)) return;
+  const keyParam = keyOf(req);
+  const keyEnc = encodeURIComponent(req.query.key);
+  const list = (config.anliegen || []).slice().reverse();
+  const dmOn = Boolean(config.settings?.dmAssistant);
+
+  const rows = list.map((a) => {
+    const ctx = (a.communities && a.communities.length) ? a.communities.join(', ')
+      : (a.groups && a.groups.length) ? a.groups.join(', ') : '–';
+    const statusChip = a.status === 'erledigt' ? '<span class="chip on">erledigt</span>' : '<span class="chip">offen</span>';
+    const doneBtn = a.status === 'erledigt' ? '' : `
+      <form method="POST" action="/anliegen/done?key=${keyEnc}" style="display:inline">
+        <input type="hidden" name="id" value="${a.id}">
+        <button type="submit" class="action-btn btn-green">✓ erledigt</button>
+      </form>`;
+    return `<tr>
+      <td>${new Date(a.at).toLocaleString('de-DE')}</td>
+      <td><a href="/lookup?num=${encodeURIComponent(a.num)}&key=${keyEnc}">${escapeHtml(a.num)}</a></td>
+      <td>${escapeHtml(a.text)}</td>
+      <td>${escapeHtml(ctx)}</td>
+      <td>${statusChip} ${doneBtn}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="5" class="muted">Noch keine Anliegen eingegangen.</td></tr>';
+
+  res.send(page('Anliegen', `
+    ${navBar(keyParam, 'anliegen')}
+    <div class="card">
+      <div class="row"><h1>📨 Anliegen</h1><a href="/dashboard${keyParam}">← Dashboard</a></div>
+      <p class="muted">Private Anfragen, die Nutzer dem Bot geschickt haben.</p>
+    </div>
+    <form class="card" method="POST" action="/global/save?key=${keyEnc}">
+      <h2>🤖 DM-Assistent</h2>
+      <p class="muted">Wenn aktiv, kann jede Person dem Bot privat schreiben (Nachricht muss mit „${COMMAND_PREFIX}" beginnen)
+        und ihr Anliegen wird hier gespeichert. <b>Standardmäßig ausgeschaltet.</b></p>
+      <label class="opt"><span>DM-Assistent aktivieren</span>
+        <input type="checkbox" name="dmAssistant" ${dmOn ? 'checked' : ''}></label>
+      <button type="submit">💾 Speichern</button>
+    </form>
+    <div class="card" style="overflow-x:auto">
+      <table>
+        <thead><tr><th>Datum</th><th>Von</th><th>Anliegen</th><th>Kontext</th><th>Status</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`));
+});
+
+// Anliegen als erledigt markieren
+app.post('/anliegen/done', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const keyParam = keyOf(req);
+  const id = Number(req.body.id);
+  const a = (config.anliegen || []).find((x) => x.id === id);
+  if (a) { a.status = 'erledigt'; await persist(); }
+  res.redirect(`/anliegen${keyParam}`);
+});
+
+// Globale Optionen speichern
+app.post('/global/save', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const keyParam = keyOf(req);
+  config.settings = config.settings || {};
+  config.settings.dmAssistant = req.body.dmAssistant !== undefined;
+  await persist();
+  logger.info({ dmAssistant: config.settings.dmAssistant }, 'Globale Optionen gespeichert');
+  res.redirect(`/anliegen${keyParam}`);
 });
 
 // Live-Dashboard
@@ -1572,16 +1882,18 @@ app.get('/dashboard', (req, res) => {
           Object.values(config.groups).reduce((s, g) => s + (g.banLog || []).length, 0)
         }</div></div>
         <div class="stat"><div class="k">Meldungen</div><div class="v">${(config.reports || []).length}</div></div>
+        <div class="stat"><div class="k">Anliegen</div><div class="v">${(config.anliegen || []).length}</div></div>
+        <div class="stat"><div class="k">DM-Assistent</div><div class="v" style="font-size:1rem">${config.settings?.dmAssistant ? 'an ✅' : 'aus ⛔'}</div></div>
         <div class="stat"><div class="k">Aktivitäts-Log</div><div class="v">${botState.activityLog.length}/100</div></div>
       </div>
     </div>
     <div class="card row" style="flex-wrap:wrap;gap:10px">
       <a href="/settings${keyParam}">⚙️ Einstellungen</a>
-      <a href="/reports${keyParam}">📋 Meldungen</a>
+      <a href="/community${keyParam}">🏘️ Communities</a>
+      <a href="/anliegen${keyParam}">📨 Anliegen</a>
       <a href="/banlog${keyParam}">🚫 Ban-Log</a>
       <a href="/activity${keyParam}">📡 Aktivität</a>
       <a href="/search${keyParam}">🔍 Suche</a>
-      <a href="/qr${keyParam}">QR-Code</a>
     </div>`, { refresh: 10, refreshUrl: `/dashboard${keyParam}` }));
 });
 
@@ -1714,10 +2026,21 @@ async function startBot() {
     for (const msg of messages) {
       try {
         const jid = msg.key.remoteJid;
-        if (!jid || !jid.endsWith('@g.us')) continue; // nur Gruppen
+        if (!jid) continue;
 
         const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
         const isOwner = Boolean(msg.key.fromMe);
+
+        // Private Nachrichten: optionaler DM-Assistent (Standard aus)
+        if (jid.endsWith('@s.whatsapp.net')) {
+          if (isOwner) continue;
+          if (!config.settings?.dmAssistant) continue;
+          if (!text.startsWith(COMMAND_PREFIX)) continue;
+          await handleDmAssistant(sock, jid, text, msg);
+          continue;
+        }
+
+        if (!jid.endsWith('@g.us')) continue; // sonst nur Gruppen
 
         // Owner-Nachrichten nur überspringen, wenn kein Befehl
         if (isOwner && !text.startsWith(COMMAND_PREFIX)) continue;
@@ -1987,11 +2310,11 @@ async function startBot() {
           case 'warn': {
             const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
             const target = mentioned[0];
-            const reason = args.slice(1).join(' ').trim() || 'kein Grund';
+            const reason = args.slice(1).join(' ').trim() || 'kein Grund angegeben';
             if (!target) { await reply(`Nutzung: ${COMMAND_PREFIX}warn @person [Grund]`); break; }
-            const w = moderation.addWarning(jid, target);
+            const w = moderation.addWarning(jid, target, reason);
             const warnLimit = Number(group.moderation.warnLimit) || 3;
-            activityLogPush({ type: 'warn', groupJid: jid, senderNum, targetNum: target.split('@')[0] });
+            activityLogPush({ type: 'warn', groupJid: jid, senderNum, targetNum: target.split('@')[0], reason });
             if (config.groups[jid]?.memberStats?.[target.split('@')[0]]) {
               config.groups[jid].memberStats[target.split('@')[0]].warnings = (config.groups[jid].memberStats[target.split('@')[0]].warnings || 0) + 1;
             }
@@ -2001,13 +2324,30 @@ async function startBot() {
             });
             break;
           }
+          case 'unwarn': {
+            const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+            const target = mentioned[0];
+            if (!target) { await reply(`Nutzung: ${COMMAND_PREFIX}unwarn @person`); break; }
+            const w = moderation.removeWarning(jid, target);
+            const warnLimit = Number(group.moderation.warnLimit) || 3;
+            activityLogPush({ type: 'warn', groupJid: jid, senderNum, targetNum: target.split('@')[0], reason: 'Verwarnung zurückgenommen' });
+            const ms = config.groups[jid]?.memberStats?.[target.split('@')[0]];
+            if (ms && ms.warnings) ms.warnings = Math.max(0, ms.warnings - 1);
+            await sock.sendMessage(jid, {
+              text: `↩️ Eine Verwarnung von @${target.split('@')[0]} wurde zurückgenommen (jetzt ${w.count}/${warnLimit}).`,
+              mentions: [target],
+            });
+            break;
+          }
           case 'clearwarn': {
             const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
             const target = mentioned[0];
             if (!target) { await reply(`Nutzung: ${COMMAND_PREFIX}clearwarn @person`); break; }
             moderation.clearWarnings(jid, target);
+            const ms2 = config.groups[jid]?.memberStats?.[target.split('@')[0]];
+            if (ms2) ms2.warnings = 0;
             await sock.sendMessage(jid, {
-              text: `✅ Verwarnungen von @${target.split('@')[0]} wurden gelöscht.`,
+              text: `✅ Alle Verwarnungen von @${target.split('@')[0]} wurden gelöscht.`,
               mentions: [target],
             });
             break;
@@ -2020,8 +2360,11 @@ async function startBot() {
             const warnLimit = Number(group.moderation.warnLimit) || 3;
             const muteLeft = moderation.getMuteTimeLeft(jid, target);
             const muteTxt = muteLeft > 0 ? `\n🔇 Stummgeschaltet noch: ${formatDuration(muteLeft)}` : '';
+            const reasonsTxt = (w.reasons && w.reasons.length)
+              ? '\n\n*Gründe:*\n' + w.reasons.map((r, i) => `${i + 1}. ${r.reason}`).join('\n')
+              : '';
             await sock.sendMessage(jid, {
-              text: `📋 @${target.split('@')[0]}: ${w.count}/${warnLimit} Verwarnungen${muteTxt}`,
+              text: `📋 @${target.split('@')[0]}: ${w.count}/${warnLimit} Verwarnungen${muteTxt}${reasonsTxt}`,
               mentions: [target],
             });
             break;
@@ -2401,6 +2744,9 @@ process.on('SIGINT', () => shutdown('SIGINT'));
 store.loadConfig(logger)
   .then((c) => {
     config = c && c.groups ? c : { groups: {} };
+    // Globale Einstellungen & Anliegen-Liste sicherstellen
+    config.settings = { dmAssistant: false, ...(config.settings || {}) };
+    if (!Array.isArray(config.anliegen)) config.anliegen = [];
     logger.info('Konfiguration geladen');
     return startBot();
   })
