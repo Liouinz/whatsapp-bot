@@ -153,6 +153,25 @@ const TIER_LABELS = { 1: '⚪ Einfach', 2: '🟢 Komfort', 3: '🔵 Gehoben', 4:
 // Starterkapital für neue Spieler
 const STARTING_BALANCE = 5000;
 
+// Preis eines Lotterie-Loses
+const LOTTERY_TICKET_PRICE = 250;
+
+// ---- Level/XP: quadratisch ansteigende Schwellen ----
+// Level n erfordert insgesamt 100 * n^2 XP.
+function xpForLevel(level) { return 100 * level * level; }
+function levelFromXp(xp) { return Math.floor(Math.sqrt(Math.max(0, xp) / 100)); }
+
+// ---- Achievements: Bedingung (test) + optionale Coin-Belohnung ----
+const ACHIEVEMENTS = [
+  { id: 'first_house', name: '🏠 Eigenheim', desc: 'Kaufe dein erstes Haus.', reward: 1000, test: (c) => c.houses >= 1 },
+  { id: 'five_houses', name: '🏘️ Immobilienhai', desc: 'Besitze 5 Häuser.', reward: 5000, test: (c) => c.houses >= 5 },
+  { id: 'ten_houses', name: '🏙️ Bauunternehmer', desc: 'Besitze 10 Häuser.', reward: 15000, test: (c) => c.houses >= 10 },
+  { id: 'rich_50k', name: '💰 Wohlhabend', desc: 'Erreiche 50.000 Vermögen.', reward: 2500, test: (c) => c.net >= 50000 },
+  { id: 'rich_100k', name: '💎 Reich', desc: 'Erreiche 100.000 Vermögen.', reward: 5000, test: (c) => c.net >= 100000 },
+  { id: 'rich_1m', name: '👑 Millionär', desc: 'Erreiche 1.000.000 Vermögen.', reward: 50000, test: (c) => c.net >= 1000000 },
+  { id: 'cash_25k', name: '🤑 Bargeld-König', desc: 'Halte 25.000 Bargeld.', reward: 2000, test: (c) => c.cash >= 25000 },
+];
+
 // ====================================================================
 // EconomyManager — Datenbankoperationen
 // ====================================================================
@@ -166,9 +185,140 @@ class EconomyManager {
     await this.db.batch([
       'CREATE TABLE IF NOT EXISTS balances (user_id TEXT PRIMARY KEY, amount INTEGER NOT NULL DEFAULT 0)',
       'CREATE TABLE IF NOT EXISTS owned_houses (user_id TEXT NOT NULL, house_id TEXT NOT NULL, bought_at INTEGER NOT NULL, PRIMARY KEY (user_id, house_id))',
-      // Cooldowns & Spieler-Metadaten (last_daily, last_work, last_rent …)
+      // Cooldowns & Spieler-Metadaten (last_daily, last_work, last_rent, xp, bank …)
       'CREATE TABLE IF NOT EXISTS player_meta (user_id TEXT NOT NULL, key TEXT NOT NULL, value INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (user_id, key))',
+      // Bank: getrennt vom Bargeld, wirft täglich Zinsen ab
+      'CREATE TABLE IF NOT EXISTS bank (user_id TEXT PRIMARY KEY, amount INTEGER NOT NULL DEFAULT 0)',
+      // Freigeschaltete Achievements
+      'CREATE TABLE IF NOT EXISTS achievements (user_id TEXT NOT NULL, ach_id TEXT NOT NULL, unlocked_at INTEGER NOT NULL, PRIMARY KEY (user_id, ach_id))',
+      // Lotterie-Lose der laufenden Ziehung
+      'CREATE TABLE IF NOT EXISTS lottery (user_id TEXT NOT NULL, draw_seed INTEGER NOT NULL, tickets INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (user_id, draw_seed))',
     ], 'write');
+  }
+
+  // ================================================================
+  // Bank – getrenntes Konto mit Tageszins (sicher vor Rauben)
+  // ================================================================
+  async getBank(userId) {
+    const rs = await this.db.execute({ sql: 'SELECT amount FROM bank WHERE user_id=?', args: [userId] });
+    return rs.rows[0] ? Number(rs.rows[0].amount) : 0;
+  }
+  async setBank(userId, amount) {
+    await this.db.execute({ sql: 'INSERT OR REPLACE INTO bank(user_id,amount) VALUES(?,?)', args: [userId, Math.max(0, Math.floor(amount))] });
+  }
+  async deposit(userId, amount) {
+    amount = Math.floor(amount);
+    if (amount <= 0) return { ok: false, reason: 'Betrag muss positiv sein.' };
+    const remaining = await this.deductBalance(userId, amount);
+    if (remaining === null) return { ok: false, reason: 'Nicht genug Bargeld.' };
+    const bank = await this.getBank(userId);
+    await this.setBank(userId, bank + amount);
+    return { ok: true, cash: remaining, bank: bank + amount };
+  }
+  async withdraw(userId, amount) {
+    amount = Math.floor(amount);
+    if (amount <= 0) return { ok: false, reason: 'Betrag muss positiv sein.' };
+    const bank = await this.getBank(userId);
+    if (bank < amount) return { ok: false, reason: 'Nicht genug auf der Bank.' };
+    await this.setBank(userId, bank - amount);
+    const cash = await this.addBalance(userId, amount);
+    return { ok: true, cash, bank: bank - amount };
+  }
+  async collectInterest(userId) {
+    const last = await this.getMeta(userId, 'last_interest');
+    const now = Date.now();
+    const DAY = 24 * 60 * 60 * 1000;
+    if (now - last < DAY) return { ok: false, waitMs: DAY - (now - last) };
+    const bank = await this.getBank(userId);
+    if (bank <= 0) return { ok: false, reason: 'Kein Guthaben auf der Bank.' };
+    const interest = Math.floor(bank * 0.01); // 1 % pro Tag
+    await this.setMeta(userId, 'last_interest', now);
+    await this.setBank(userId, bank + interest);
+    return { ok: true, interest, bank: bank + interest };
+  }
+  // Gesamtvermögen = Bargeld + Bank + Hauswerte
+  async getNetWorth(userId) {
+    const [cash, bank, inv] = await Promise.all([
+      this.getBalance(userId), this.getBank(userId), this.getInventory(userId),
+    ]);
+    const houses = inv.reduce((s, e) => s + (e.house?.price || 0), 0);
+    return { cash, bank, houses, total: cash + bank + houses };
+  }
+
+  // ================================================================
+  // Level / XP
+  // ================================================================
+  async addXp(userId, amount) {
+    const cur = await this.getMeta(userId, 'xp');
+    const next = cur + Math.max(0, Math.floor(amount));
+    await this.setMeta(userId, 'xp', next);
+    const before = levelFromXp(cur);
+    const after = levelFromXp(next);
+    return { xp: next, level: after, leveledUp: after > before };
+  }
+  async getLevelInfo(userId) {
+    const xp = await this.getMeta(userId, 'xp');
+    const level = levelFromXp(xp);
+    const cur = xpForLevel(level);
+    const need = xpForLevel(level + 1);
+    return { xp, level, intoLevel: xp - cur, levelSpan: need - cur, nextAt: need };
+  }
+
+  // ================================================================
+  // Achievements
+  // ================================================================
+  async getAchievements(userId) {
+    const rs = await this.db.execute({ sql: 'SELECT ach_id, unlocked_at FROM achievements WHERE user_id=?', args: [userId] });
+    return rs.rows.map((r) => ({ id: r.ach_id, at: Number(r.unlocked_at), def: ACHIEVEMENTS.find((a) => a.id === r.ach_id) })).filter((r) => r.def);
+  }
+  async unlock(userId, achId) {
+    const def = ACHIEVEMENTS.find((a) => a.id === achId);
+    if (!def) return { ok: false };
+    try {
+      await this.db.execute({ sql: 'INSERT INTO achievements(user_id,ach_id,unlocked_at) VALUES(?,?,?)', args: [userId, achId, Date.now()] });
+      if (def.reward) await this.addBalance(userId, def.reward);
+      return { ok: true, def, reward: def.reward || 0 };
+    } catch {
+      return { ok: false, already: true }; // bereits freigeschaltet (PK-Konflikt)
+    }
+  }
+  // Prüft alle Achievements und schaltet neu erreichte frei.
+  async checkAchievements(userId) {
+    const net = await this.getNetWorth(userId);
+    const inv = await this.getInventory(userId);
+    const already = new Set((await this.getAchievements(userId)).map((a) => a.id));
+    const ctx = { net: net.total, cash: net.cash, houses: inv.length };
+    const newly = [];
+    for (const a of ACHIEVEMENTS) {
+      if (already.has(a.id)) continue;
+      if (a.test(ctx)) { const r = await this.unlock(userId, a.id); if (r.ok) newly.push(r); }
+    }
+    return newly;
+  }
+
+  // ================================================================
+  // Lotterie – täglicher Topf, Gewinner per Tages-Seed
+  // ================================================================
+  static lotterySeed() {
+    const d = new Date();
+    return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+  }
+  async buyTicket(userId, count = 1) {
+    count = Math.max(1, Math.floor(count));
+    const cost = count * LOTTERY_TICKET_PRICE;
+    const remaining = await this.deductBalance(userId, cost);
+    if (remaining === null) return { ok: false, reason: 'Nicht genug Coins.' };
+    const seed = EconomyManager.lotterySeed();
+    const rs = await this.db.execute({ sql: 'SELECT tickets FROM lottery WHERE user_id=? AND draw_seed=?', args: [userId, seed] });
+    const have = rs.rows[0] ? Number(rs.rows[0].tickets) : 0;
+    await this.db.execute({ sql: 'INSERT OR REPLACE INTO lottery(user_id,draw_seed,tickets) VALUES(?,?,?)', args: [userId, seed, have + count] });
+    return { ok: true, tickets: have + count, cost, balance: remaining };
+  }
+  async getLotteryPot() {
+    const seed = EconomyManager.lotterySeed();
+    const rs = await this.db.execute({ sql: 'SELECT SUM(tickets) AS t, COUNT(*) AS p FROM lottery WHERE draw_seed=?', args: [seed] });
+    const tickets = Number(rs.rows[0]?.t || 0);
+    return { tickets, players: Number(rs.rows[0]?.p || 0), pot: tickets * LOTTERY_TICKET_PRICE };
   }
 
   // ---- Cooldown-Helfer ----
@@ -403,6 +553,64 @@ function marketPage(page = 0, tierFilter = null) {
     break;
   }
 
+  // ---- Bank ----
+  case 'einzahlen': case 'deposit': {
+    const r = await economy.deposit(senderJid, Number(args[0]) || 0);
+    if (!r.ok) { await reply(`❌ ${r.reason}`); break; }
+    await reply(`🏦 Eingezahlt.\nBargeld: ${formatBalance(r.cash)}\nBank: ${formatBalance(r.bank)}`);
+    break;
+  }
+  case 'auszahlen': case 'withdraw': {
+    const r = await economy.withdraw(senderJid, Number(args[0]) || 0);
+    if (!r.ok) { await reply(`❌ ${r.reason}`); break; }
+    await reply(`🏦 Ausgezahlt.\nBargeld: ${formatBalance(r.cash)}\nBank: ${formatBalance(r.bank)}`);
+    break;
+  }
+  case 'zinsen': {
+    const r = await economy.collectInterest(senderJid);
+    if (!r.ok) { await reply(r.reason || '⏳ Zinsen gibt es einmal pro Tag.'); break; }
+    await reply(`💵 Zinsen erhalten: ${formatBalance(r.interest)}\nBank: ${formatBalance(r.bank)}`);
+    break;
+  }
+  case 'vermögen': case 'networth': {
+    const n = await economy.getNetWorth(senderJid);
+    await reply(`📊 *Vermögen*\nBargeld: ${formatBalance(n.cash)}\nBank: ${formatBalance(n.bank)}\nHäuser: ${formatBalance(n.houses)}\n*Gesamt: ${formatBalance(n.total)}*`);
+    break;
+  }
+
+  // ---- Level & Achievements ----
+  case 'level': case 'rang': {
+    const l = await economy.getLevelInfo(senderJid);
+    await reply(`⭐ Level *${l.level}*\nXP: ${l.intoLevel}/${l.levelSpan} bis Level ${l.level + 1}`);
+    break;
+  }
+  case 'achievements': case 'erfolge': {
+    const list = await economy.getAchievements(senderJid);
+    if (!list.length) { await reply('Noch keine Erfolge. Kauf ein Haus oder werde reich! 🏆'); break; }
+    await reply('🏆 *Deine Erfolge*\n\n' + list.map((a) => `${a.def.name} – ${a.def.desc}`).join('\n'));
+    break;
+  }
+
+  // ---- Lotterie ----
+  case 'lotto': case 'lotterie': {
+    const n = Math.max(1, Number(args[0]) || 1);
+    const r = await economy.buyTicket(senderJid, n);
+    if (!r.ok) { await reply(`❌ ${r.reason}`); break; }
+    const pot = await economy.getLotteryPot();
+    await reply(`🎟️ ${n} Los(e) gekauft (${formatBalance(r.cost)}).\nDu hast ${r.tickets} Lose.\nJackpot heute: ${formatBalance(pot.pot)} (${pot.players} Spieler)`);
+    break;
+  }
+  case 'jackpot': {
+    const pot = await economy.getLotteryPot();
+    await reply(`💰 *Lotto-Jackpot*\nHeute: ${formatBalance(pot.pot)}\nSpieler: ${pot.players}\nLose gesamt: ${pot.tickets}\nEin Los kostet ${formatBalance(250)}.`);
+    break;
+  }
+
 */
 
-module.exports = { EconomyManager, HOUSES, TIER_LABELS, formatBalance, houseCard, marketPage };
+module.exports = {
+  EconomyManager, HOUSES, TIER_LABELS, ACHIEVEMENTS,
+  STARTING_BALANCE, LOTTERY_TICKET_PRICE,
+  formatBalance, houseCard, marketPage,
+  xpForLevel, levelFromXp,
+};

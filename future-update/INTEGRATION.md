@@ -6,8 +6,8 @@
 ---
 
 ## Schritt 0 – Vorbereitung
-1. In Render eine Variable `GAME_GROUP_JID` mit der JID der Spiel-Gruppe anlegen
-   (JID bekommst du mit `!id` in der gewünschten Gruppe).
+1. Keine neue Render-Variable nötig. Spiele werden pro Gruppe per `!spielgruppe an`
+   (nur Inhaber) freigeschaltet – gespeichert in `config.gameGroups`.
 2. `TURSO_*`-Variablen sind bereits gesetzt.
 
 ---
@@ -17,35 +17,48 @@
 **Oben in `index.js` (bei den require-Zeilen):**
 ```js
 const { EconomyManager, HOUSES, TIER_LABELS, formatBalance, houseCard, marketPage } = require('./economy');
-const { GameManager, fmtWait } = require('./future-update/games');
-const GAME_GROUP_JID = process.env.GAME_GROUP_JID || '';
-let economy = null, game = null;
+const { GameManager, fmtWait, isGameGroup, setGameGroup } = require('./future-update/games');
+const { ShopManager, shopList } = require('./future-update/shop');
+const { QuestManager } = require('./future-update/quests');
+let economy = null, game = null, shop = null, quest = null;
+const duels = new Map(); // für PvP-Würfelduelle: key = `${jid}:${gegnerNum}`
 ```
 
-**Im Startup-Block** (nach `store.loadConfig(...).then(...)`, vor/nach `startBot()`):
+**Im Startup-Block** (nach `store.loadConfig(...).then(...)`):
 ```js
+if (!config.gameGroups || typeof config.gameGroups !== 'object') config.gameGroups = {};
 if (process.env.TURSO_DATABASE_URL && process.env.TURSO_AUTH_TOKEN) {
   economy = new EconomyManager(process.env.TURSO_DATABASE_URL, process.env.TURSO_AUTH_TOKEN);
   await economy.init();
+  shop = new ShopManager(economy); await shop.init();
   game = new GameManager(economy);
-  logger.info('Wirtschaft & Spiele aktiv');
+  quest = new QuestManager(economy);
+  logger.info('Wirtschaft, Shop, Quests & Spiele bereit');
 }
 ```
 
-**Im `switch (cmd)`-Block:** die Cases aus dem Kommentar in `economy.js`
-(`ECONOMY_COMMANDS`) und `future-update/games.js` (`GAME_COMMANDS`) einfügen.
+**Im `switch (cmd)`-Block:** die Cases aus den Kommentaren in `economy.js`
+(`ECONOMY_COMMANDS`), `future-update/games.js` (`GAME_COMMANDS`),
+`future-update/shop.js` (`SHOP_COMMANDS`) und `future-update/quests.js`
+(`QUEST_COMMANDS`) einfügen. Der `spielgruppe`-Case (Inhaber) gehört dazu.
 
-**Spiel-Gruppen-Sperre** – direkt vor diesen Cases:
+**Inhaber-Freigabe pro Gruppe** – zentrale Sperre direkt vor allen Spiel-/Wirtschaftscases
+(außer `spielgruppe` selbst):
 ```js
-const ECO_CMDS = ['balance','kaufen','verkaufen','inventar','markt','angebot','reich',
-                  'daily','arbeiten','work','miete','pay','überweisen','slots','coinflip',
-                  'cf','würfelwette','dicebet','rauben','rob'];
-if (ECO_CMDS.includes(cmd) && GAME_GROUP_JID && jid !== GAME_GROUP_JID) {
-  await reply('🎮 Spiele laufen nur in der Spiel-Gruppe.'); break;
+const GAME_CMDS = ['balance','vermögen','networth','kaufen','verkaufen','inventar','markt',
+  'angebot','reich','daily','arbeiten','work','miete','pay','überweisen','level','rang',
+  'achievements','erfolge','einzahlen','deposit','auszahlen','withdraw','zinsen','lotto',
+  'lotterie','jackpot','slots','coinflip','cf','würfelwette','dicebet','roulette','hl',
+  'higherlower','bj','blackjack','duell','annehmen','rauben','rob','shop','kaufenitem',
+  'buyitem','verkaufenitem','sellitem','items','meineitems','einkommen','tagesdeal',
+  'quests','aufgaben','claim'];
+if (GAME_CMDS.includes(cmd)) {
+  if (!economy) { await reply('🎮 Spielmodus nicht verfügbar (keine Datenbank).'); break; }
+  if (!isGameGroup(config, jid)) { await reply('🚫 Spiele sind hier nicht freigeschaltet. Der Inhaber kann sie mit !spielgruppe an aktivieren.'); break; }
 }
 ```
 
-**COMMANDS-Registry & ALIAS** um die neuen Befehle ergänzen (sonst `!hilfe`-Filter zeigt sie nicht).
+**COMMANDS-Registry & ALIAS** um die neuen Befehle ergänzen (sonst zeigt der `!hilfe`-Filter sie nicht).
 
 ---
 
@@ -83,27 +96,57 @@ if (!isAdmin(metaForAdmin, senderJid) && !darfMod && !(await isCommunityOwner(se
 const webui = require('./future-update/webui');
 ```
 
-**Pro Route** das alte Inline-HTML ersetzen, z. B. das Dashboard:
+**Fertige Seiten-Renderer** (am einfachsten):
 ```js
-const cards = [
-  webui.statCard('Nummer', escapeHtml(nummer)),
-  webui.statCard('Laufzeit', uptime),
-  webui.statCard('Aktive Gruppen', activeGroupCount()),
-  webui.statCard('Speicher', speicher, { badge: 'OK', badgeType: 'good' }),
-];
-const body = `<div class="section-title">Übersicht</div>${webui.statGrid(cards)}`;
-res.send(webui.pageShell('Dashboard', body, { active: 'dashboard', keyParam }));
+// Dashboard
+res.send(webui.renderDashboard([
+  { k: 'Nummer', v: escapeHtml(nummer) },
+  { k: 'Laufzeit', v: uptime },
+  { k: 'Aktive Gruppen', v: activeGroupCount() },
+  { k: 'Speicher', v: speicher, badge: 'OK', badgeType: 'good' },
+], keyParam));
+
+// Login-Seite
+res.send(webui.renderLogin(keyParam, fehlerText));
+
+// Gruppen-Liste
+res.send(webui.renderGroups(botState.groups, keyParam));
+
+// Reichste Spieler (aus economy.getLeaderboard())
+res.send(webui.renderEconomyBoard(rows, keyParam));
+
+// Einstellungen mit Animations-Schaltern
+res.send(webui.renderSettings([{ label: 'DM-Assistent', name: 'dm', checked: config.settings?.dmAssistant }], keyParam));
 ```
-Routen einzeln umstellen – so bleibt das alte UI funktionsfähig, bis alles migriert ist.
+Einzelne Komponenten (`webui.table`, `webui.progressBar`, `webui.toggleSwitch`, `webui.groupCard`)
+lassen sich auch frei in eigenes HTML einsetzen. Routen einzeln umstellen – das alte UI bleibt
+funktionsfähig, bis alles migriert ist.
 
 ---
 
+## Schritt 3.5 – Quest-Fortschritt melden (optional, empfohlen)
+An den passenden Cases `await quest.track(...)` einfügen, z. B.:
+```js
+await quest.track(senderJid, 'slots');             // im slots-Case
+await quest.track(senderJid, 'work');              // im arbeiten-Case
+await quest.track(senderJid, 'gamble');            // in jedem Casino-Case
+await quest.track(senderJid, 'win');               // wenn ein Casino-Spiel gewonnen
+await quest.track(senderJid, 'earn', verdienst);   // wenn Coins verdient wurden
+await quest.track(senderJid, 'buyhouse');          // im kaufen-Case
+await quest.track(senderJid, 'daily');             // im daily-Case
+```
+Achievements nach Geldänderungen prüfen: `const neu = await economy.checkAchievements(senderJid);`
+und bei `neu.length` eine kurze Glückwunsch-Nachricht senden.
+
 ## Schritt 4 – Testen
 - `node -c index.js` → fehlerfrei.
-- Lokal/Render starten, Log prüfen: „Wirtschaft & Spiele aktiv", „Turso verbunden".
-- In der Spiel-Gruppe: `!daily`, `!arbeiten`, `!markt`, `!kaufen h001`, `!slots 100`.
+- Lokal/Render starten, Log prüfen: „Wirtschaft, Shop, Quests & Spiele bereit", „Turso verbunden".
+- Als Inhaber `!spielgruppe an` in einer Testgruppe; dann:
+  `!daily`, `!arbeiten`, `!markt`, `!kaufen h001`, `!slots 100`, `!roulette rot 100`,
+  `!shop`, `!kaufenitem pet_cat`, `!quests`, `!einzahlen 1000`, `!zinsen`, `!lotto 2`.
+- In einer NICHT freigeschalteten Gruppe → Spielbefehle werden abgelehnt.
 - `!menu` zeigt rollenabhängige Menüs; `!modallow @x moderation` als Inhaber testen.
-- Web-UI im Browser prüfen (Hell/Dunkel-Umschalter oben rechts).
+- Web-UI im Browser prüfen (Hell/Dunkel-Umschalter oben rechts, Animationen).
 
 ---
 

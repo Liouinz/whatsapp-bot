@@ -27,20 +27,46 @@ const CATEGORIES = {
   },
   economy: {
     label: '🏠 Wirtschaft',
-    desc: 'Coins & Häuser (nur Spiel-Gruppe)',
+    desc: 'Coins & Häuser (nur freigegebene Gruppen)',
     commands: [
-      ['balance', 'Kontostand'], ['daily', 'Tagesbonus'], ['arbeiten', 'Coins verdienen'],
-      ['markt', 'Häuser-Markt'], ['kaufen', 'Haus kaufen'], ['verkaufen', 'Haus verkaufen'],
-      ['inventar', 'deine Häuser'], ['miete', 'Mieteinnahmen'], ['angebot', 'Tagesangebote'],
-      ['reich', 'Rangliste'], ['pay', 'Coins überweisen'],
+      ['balance', 'Kontostand'], ['vermögen', 'Gesamtvermögen'], ['daily', 'Tagesbonus'],
+      ['arbeiten', 'Coins verdienen'], ['markt', 'Häuser-Markt'], ['kaufen', 'Haus kaufen'],
+      ['verkaufen', 'Haus verkaufen'], ['inventar', 'deine Häuser'], ['miete', 'Mieteinnahmen'],
+      ['angebot', 'Tagesangebote'], ['reich', 'Rangliste'], ['pay', 'Coins überweisen'],
+      ['level', 'dein Level/XP'], ['achievements', 'Erfolge'],
+    ],
+  },
+  bank: {
+    label: '🏦 Bank',
+    desc: 'Sicheres Konto mit Zinsen',
+    commands: [
+      ['einzahlen', 'Geld einzahlen'], ['auszahlen', 'Geld abheben'], ['zinsen', 'Tageszins abholen'],
+    ],
+  },
+  shop: {
+    label: '🛒 Shop',
+    desc: 'Autos, Haustiere & Boosts',
+    commands: [
+      ['shop', 'Shop ansehen'], ['kaufenitem', 'Item kaufen'], ['verkaufenitem', 'Item verkaufen'],
+      ['items', 'deine Items'], ['einkommen', 'Tageseinkommen'], ['tagesdeal', 'Item-Angebot'],
+    ],
+  },
+  quests: {
+    label: '🎯 Quests',
+    desc: 'Tägliche Aufgaben',
+    commands: [
+      ['quests', 'Tagesquests'], ['claim', 'Belohnung abholen'],
     ],
   },
   games: {
     label: '🎲 Casino',
-    desc: 'Wettspiele (nur Spiel-Gruppe)',
+    desc: 'Wettspiele (nur freigegebene Gruppen)',
     commands: [
       ['slots', 'Einarmiger Bandit 🎰'], ['coinflip', 'Kopf oder Zahl'],
-      ['würfelwette', 'Würfeln gegen den Bot'], ['rauben', 'jemanden ausrauben 🦹'],
+      ['würfelwette', 'Würfeln gegen den Bot'], ['roulette', 'Roulette 🎡'],
+      ['blackjack', 'Blackjack 🃏'], ['hl', 'Higher-Lower'],
+      ['duell', 'Würfelduell gegen Spieler'], ['lotto', 'Lotterie-Los'],
+      ['rauben', 'jemanden ausrauben 🦹'],
     ],
   },
   moderation: {
@@ -64,8 +90,9 @@ const CATEGORIES = {
     desc: 'Nur für den Community-Inhaber',
     commands: [
       ['communitykick', 'aus ALLEN Gruppen bannen'], ['communityunban', 'Bann aufheben'],
-      ['communitybanlist', 'Bannliste'], ['modallow', 'Moderator-Rechte vergeben'],
-      ['moddeny', 'Moderator-Rechte entziehen'], ['modlist', 'Moderatoren anzeigen'],
+      ['communitybanlist', 'Bannliste'], ['spielgruppe', 'Spiele hier an/aus'],
+      ['modallow', 'Moderator-Rechte vergeben'], ['moddeny', 'Moderator-Rechte entziehen'],
+      ['modlist', 'Moderatoren anzeigen'],
     ],
   },
 };
@@ -101,6 +128,9 @@ function renderCategory(prefix, cat) {
 function buildMenu(prefix, { isOwner = false, isAdmin = false, modCats = [] } = {}) {
   const blocks = [renderCategory(prefix, CATEGORIES.user), renderCategory(prefix, CATEGORIES.fun)];
   blocks.push(renderCategory(prefix, CATEGORIES.economy));
+  blocks.push(renderCategory(prefix, CATEGORIES.bank));
+  blocks.push(renderCategory(prefix, CATEGORIES.shop));
+  blocks.push(renderCategory(prefix, CATEGORIES.quests));
   blocks.push(renderCategory(prefix, CATEGORIES.games));
   if (isAdmin || modCats.includes('moderation')) blocks.push(renderCategory(prefix, CATEGORIES.moderation));
   if (isAdmin) blocks.push(renderCategory(prefix, CATEGORIES.admin));

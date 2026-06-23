@@ -134,4 +134,102 @@ function pageShell(title, bodyHtml, opts = {}) {
 <script>${SCRIPT}</script></body></html>`;
 }
 
-module.exports = { STYLES, SCRIPT, navBar, statCard, statGrid, button, pageShell };
+// ====================================================================
+// Weitere Komponenten
+// ====================================================================
+function sectionTitle(text) { return `<div class="section-title">${text}</div>`; }
+
+function table(headers, rows) {
+  const head = headers.map((h) => `<th style="text-align:left;padding:10px 12px;color:var(--muted);font-size:.8rem">${h}</th>`).join('');
+  const body = rows.map((r) =>
+    `<tr style="border-top:1px solid var(--card-brd)">${r.map((c) => `<td style="padding:10px 12px">${c}</td>`).join('')}</tr>`).join('');
+  return `<div class="card" style="padding:6px"><table style="width:100%;border-collapse:collapse"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+function formRow(label, inputHtml) {
+  return `<div style="display:flex;justify-content:space-between;align-items:center;gap:14px;padding:12px 4px;border-bottom:1px solid var(--card-brd)">
+    <span style="color:var(--txt)">${label}</span><span>${inputHtml}</span></div>`;
+}
+
+function toggleSwitch(name, checked) {
+  return `<label class="switch"><input type="checkbox" name="${name}" ${checked ? 'checked' : ''}><span class="slider"></span></label>`;
+}
+
+function progressBar(value, max, label = '') {
+  const pct = Math.max(0, Math.min(100, Math.round((value / Math.max(1, max)) * 100)));
+  return `<div style="margin:6px 0">
+    ${label ? `<div style="font-size:.8rem;color:var(--muted);margin-bottom:4px">${label} – ${value}/${max}</div>` : ''}
+    <div style="height:10px;background:var(--card-brd);border-radius:999px;overflow:hidden">
+      <div style="height:100%;width:${pct}%;background:linear-gradient(135deg,var(--accent),var(--accent2));transition:width .6s ease"></div>
+    </div></div>`;
+}
+
+function groupCard(g, keyParam = '') {
+  const status = g.active ? '<span class="badge good">aktiv</span>' : '<span class="badge bad">inaktiv</span>';
+  return `<div class="card">
+    <div style="font-weight:600;font-size:1.05rem;margin-bottom:6px">${escapeHtml(g.subject || g.id)}</div>
+    <div style="color:var(--muted);font-size:.85rem;margin-bottom:10px">${g.size || 0} Mitglieder ${status}</div>
+    ${button('Verwalten', { href: `/groups/${encodeURIComponent(g.id)}${keyParam}`, ghost: true })}
+  </div>`;
+}
+
+// kleine HTML-Escape-Hilfe (Module ist eigenständig)
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// ====================================================================
+// Fertige Seiten-Renderer (später 1:1 in index.js-Routen einsetzbar)
+// ====================================================================
+function renderLogin(keyParam = '', error = '') {
+  const body = `<div style="max-width:380px;margin:10vh auto 0">
+    <div class="card" style="text-align:center;animation:rise .5s ease both">
+      <div style="font-size:2.4rem;margin-bottom:6px">🤖</div>
+      <div class="section-title" style="margin:0 0 4px">WhatsApp-Bot</div>
+      <p style="color:var(--muted);margin-top:0">Bitte Passwort eingeben</p>
+      ${error ? `<p class="badge bad">${escapeHtml(error)}</p>` : ''}
+      <form method="GET" action="/dashboard" style="margin-top:14px">
+        <input name="key" type="password" placeholder="Passwort"
+          style="width:100%;padding:12px 14px;border-radius:14px;border:1px solid var(--card-brd);background:var(--card);color:var(--txt);margin-bottom:12px">
+        <button class="btn" style="width:100%;justify-content:center">Anmelden</button>
+      </form>
+    </div></div>`;
+  return pageShell('Login', body, { active: '', keyParam });
+}
+
+function renderDashboard(stats, keyParam = '') {
+  // stats: [{k, v, badge?, badgeType?}]
+  const cards = stats.map((s) => statCard(s.k, s.v, { badge: s.badge, badgeType: s.badgeType }));
+  const body = `${sectionTitle('📊 Übersicht')}${statGrid(cards)}`;
+  return pageShell('Dashboard', body, { active: 'dashboard', keyParam });
+}
+
+function renderGroups(groups, keyParam = '') {
+  const cards = groups.map((g) => groupCard(g, keyParam)).join('');
+  const body = `${sectionTitle('⚙️ Gruppen')}<div class="grid">${cards}</div>`;
+  return pageShell('Gruppen', body, { active: 'groups', keyParam });
+}
+
+function renderEconomyBoard(rows, keyParam = '') {
+  // rows: [{rank, name, houses, worth}]
+  const medals = ['🥇', '🥈', '🥉'];
+  const trows = rows.map((r, i) => [medals[i] || `${i + 1}.`, escapeHtml(r.name), r.houses, r.worth]);
+  const body = `${sectionTitle('🏆 Reichste Spieler')}${table(['#', 'Spieler', 'Häuser', 'Vermögen'], trows)}`;
+  return pageShell('Wirtschaft', body, { active: 'economy', keyParam });
+}
+
+function renderSettings(settings, keyParam = '') {
+  // settings: [{label, name, checked}]
+  const rows = settings.map((s) => formRow(s.label, toggleSwitch(s.name, s.checked))).join('');
+  const body = `${sectionTitle('🛠️ Einstellungen')}
+    <form method="POST" action="/settings${keyParam}"><div class="card">${rows}</div>
+    <div style="margin-top:14px">${button('Speichern')}</div></form>`;
+  return pageShell('Einstellungen', body, { active: 'settings', keyParam });
+}
+
+module.exports = {
+  STYLES, SCRIPT, navBar, statCard, statGrid, button, pageShell,
+  sectionTitle, table, formRow, toggleSwitch, progressBar, groupCard, escapeHtml,
+  renderLogin, renderDashboard, renderGroups, renderEconomyBoard, renderSettings,
+};

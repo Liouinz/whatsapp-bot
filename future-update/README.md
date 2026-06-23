@@ -14,10 +14,12 @@ startet oder etwas am Live-Betrieb kaputt geht.
 
 | Modul | Datei | Zweck | Status |
 |-------|-------|-------|--------|
-| 🏠 Wirtschaft | `../economy.js` | 130 Häuser, Coins, Kauf/Verkauf, Tagesangebote, Mieteinnahmen | Gerüst steht |
-| 🎮 Spiele | `games.js` | Spiel-Gruppe: Slots, Coinflip, Würfelwetten, Daily, Arbeiten, Rauben | Gerüst steht |
-| 📋 Menüs | `menus.js` | `!menu`, `!adminmenu`, `!modmenu` – Befehle nach Rolle; Inhaber steuert Mod-Rechte | Gerüst steht |
-| 🎨 Web-UI | `webui.js` | Komplett neues, cleanes Design (Apple/Samsung-Stil) mit Animationen | Gerüst steht |
+| 🏠 Wirtschaft | `../economy.js` | 130 Häuser, Coins, Kauf/Verkauf, Tagesangebote, Miete, **Bank+Zinsen, Level/XP, Achievements, Lotterie** | ausgebaut |
+| 🎮 Spiele | `games.js` | Slots, Coinflip, Würfelwette, **Roulette, Blackjack, Higher-Lower, PvP-Duell** + Inhaber-Freigabe pro Gruppe | ausgebaut |
+| 🛒 Shop | `shop.js` | Autos, Haustiere, Boosts (XP/Glück/Einkommen) + Tagesdeal | NEU |
+| 🎯 Quests | `quests.js` | 3 Tagesquests mit Fortschritt & Belohnung (Coins + XP) | NEU |
+| 📋 Menüs | `menus.js` | `!menu`, `!adminmenu`, `!modmenu` – Befehle nach Rolle; Inhaber steuert Mod-Rechte | ausgebaut |
+| 🎨 Web-UI | `webui.js` | Neues cleanes Design (Apple/Samsung-Stil), Animationen, fertige Seiten-Renderer | ausgebaut |
 | 🔌 Einbau | `INTEGRATION.md` | Schritt-für-Schritt, wie jedes Modul in `index.js` eingehängt wird | — |
 
 ---
@@ -33,12 +35,17 @@ startet oder etwas am Live-Betrieb kaputt geht.
 
 ---
 
-## Neue Umgebungsvariablen (erst beim Einbau setzen)
+## Spiele pro Gruppe freischalten (Inhaber)
+
+Spiele & Wirtschaft sind **standardmäßig aus**. Nur der Community-Inhaber schaltet sie
+pro Gruppe frei: `!spielgruppe an` (bzw. `!spielgruppe aus`). Gespeichert in
+`config.gameGroups[jid]` – überlebt Neustarts via Turso. Keine feste `GAME_GROUP_JID`-Variable nötig.
+
+## Umgebungsvariablen
 
 | Variable | Zweck |
 |----------|-------|
-| `GAME_GROUP_JID` | JID der Spiel-Gruppe (Spiele-Befehle nur dort aktiv) |
-| `TURSO_DATABASE_URL` | bereits gesetzt – wird auch für Coins/Häuser genutzt |
+| `TURSO_DATABASE_URL` | bereits gesetzt – wird auch für Coins/Häuser/Bank/Items genutzt |
 | `TURSO_AUTH_TOKEN` | bereits gesetzt |
 
 ---
