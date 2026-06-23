@@ -806,11 +806,18 @@ function happinessStatus(since) {
   const base = Math.min(100, 60 + days * 0.5 + (seed % 20));
   const wobble = ((seed * 7 + Math.floor(days) * 3) % 20) - 10;
   const pct = Math.round(Math.max(20, Math.min(100, base + wobble)));
-  if (pct >= 90) return `${pct}% 💍 unzertrennlich`;
-  if (pct >= 70) return `${pct}% 😍 sehr glücklich`;
-  if (pct >= 50) return `${pct}% 🙂 ganz gut`;
-  if (pct >= 35) return `${pct}% 😐 läuft so`;
-  return `${pct}% 😤 angespannt`;
+  if (pct >= 90) return `${pct}% \u{1F48D} unzertrennlich`;
+  if (pct >= 70) return `${pct}% \u{1F60D} sehr glücklich`;
+  if (pct >= 50) return `${pct}% \u{1F642} ganz gut`;
+  if (pct >= 35) return `${pct}% \u{1F610} läuft so`;
+  return `${pct}% \u{1F624} angespannt`;
+}
+
+function getTargetJid(msg) {
+  const ctx = msg.message?.extendedTextMessage?.contextInfo
+    || msg.message?.imageMessage?.contextInfo
+    || msg.message?.videoMessage?.contextInfo;
+  return (ctx?.mentionedJid?.[0]) || (ctx?.participant) || null;
 }
 
 // ---------- Hilfsfunktionen ----------
@@ -2119,13 +2126,20 @@ app.get('/dashboard', (req, res) => {
 
 const server = app.listen(PORT, () => logger.info(`HTTP-Server läuft auf Port ${PORT}`));
 
-// ---------- Optionaler Self-Ping ----------
+// ---------- Self-Ping (Render Free bleibt wach) ----------
 if (SELF_URL) {
-  setInterval(() => {
-    fetch(`${SELF_URL}/ping`)
-      .then(() => logger.debug('Self-Ping erfolgreich'))
-      .catch((err) => logger.warn({ err }, 'Self-Ping fehlgeschlagen'));
-  }, 4 * 60 * 1000);
+  const doPing = () => {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 10_000);
+    fetch(`${SELF_URL}/ping`, { signal: ctrl.signal })
+      .then(() => logger.info('Self-Ping OK'))
+      .catch((err) => logger.warn({ err }, 'Self-Ping fehlgeschlagen'))
+      .finally(() => clearTimeout(t));
+  };
+  doPing();
+  setInterval(doPing, 4 * 60 * 1000);
+} else {
+  logger.warn('SELF_URL nicht gesetzt – Bot kann auf Render einschlafen!');
 }
 
 // ---------- Gruppen & Metadaten ----------
@@ -2400,8 +2414,7 @@ async function startBot() {
             break;
           }
           case 'marry': {
-            const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
-            const target = mentioned[0];
+            const target = getTargetJid(msg);
             if (!target) {
               const m = findMarriage(jid, senderJid);
               if (!m) {
@@ -2490,8 +2503,7 @@ async function startBot() {
 
           // ---- Admin-Moderations-Befehle ----
           case 'kick': {
-            const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
-            const target = mentioned[0];
+            const target = getTargetJid(msg);
             if (!target) { await reply(`Nutzung: ${COMMAND_PREFIX}kick @person`); break; }
             try {
               await sock.groupParticipantsUpdate(jid, [target], 'remove');
@@ -2503,9 +2515,9 @@ async function startBot() {
             break;
           }
           case 'ban': {
-            const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
-            const target = mentioned[0];
-            const reason = args.slice(1).join(' ').trim() || 'kein Grund angegeben';
+            const _mentionedBan = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+            const target = _mentionedBan[0] || getTargetJid(msg);
+            const reason = (_mentionedBan[0] ? args.slice(1) : args).join(' ').trim() || 'kein Grund angegeben';
             if (!target) { await reply(`Nutzung: ${COMMAND_PREFIX}ban @person [Grund]`); break; }
             try {
               await sock.groupParticipantsUpdate(jid, [target], 'remove');
@@ -2520,9 +2532,9 @@ async function startBot() {
             break;
           }
           case 'mute': {
-            const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
-            const target = mentioned[0];
-            const minutes = Math.min(1440, Math.max(1, Number(args[1]) || 10));
+            const _mentionedMute = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+            const target = _mentionedMute[0] || getTargetJid(msg);
+            const minutes = Math.min(1440, Math.max(1, Number(_mentionedMute[0] ? args[1] : args[0]) || 10));
             if (!target) { await reply(`Nutzung: ${COMMAND_PREFIX}mute @person [Minuten]`); break; }
             moderation.muteUser(jid, target, minutes);
             activityLogPush({ type: 'mute', groupJid: jid, senderNum, targetNum: target.split('@')[0] });
@@ -2533,8 +2545,7 @@ async function startBot() {
             break;
           }
           case 'unmute': {
-            const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
-            const target = mentioned[0];
+            const target = getTargetJid(msg);
             if (!target) { await reply(`Nutzung: ${COMMAND_PREFIX}unmute @person`); break; }
             moderation.unmuteUser(jid, target);
             await sock.sendMessage(jid, {
@@ -2544,9 +2555,9 @@ async function startBot() {
             break;
           }
           case 'warn': {
-            const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
-            const target = mentioned[0];
-            const reason = args.slice(1).join(' ').trim() || 'kein Grund angegeben';
+            const _mentionedWarn = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+            const target = _mentionedWarn[0] || getTargetJid(msg);
+            const reason = (_mentionedWarn[0] ? args.slice(1) : args).join(' ').trim() || 'kein Grund angegeben';
             if (!target) { await reply(`Nutzung: ${COMMAND_PREFIX}warn @person [Grund]`); break; }
             const w = moderation.addWarning(jid, target, reason);
             const warnLimit = Number(group.moderation.warnLimit) || 3;
@@ -2561,8 +2572,7 @@ async function startBot() {
             break;
           }
           case 'unwarn': {
-            const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
-            const target = mentioned[0];
+            const target = getTargetJid(msg);
             if (!target) { await reply(`Nutzung: ${COMMAND_PREFIX}unwarn @person`); break; }
             const w = moderation.removeWarning(jid, target);
             const warnLimit = Number(group.moderation.warnLimit) || 3;
@@ -2576,8 +2586,7 @@ async function startBot() {
             break;
           }
           case 'clearwarn': {
-            const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
-            const target = mentioned[0];
+            const target = getTargetJid(msg);
             if (!target) { await reply(`Nutzung: ${COMMAND_PREFIX}clearwarn @person`); break; }
             moderation.clearWarnings(jid, target);
             const ms2 = config.groups[jid]?.memberStats?.[target.split('@')[0]];
@@ -2589,8 +2598,7 @@ async function startBot() {
             break;
           }
           case 'warninfo': {
-            const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
-            const target = mentioned[0];
+            const target = getTargetJid(msg);
             if (!target) { await reply(`Nutzung: ${COMMAND_PREFIX}warninfo @person`); break; }
             const w = moderation.getWarnings(jid, target);
             const warnLimit = Number(group.moderation.warnLimit) || 3;
@@ -2613,8 +2621,7 @@ async function startBot() {
             break;
           }
           case 'promote': {
-            const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
-            const target = mentioned[0];
+            const target = getTargetJid(msg);
             if (!target) { await reply(`Nutzung: ${COMMAND_PREFIX}promote @person`); break; }
             try {
               await sock.groupParticipantsUpdate(jid, [target], 'promote');
@@ -2623,8 +2630,7 @@ async function startBot() {
             break;
           }
           case 'demote': {
-            const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
-            const target = mentioned[0];
+            const target = getTargetJid(msg);
             if (!target) { await reply(`Nutzung: ${COMMAND_PREFIX}demote @person`); break; }
             try {
               await sock.groupParticipantsUpdate(jid, [target], 'demote');
@@ -2854,8 +2860,8 @@ async function startBot() {
             break;
           }
           case 'stats': {
-            const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
-            const targetNum2 = mentioned[0] ? mentioned[0].split('@')[0] : senderNum;
+            const _statsTarget = getTargetJid(msg);
+            const targetNum2 = _statsTarget ? _statsTarget.split('@')[0] : senderNum;
             const s2 = getMemberStats(jid, targetNum2);
             const w2 = moderation.getWarnings(jid, `${targetNum2}@s.whatsapp.net`);
             const mar2 = findMarriage(jid, `${targetNum2}@s.whatsapp.net`);
@@ -2878,8 +2884,7 @@ async function startBot() {
             break;
           }
           case 'profil': {
-            const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
-            const targetPJ = mentioned[0] || senderJid;
+            const targetPJ = getTargetJid(msg) || senderJid;
             const targetPN = targetPJ.split('@')[0];
             const ps = getMemberStats(jid, targetPN);
             const pw = moderation.getWarnings(jid, targetPJ);
@@ -2955,8 +2960,12 @@ async function startBot() {
           }
           case 'ship': {
             const mentions3 = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
-            if (mentions3.length < 2) { await reply(`Nutzung: ${COMMAND_PREFIX}ship @person1 @person2`); break; }
-            const [p1, p2] = mentions3;
+            const replyPerson = msg.message?.extendedTextMessage?.contextInfo?.participant;
+            const shipTargets = replyPerson && mentions3.length === 1
+              ? [replyPerson, mentions3[0]]
+              : mentions3;
+            if (shipTargets.length < 2) { await reply(`Nutzung: ${COMMAND_PREFIX}ship @person1 @person2`); break; }
+            const [p1, p2] = shipTargets;
             const seed2 = (Number(p1.replace(/\D/g, '').slice(-4)) + Number(p2.replace(/\D/g, '').slice(-4))) % 100;
             const compat = Math.abs((seed2 * 37 + 23) % 101);
             const heart = compat >= 80 ? '💕' : compat >= 60 ? '💛' : compat >= 40 ? '💙' : compat >= 20 ? '🫤' : '💔';
@@ -3069,8 +3078,7 @@ async function startBot() {
           case 'iq':
           case 'simp':
           case 'vibe': {
-            const mentionedG = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
-            const targetG = mentionedG[0] || senderJid;
+            const targetG = getTargetJid(msg) || senderJid;
             const tnumG = targetG.split('@')[0];
             const seedG = tnumG.split('').reduce((a, c) => a + c.charCodeAt(0), 0) + new Date().getDate();
             if (cmd === 'iq') {
@@ -3134,8 +3142,7 @@ async function startBot() {
           case 'hug':
           case 'slap':
           case 'poke': {
-            const mentioned4 = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
-            const target4 = mentioned4[0];
+            const target4 = getTargetJid(msg);
             if (!target4) { await reply(`Nutzung: ${COMMAND_PREFIX}${cmd} @person`); break; }
             const actionArr = ACTIONS[cmd];
             const actionTxt = actionArr[Math.floor(Math.random() * actionArr.length)]
@@ -3145,8 +3152,7 @@ async function startBot() {
             break;
           }
           case 'compliment': {
-            const mentioned5 = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
-            const target5 = mentioned5[0];
+            const target5 = getTargetJid(msg);
             const comp = COMPLIMENTS[Math.floor(Math.random() * COMPLIMENTS.length)];
             if (target5) {
               await sock.sendMessage(jid, {

@@ -11,6 +11,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
+    "@libsql/client": "^0.14.0",
     "@whiskeysockets/baileys": "^6.7.23",
     "express": "^4.22.2",
     "mongodb": "^6.12.0",
