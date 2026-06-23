@@ -166,7 +166,82 @@ class EconomyManager {
     await this.db.batch([
       'CREATE TABLE IF NOT EXISTS balances (user_id TEXT PRIMARY KEY, amount INTEGER NOT NULL DEFAULT 0)',
       'CREATE TABLE IF NOT EXISTS owned_houses (user_id TEXT NOT NULL, house_id TEXT NOT NULL, bought_at INTEGER NOT NULL, PRIMARY KEY (user_id, house_id))',
+      // Cooldowns & Spieler-Metadaten (last_daily, last_work, last_rent …)
+      'CREATE TABLE IF NOT EXISTS player_meta (user_id TEXT NOT NULL, key TEXT NOT NULL, value INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (user_id, key))',
     ], 'write');
+  }
+
+  // ---- Cooldown-Helfer ----
+  async getMeta(userId, key) {
+    const rs = await this.db.execute({ sql: 'SELECT value FROM player_meta WHERE user_id=? AND key=?', args: [userId, key] });
+    return rs.rows[0] ? Number(rs.rows[0].value) : 0;
+  }
+  async setMeta(userId, key, value) {
+    await this.db.execute({ sql: 'INSERT OR REPLACE INTO player_meta(user_id,key,value) VALUES(?,?,?)', args: [userId, key, Math.floor(value)] });
+  }
+
+  // ---- Tägliche Belohnung ----
+  async claimDaily(userId) {
+    const last = await this.getMeta(userId, 'last_daily');
+    const now = Date.now();
+    const DAY = 24 * 60 * 60 * 1000;
+    if (now - last < DAY) {
+      return { ok: false, waitMs: DAY - (now - last) };
+    }
+    // Streak-Bonus: aufeinanderfolgende Tage geben mehr.
+    let streak = await this.getMeta(userId, 'daily_streak');
+    streak = (now - last < 2 * DAY) ? streak + 1 : 1;
+    const reward = 500 + Math.min(streak, 14) * 100; // bis +1400 Bonus
+    await this.setMeta(userId, 'last_daily', now);
+    await this.setMeta(userId, 'daily_streak', streak);
+    const balance = await this.addBalance(userId, reward);
+    return { ok: true, reward, streak, balance };
+  }
+
+  // ---- Arbeiten (kurzer Cooldown, kleiner Verdienst) ----
+  async work(userId) {
+    const last = await this.getMeta(userId, 'last_work');
+    const now = Date.now();
+    const COOLDOWN = 30 * 60 * 1000; // 30 Min
+    if (now - last < COOLDOWN) return { ok: false, waitMs: COOLDOWN - (now - last) };
+    const jobs = [
+      { t: 'Du hast als Pizzabote gearbeitet', min: 150, max: 400 },
+      { t: 'Du hast Code für eine Firma geschrieben', min: 300, max: 700 },
+      { t: 'Du hast einen Stream gemacht', min: 100, max: 900 },
+      { t: 'Du hast Pfandflaschen gesammelt', min: 50, max: 250 },
+      { t: 'Du hast als DJ aufgelegt', min: 200, max: 600 },
+      { t: 'Du hast Nachhilfe gegeben', min: 250, max: 500 },
+    ];
+    const job = jobs[Math.floor(Math.random() * jobs.length)];
+    const earned = job.min + Math.floor(Math.random() * (job.max - job.min + 1));
+    await this.setMeta(userId, 'last_work', now);
+    const balance = await this.addBalance(userId, earned);
+    return { ok: true, text: job.t, earned, balance };
+  }
+
+  // ---- Geld an eine andere Person überweisen ----
+  async pay(fromId, toId, amount) {
+    amount = Math.floor(amount);
+    if (amount <= 0) return { ok: false, reason: 'Betrag muss positiv sein.' };
+    const remaining = await this.deductBalance(fromId, amount);
+    if (remaining === null) return { ok: false, reason: 'Nicht genug Coins.' };
+    const toBal = await this.addBalance(toId, amount);
+    return { ok: true, amount, fromBalance: remaining, toBalance: toBal };
+  }
+
+  // ---- Mieteinnahmen aus eigenen Häusern (alle 24h) ----
+  async collectRent(userId) {
+    const last = await this.getMeta(userId, 'last_rent');
+    const now = Date.now();
+    const DAY = 24 * 60 * 60 * 1000;
+    if (now - last < DAY) return { ok: false, waitMs: DAY - (now - last) };
+    const inv = await this.getInventory(userId);
+    if (!inv.length) return { ok: false, reason: 'Du besitzt keine Häuser.' };
+    // 2 % des Hauswerts pro Tag als Miete.
+    const rent = inv.reduce((s, e) => s + Math.floor((e.house?.price || 0) * 0.02), 0);
+    await this.setMeta(userId, 'last_rent', now);
+    const balance = await this.addBalance(userId, rent);
+    return { ok: true, rent, houses: inv.length, balance };
   }
 
   async getBalance(userId) {
