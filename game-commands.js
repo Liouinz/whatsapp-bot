@@ -13,7 +13,7 @@
 // ====================================================================
 'use strict';
 
-let economyMod, gamesMod, shopMod, questsMod, eventsMod, clanMod, worldMod, profMod;
+let economyMod, gamesMod, shopMod, questsMod, eventsMod, clanMod, worldMod, profMod, arenaMod, socialMod, farmMod;
 try { economyMod = require('./economy'); } catch (_) { /* optional */ }
 try { gamesMod = require('./future-update/games'); } catch (_) { /* optional */ }
 try { shopMod = require('./future-update/shop'); } catch (_) { /* optional */ }
@@ -22,6 +22,9 @@ try { eventsMod = require('./future-update/events'); } catch (_) { /* optional *
 try { clanMod = require('./future-update/clan'); } catch (_) { /* optional */ }
 try { worldMod = require('./future-update/world'); } catch (_) { /* optional */ }
 try { profMod = require('./future-update/professions'); } catch (_) { /* optional */ }
+try { arenaMod = require('./future-update/arena'); } catch (_) { /* optional */ }
+try { socialMod = require('./future-update/social'); } catch (_) { /* optional */ }
+try { farmMod = require('./future-update/farming'); } catch (_) { /* optional */ }
 
 const fmt = (economyMod && economyMod.formatBalance) || ((n) => `${Math.round(n)} 🪙`);
 const fmtWait = (gamesMod && gamesMod.fmtWait) || ((ms) => `${Math.ceil(ms / 60000)} Min`);
@@ -33,7 +36,7 @@ const setGameGroup = (gamesMod && gamesMod.setGameGroup) || ((cfg, jid, on) => {
 const HOUSES = (economyMod && economyMod.HOUSES) || [];
 
 // Modul-Instanzen (nach initModules gesetzt)
-const mgrs = { economy: null, game: null, shop: null, quest: null, events: null, clan: null, world: null, professions: null };
+const mgrs = { economy: null, game: null, shop: null, quest: null, events: null, clan: null, world: null, professions: null, arena: null, social: null, farm: null };
 let _logger = { info() {}, warn() {}, error() {} };
 
 // ====================================================================
@@ -79,7 +82,19 @@ async function initModules({ logger } = {}) {
       try { mgrs.professions = new profMod.ProfessionManager(economy); }
       catch (e) { _logger.warn({ e }, 'Professions-Init übersprungen'); mgrs.professions = null; }
     }
-    _logger.info('🎮 Wirtschaft, Shop, Quests, Events, Clan, Welt & Berufe aktiviert (Turso)');
+    if (arenaMod && arenaMod.ArenaManager) {
+      try { mgrs.arena = new arenaMod.ArenaManager(economy); await mgrs.arena.init(); }
+      catch (e) { _logger.warn({ e }, 'Arena-Init übersprungen'); mgrs.arena = null; }
+    }
+    if (socialMod && socialMod.SocialManager) {
+      try { mgrs.social = new socialMod.SocialManager(economy); await mgrs.social.init(); }
+      catch (e) { _logger.warn({ e }, 'Social-Init übersprungen'); mgrs.social = null; }
+    }
+    if (farmMod && farmMod.FarmManager) {
+      try { mgrs.farm = new farmMod.FarmManager(economy); await mgrs.farm.init(); }
+      catch (e) { _logger.warn({ e }, 'Farm-Init übersprungen'); mgrs.farm = null; }
+    }
+    _logger.info('🎮 Wirtschaft, Shop, Quests, Events, Clan, Welt, Berufe, Arena, Social & Farm aktiviert (Turso)');
     return { ok: true };
   } catch (e) {
     _logger.error({ e }, 'Spielmodule-Init fehlgeschlagen – Bot läuft ohne Spielteil');
@@ -103,7 +118,7 @@ async function heartbeat() {
 const ECON_CMDS = [
   'balance', 'kontostand', 'geld', 'vermögen', 'networth', 'daily', 'arbeiten', 'work',
   'miete', 'markt', 'kaufen', 'verkaufen', 'inventar', 'häuser', 'pay', 'überweisen',
-  'level', 'rang', 'levelcard', 'profil', 'achievements', 'erfolge', 'prestige', 'einzahlen', 'deposit',
+  'level', 'rang', 'levelcard', 'achievements', 'erfolge', 'prestige', 'einzahlen', 'deposit',
   'auszahlen', 'withdraw', 'zinsen', 'reich', 'rangliste', 'lotto', 'lotterie',
   'jackpot', 'saisonbonus', 'stats', 'statistik',
   // Neue Wirtschaftsbefehle
@@ -175,12 +190,41 @@ const PROF_CMDS = [
   'spekulieren',
   'berufsrangliste', 'profleaderboard',
 ];
+const ARENA_CMDS = [
+  'arena', 'duell', 'duel', 'pvp', 'gladiator', 'arenakampf',
+  'arenaannehmen', 'duellannehmen', 'arenaablehnen', 'duellablehnen',
+  'arenastatus', 'arenastats', 'kampfrekord',
+  'arenatop', 'pvprangliste', 'pvpstats',
+];
+const SOCIAL_CMDS = [
+  'profil', 'profile',
+  'bio', 'setbio', 'meinebiografie',
+  'titel', 'settitel', 'myntitel',
+  'freunde', 'freundliste', 'freundschaft', 'freundanfrage',
+  'freundannehmen', 'freundablehnen', 'freundentfernen', 'entfreunden',
+  'anfragen', 'offeneanfragen',
+  'heiraten', 'eheantrag', 'heiratsantrag',
+  'ehepartner', 'ehe', 'hochzeit',
+  'scheidung', 'divorce',
+  'vergleich', 'compare',
+  'ruf', 'reputation', 'geberuf', 'topruf', 'reputationtop',
+];
+const FARM_CMDS = [
+  'farm', 'farmstatus', 'felder', 'ackerland',
+  'saen', 'saat', 'bepflanzen',
+  'giessen', 'bewaessern',
+  'farmernte', 'farmaernten',
+  'farmshop', 'saatgut', 'samen', 'pflanzenliste',
+  'neuesfeld', 'feldkaufen', 'farmerweitern',
+  'farmlevel', 'farminfo',
+];
 
 const GAME_CMDS = new Set([
   ...ECON_CMDS, ...CASINO_CMDS, ...SHOP_CMDS, ...QUEST_CMDS,
   ...CLAN_CMDS, ...WORLD_CMDS, ...PROF_CMDS,
+  ...ARENA_CMDS, ...SOCIAL_CMDS, ...FARM_CMDS,
 ]);
-const ALL_CMDS = new Set([...GAME_CMDS, 'spielgruppe', 'hilfewelt', 'hilfeberuf', 'hilfegilden']);
+const ALL_CMDS = new Set([...GAME_CMDS, 'spielgruppe', 'hilfewelt', 'hilfeberuf', 'hilfegilden', 'hilfearena', 'hilfesozialen', 'hilfefarm']);
 
 function owns(cmd) { return ALL_CMDS.has(cmd); }
 
@@ -251,12 +295,21 @@ async function dispatch(ctx) {
   const { cmd } = ctx;
   if (WORLD_CMDS.includes(cmd)) return worldCmd(ctx);
   else if (PROF_CMDS.includes(cmd)) return profCmd(ctx);
+  else if (ARENA_CMDS.includes(cmd)) return arenaCmd(ctx);
+  else if (SOCIAL_CMDS.includes(cmd)) return socialCmd(ctx);
+  else if (FARM_CMDS.includes(cmd)) return farmCmd(ctx);
   else if (ECON_CMDS.includes(cmd)) return econ(ctx);
   else if (CASINO_CMDS.includes(cmd)) return casino(ctx);
   else if (SHOP_CMDS.includes(cmd)) return shopCmd(ctx);
   else if (QUEST_CMDS.includes(cmd)) return questCmd(ctx);
   else if (CLAN_CMDS.includes(cmd)) return clanCmd(ctx);
-  else if (cmd === 'hilfewelt') {
+  else if (cmd === 'hilfearena') {
+    await ctx.reply(`⚔️ *Arena / PvP-Befehle*\n\n${ctx.COMMAND_PREFIX}arena @spieler <einsatz> – Herausfordern\n${ctx.COMMAND_PREFIX}arenaannehmen – Kampf annehmen\n${ctx.COMMAND_PREFIX}arenaablehnen – Ablehnen\n${ctx.COMMAND_PREFIX}arenastatus – Offene Herausforderung\n${ctx.COMMAND_PREFIX}arenastats – Deine Kampf-Statistik\n${ctx.COMMAND_PREFIX}arenatop – Rangliste`);
+  } else if (cmd === 'hilfesozialen') {
+    await ctx.reply(`👥 *Soziale Befehle*\n\n${ctx.COMMAND_PREFIX}profil [@spieler] – Profil anzeigen\n${ctx.COMMAND_PREFIX}bio <text> – Biografie setzen\n${ctx.COMMAND_PREFIX}titel <text> – Titel setzen\n${ctx.COMMAND_PREFIX}freundschaft @p – Freundschaft senden\n${ctx.COMMAND_PREFIX}freundannehmen @p – Annehmen\n${ctx.COMMAND_PREFIX}freunde – Freundesliste\n${ctx.COMMAND_PREFIX}heiraten @p – Heiratsantrag\n${ctx.COMMAND_PREFIX}scheidung – Scheiden\n${ctx.COMMAND_PREFIX}ruf @p – Ruf geben\n${ctx.COMMAND_PREFIX}topruf – Ruf-Rangliste\n${ctx.COMMAND_PREFIX}vergleich @p – Vergleich`);
+  } else if (cmd === 'hilfefarm') {
+    await ctx.reply(`🌾 *Farm-Befehle*\n\n${ctx.COMMAND_PREFIX}farm – Farmstatus\n${ctx.COMMAND_PREFIX}saen <pflanze> <slot> – Bepflanzen\n${ctx.COMMAND_PREFIX}giessen – Gießen (25% schneller)\n${ctx.COMMAND_PREFIX}farmernte – Ernte einfahren\n${ctx.COMMAND_PREFIX}farmshop – Pflanzenliste\n${ctx.COMMAND_PREFIX}neuesfeld – Neues Feld kaufen\n${ctx.COMMAND_PREFIX}farmlevel – Farm-Level`);
+  } else if (cmd === 'hilfewelt') {
     await ctx.reply('🌍 *Weltbefehle*\n\n!karte – Weltkarte\n!reisen <region> – Bereise eine Region\n!region – Info zur aktuellen Region\n!standort – Wo bin ich?\n!kämpfen – Monster bekämpfen\n!jagd – Jagd starten (5/Tag)\n!sammeln – Rohstoffe sammeln\n!ressourcen – Meine Rohstoffe\n!erkunden – Gebiet erkunden\n!bestiarium – Alle Monster\n!topjaeger – Weltrangliste');
   } else if (cmd === 'hilfeberuf') {
     await ctx.reply('💼 *Berufsbefehle*\n\n!berufe – Alle Berufe anzeigen\n!beruf – Mein Beruf\n!beruf <id> wählen – Beruf wählen\n!berufsarbeit – Berufsarbeit ausführen\n!berufseinnahmen – Passive Einnahmen abholen\n!berufsrangliste – Top-Spieler nach Beruf');
@@ -856,6 +909,7 @@ async function worldCmd(ctx) {
       const r = await world.travel(senderJid, regionId);
       if (!r.ok) { await reply(`❌ ${r.reason}`); return; }
       await reply(`✈️ Du reist nach ${r.region.emoji} *${r.region.name}*!\nReisekosten: ${fmt(r.cost)}\nKontostand: ${fmt(r.balance)}\n\n_${r.region.description}_`);
+      try { if (mgrs.quest) await mgrs.quest.track(senderJid, 'travel'); } catch (_) {}
       return;
     }
     case 'region': case 'regioninfo': {
@@ -873,6 +927,7 @@ async function worldCmd(ctx) {
         ? `✅ *Sieg!* +${fmt(r.coinsGained)}${r.drop ? ` + 1× ${r.drop}` : ''}\n+${r.xpGained} XP${r.leveledUp ? ` → 🎉 Level ${r.newLevel}!` : ''}\nHP: ${r.userHpLeft} übrig`
         : `💀 *Niederlage* – du hast ${r.monster.name} verloren.\n+${r.xpGained} XP (Tröstungspreis)`;
       await reply(`⚔️ *Kampf gegen ${r.monster.emoji} ${r.monster.name}*\n(${r.rounds} Runden)\n\n${winTxt}`);
+      if (r.win) { try { if (mgrs.quest) await mgrs.quest.track(senderJid, 'fight_win'); } catch (_) {} }
       return;
     }
     case 'jagd': case 'hunt': case 'jagen': {
@@ -884,6 +939,7 @@ async function worldCmd(ctx) {
         `${i + 1}. ${r.monster.emoji} ${r.monster.name}: ${r.win ? `✅ +${fmt(r.coinsGained)} +${r.xpGained}XP` : '💀 verloren'}`
       );
       await reply(`🏹 *Jagd* (${charges.remaining - 1} Ladungen übrig)\n\n${lines.join('\n')}\n\n💰 Gesamt: ${fmt(results.totalCoins)}\n⭐ Gesamt-XP: ${results.totalXp}`);
+      try { if (mgrs.quest) { for (const b of results.battles) { if (b.win) await mgrs.quest.track(senderJid, 'fight_win'); } } } catch (_) {}
       return;
     }
     case 'jagdladungen': {
@@ -901,6 +957,7 @@ async function worldCmd(ctx) {
       if (!r.ok) { await reply(`⏳ Sammeln wieder in ${fmtWait(r.waitMs)}.`); return; }
       const lines = r.gathered.map((g) => `${g.resource.emoji} ${g.resource.name}: ×${g.amount}`);
       await reply(`🌿 *Gesammelt in ${r.region.emoji} ${r.region.name}*\n\n${lines.join('\n')}`);
+      try { if (mgrs.quest) await mgrs.quest.track(senderJid, 'gather'); } catch (_) {}
       return;
     }
     case 'ressourcen': case 'rohstoffe': case 'resources': {
@@ -939,6 +996,7 @@ async function worldCmd(ctx) {
       const r = await world.explore(senderJid);
       if (!r.ok) { await reply(`⏳ Erkunden wieder in ${fmtWait(r.waitMs)}.`); return; }
       await reply(`🔭 *Erkundung*\n\n${r.message}${r.reward ? `\n\n${r.rewardText}` : ''}`);
+      try { if (mgrs.quest) await mgrs.quest.track(senderJid, 'explore'); } catch (_) {}
       return;
     }
     case 'weltranking': case 'topjaeger': {
@@ -1010,6 +1068,7 @@ async function profCmd(ctx) {
       const r = await prof.professionWork(senderJid);
       if (!r.ok) { await reply(`⏳ Berufsarbeit wieder in ${fmtWait(r.waitMs)}.`); return; }
       await reply(`💼 Berufsarbeit: +${fmt(r.earned)}!\n+${r.profXp} Beruf-XP${r.leveledUp ? `\n🎉 Beruf-Level ${r.profLevel}!` : ''}\nKontostand: ${fmt(r.balance)}`);
+      try { if (mgrs.quest) await mgrs.quest.track(senderJid, 'prof_work'); } catch (_) {}
       return;
     }
     case 'berufseinnahmen': case 'berufseinkommen': {
@@ -1031,6 +1090,310 @@ async function profCmd(ctx) {
 }
 
 // ====================================================================
+// Arena – PvP-Duelle
+// ====================================================================
+async function arenaCmd(ctx) {
+  const { cmd, args, senderJid, reply, COMMAND_PREFIX, mentioned } = ctx;
+  const arena = mgrs.arena;
+  if (!arena) { await reply('⚔️ Arena-Modul nicht verfügbar.'); return; }
+
+  const fmtUser = (jid) => `@${jid.split('@')[0]}`;
+
+  switch (cmd) {
+    case 'arena': case 'duell': case 'duel': case 'pvp': case 'arenakampf': case 'gladiator': {
+      // !arena @target <einsatz>
+      const target = mentioned && mentioned[0];
+      const bet = Math.floor(Number(args.find((a) => /^\d+$/.test(a))) || 0);
+      if (!target || !bet) {
+        await reply(`⚔️ *Arena – PvP-Kampf*\n\nNutzung: ${COMMAND_PREFIX}arena @spieler <einsatz>\nBeispiel: ${COMMAND_PREFIX}arena @max 5000\n\nEinsatz: min. 100 – max. 2.000.000\n5% Kampfgebühr (an den Jackpot)`);
+        return;
+      }
+      const r = await arena.challenge(senderJid, target, bet);
+      if (!r.ok) { await reply(`❌ ${r.reason}`); return; }
+      await reply(`⚔️ *Kampfherausforderung gesendet!*\n\n${fmtUser(senderJid)} fordert ${fmtUser(target)} heraus!\nEinsatz: ${fmt(bet)}\n\n${fmtUser(target)}, antworte mit:\n${COMMAND_PREFIX}arenaannehmen – annehmen\n${COMMAND_PREFIX}arenaablehnen – ablehnen\n\n⏰ Läuft in 5 Minuten ab.`);
+      return;
+    }
+    case 'arenaannehmen': case 'duellannehmen': {
+      const r = await arena.acceptChallenge(senderJid);
+      if (!r.ok) { await reply(`❌ ${r.reason}`); return; }
+      const winnerLabel = fmtUser(r.winner);
+      const loserLabel  = fmtUser(r.loser);
+      const roundLog    = r.log.join(' | ');
+      await reply(`⚔️ *Arena-Kampf – ${r.rounds} Runden!*\n\n${roundLog}\n\n🏆 *Sieger: ${winnerLabel}*\n💰 Gewinn: +${fmt(r.prize)} (5% Gebühr: ${fmt(r.tax)})\n${loserLabel} verliert ${fmt(r.bet)}`);
+      return;
+    }
+    case 'arenaablehnen': case 'duellablehnen': {
+      const r = arena.declineChallenge(senderJid);
+      if (!r.ok) { await reply(`❌ ${r.reason}`); return; }
+      await reply(`🛡️ Herausforderung von ${fmtUser(r.challengerJid)} abgelehnt.`);
+      return;
+    }
+    case 'arenastatus': {
+      const ch = arena.getPendingChallenge(senderJid);
+      if (!ch) { await reply(`📭 Keine offene Herausforderung an dich.\nFordere jemanden heraus: ${COMMAND_PREFIX}arena @spieler <einsatz>`); return; }
+      const remaining = Math.max(0, Math.ceil((ch.expiresAt - Date.now()) / 1000));
+      await reply(`⚔️ *Offene Herausforderung*\n\nVon: ${fmtUser(ch.challengerJid)}\nEinsatz: ${fmt(ch.bet)}\nLäuft ab in: ${remaining}s\n\n${COMMAND_PREFIX}arenaannehmen – annehmen\n${COMMAND_PREFIX}arenaablehnen – ablehnen`);
+      return;
+    }
+    case 'arenastats': case 'kampfrekord': case 'pvpstats': {
+      const s = await arena.getStats(senderJid);
+      const total = (s.wins || 0) + (s.losses || 0);
+      await reply(`${s.titleEmoji} *Arena-Statistik*\n\n🏆 Siege: ${s.wins}\n💀 Niederlagen: ${s.losses}\n📊 Winrate: ${s.winrate}%\n🔥 Streak: ${s.streak}\n⭐ Best-Streak: ${s.best_streak}\n\n💰 Verdient: ${fmt(s.coins_won)}\n💸 Verloren: ${fmt(s.coins_lost)}\n\nTitel: *${s.titleEmoji} ${s.title}*`);
+      return;
+    }
+    case 'arenatop': case 'pvprangliste': {
+      const board = await arena.getLeaderboard();
+      if (!board.length) { await reply('Noch keine Arena-Kämpfe.'); return; }
+      const medals = ['🥇', '🥈', '🥉'];
+      const lines = board.map((p, i) =>
+        `${medals[i] || `${i + 1}.`} ${p.emoji} ${fmtUser(p.userId)}: ${p.wins}S/${p.losses}N | Best: ${p.bestStreak}🔥`
+      );
+      await reply(`⚔️ *Arena-Rangliste (Top 10)*\n\n${lines.join('\n')}`);
+      return;
+    }
+    default:
+      await reply(`⚔️ *Arena-Befehle*\n${COMMAND_PREFIX}arena @spieler <einsatz> · ${COMMAND_PREFIX}arenaannehmen · ${COMMAND_PREFIX}arenaablehnen\n${COMMAND_PREFIX}arenastatus · ${COMMAND_PREFIX}arenastats · ${COMMAND_PREFIX}arenatop`);
+  }
+}
+
+// ====================================================================
+// Social – Profile, Freunde, Ehe, Ruf
+// ====================================================================
+async function socialCmd(ctx) {
+  const { cmd, args, senderJid, reply, COMMAND_PREFIX, mentioned } = ctx;
+  const social = mgrs.social;
+  if (!social) { await reply('👥 Social-Modul nicht verfügbar.'); return; }
+
+  const fmtUser = (jid) => `@${jid.split('@')[0]}`;
+  const target = mentioned && mentioned[0];
+
+  switch (cmd) {
+    case 'profil': case 'profile': {
+      const uid = target || senderJid;
+      const p = await social.getProfile(uid);
+      const bar = '█'.repeat(Math.min(10, Math.floor((p.level % 1 === 0 ? 0 : (p.xp % 1000) / 100)))) + '░'.repeat(10);
+      const married = p.spouseId ? `💍 Verheiratet mit ${fmtUser(p.spouseId)}` : '💔 Ledig';
+      await reply(
+        `👤 *Profil: ${fmtUser(uid)}*\n` +
+        (p.customTitle ? `🏷️ _${p.customTitle}_\n` : '') +
+        (p.bio ? `📝 "${p.bio}"\n` : '') +
+        `\n⭐ Level ${p.level} | 🌟 Prestige ${p.prestige}\n` +
+        `💰 ${fmt(p.balance)} | 🏦 ${fmt(p.bankBal)}\n` +
+        `🌍 Vermögen: ${fmt(p.wealth)}\n` +
+        `${p.repEmoji} Ruf: ${p.reputation} (${p.repTitle})\n` +
+        `${married}`
+      );
+      return;
+    }
+    case 'bio': case 'setbio': case 'meinebiografie': {
+      const text = args.join(' ');
+      const r = await social.setBio(senderJid, text);
+      if (!r.ok) { await reply(`❌ ${r.reason}`); return; }
+      await reply(`✅ Bio gesetzt:\n"${text}"`);
+      return;
+    }
+    case 'titel': case 'settitel': case 'myntitel': {
+      const text = args.join(' ');
+      const r = await social.setTitle(senderJid, text);
+      if (!r.ok) { await reply(`❌ ${r.reason}`); return; }
+      await reply(`✅ Titel gesetzt: _${text}_`);
+      return;
+    }
+    case 'ruf': case 'geberuf': case 'reputation': {
+      if (!target) { await reply(`Nutzung: ${COMMAND_PREFIX}ruf @spieler`); return; }
+      const r = await social.giveRep(senderJid, target);
+      if (!r.ok) { await reply(`❌ ${r.reason}`); return; }
+      await reply(`⭐ Du hast ${fmtUser(target)} +1 Ruf gegeben!\n${target.split('@')[0]} hat jetzt ${r.newRep} Ruf (${r.repTitle.emoji} ${r.repTitle.title})`);
+      return;
+    }
+    case 'topruf': case 'reputationtop': {
+      const board = await social.getTopRep();
+      if (!board.length) { await reply('Noch keine Ruf-Daten.'); return; }
+      const medals = ['🥇', '🥈', '🥉'];
+      await reply(`⭐ *Ruf-Rangliste*\n\n${board.map((p, i) => `${medals[i] || `${i + 1}.`} ${p.emoji} ${fmtUser(p.userId)}: ${p.rep} (${p.title})`).join('\n')}`);
+      return;
+    }
+    case 'freundschaft': case 'freundanfrage': {
+      if (!target) { await reply(`Nutzung: ${COMMAND_PREFIX}freundschaft @spieler`); return; }
+      const r = await social.sendFriendRequest(senderJid, target);
+      if (!r.ok) { await reply(`❌ ${r.reason}`); return; }
+      if (r.autoAccepted) {
+        await reply(`✅ *Ihr seid jetzt Freunde!* 🤝\n${fmtUser(senderJid)} ↔ ${fmtUser(target)}`);
+      } else {
+        await reply(`📨 Freundschaftsanfrage an ${fmtUser(target)} gesendet!\nSie können mit ${COMMAND_PREFIX}freundannehmen @${senderJid.split('@')[0]} annehmen.`);
+      }
+      return;
+    }
+    case 'freundannehmen': {
+      if (!target) { await reply(`Nutzung: ${COMMAND_PREFIX}freundannehmen @spieler`); return; }
+      const r = await social.acceptFriendRequest(senderJid, target);
+      if (!r.ok) { await reply(`❌ ${r.reason}`); return; }
+      await reply(`✅ Du hast ${fmtUser(target)}s Anfrage angenommen! 🤝\nIhr seid jetzt Freunde.`);
+      return;
+    }
+    case 'freundablehnen': {
+      if (!target) { await reply(`Nutzung: ${COMMAND_PREFIX}freundablehnen @spieler`); return; }
+      await social.declineFriendRequest(senderJid, target);
+      await reply(`❌ Anfrage von ${fmtUser(target)} abgelehnt.`);
+      return;
+    }
+    case 'freundentfernen': case 'entfreunden': {
+      if (!target) { await reply(`Nutzung: ${COMMAND_PREFIX}entfreunden @spieler`); return; }
+      await social.removeFriend(senderJid, target);
+      await reply(`👋 ${fmtUser(target)} aus deiner Freundesliste entfernt.`);
+      return;
+    }
+    case 'freunde': case 'freundliste': {
+      const friends = await social.getFriends(senderJid);
+      if (!friends.length) { await reply(`Du hast noch keine Freunde.\n${COMMAND_PREFIX}freundschaft @spieler – Anfrage senden`); return; }
+      const list = friends.map((f) => `• ${fmtUser(f.friendId)}`).join('\n');
+      await reply(`🤝 *Deine Freunde (${friends.length})*\n\n${list}`);
+      return;
+    }
+    case 'anfragen': case 'offeneanfragen': {
+      const reqs = await social.getPendingRequests(senderJid);
+      if (!reqs.length) { await reply('Keine offenen Freundschaftsanfragen.'); return; }
+      const list = reqs.map((r) => `• ${fmtUser(r.from_id)}`).join('\n');
+      await reply(`📨 *Offene Anfragen*\n\n${list}\n\nAnnehmen: ${COMMAND_PREFIX}freundannehmen @spieler`);
+      return;
+    }
+    case 'heiraten': case 'eheantrag': case 'heiratsantrag': case 'hochzeit': {
+      if (!target) { await reply(`Nutzung: ${COMMAND_PREFIX}heiraten @spieler`); return; }
+      // Check if target proposed to sender
+      if (social.marriageProposals.get(senderJid) === target) {
+        const r = await social.acceptMarriage(senderJid, target);
+        if (!r.ok) { await reply(`❌ ${r.reason}`); return; }
+        await reply(`💍 *Glückwunsch!* 🎉\n${fmtUser(target)} und ${fmtUser(senderJid)} haben geheiratet!\n\n_Möge eure Ehe ewig halten!_ 💕`);
+        return;
+      }
+      const r = await social.propose(senderJid, target);
+      if (!r.ok) { await reply(`❌ ${r.reason}`); return; }
+      await reply(`💍 *Heiratsantrag!*\n\n${fmtUser(senderJid)} hat ${fmtUser(target)} einen Antrag gemacht!\n\n${fmtUser(target)}, schreibe ${COMMAND_PREFIX}heiraten @${senderJid.split('@')[0]} um JA zu sagen!`);
+      return;
+    }
+    case 'ehepartner': case 'ehe': {
+      const p = await social.getProfile(senderJid);
+      if (!p.spouseId) { await reply(`Du bist nicht verheiratet.\n${COMMAND_PREFIX}heiraten @spieler – Antrag machen`); return; }
+      const dur = p.marriedAt ? Math.floor((Date.now() - p.marriedAt) / 86_400_000) : 0;
+      await reply(`💍 *Verheiratet mit ${fmtUser(p.spouseId)}*\nSeit: ${dur} Tagen`);
+      return;
+    }
+    case 'scheidung': case 'divorce': {
+      const r = await social.divorce(senderJid);
+      if (!r.ok) { await reply(`❌ ${r.reason}`); return; }
+      await reply(`💔 Scheidung vollzogen. Du bist jetzt wieder ledig.`);
+      return;
+    }
+    case 'vergleich': case 'compare': {
+      if (!target) { await reply(`Nutzung: ${COMMAND_PREFIX}vergleich @spieler`); return; }
+      const { p1, p2 } = await social.compareProfiles(senderJid, target);
+      const cmp = (a, b, better = '>') => {
+        if (better === '>') return a > b ? '✅' : a === b ? '🟡' : '❌';
+        return a < b ? '✅' : a === b ? '🟡' : '❌';
+      };
+      await reply(
+        `📊 *Vergleich*\n\n` +
+        `👤 ${fmtUser(p1.userId)} vs ${fmtUser(p2.userId)}\n\n` +
+        `Level: ${p1.level} ${cmp(p1.level, p2.level)} ${p2.level}\n` +
+        `Prestige: ${p1.prestige} ${cmp(p1.prestige, p2.prestige)} ${p2.prestige}\n` +
+        `Vermögen: ${fmt(p1.wealth)} ${cmp(p1.wealth, p2.wealth)} ${fmt(p2.wealth)}\n` +
+        `Ruf: ${p1.reputation} ${cmp(p1.reputation, p2.reputation)} ${p2.reputation}`
+      );
+      return;
+    }
+    default:
+      await reply(`👥 *Soziale Befehle*\n${COMMAND_PREFIX}profil · ${COMMAND_PREFIX}bio <text> · ${COMMAND_PREFIX}titel <text>\n${COMMAND_PREFIX}freundschaft @p · ${COMMAND_PREFIX}freunde · ${COMMAND_PREFIX}anfragen\n${COMMAND_PREFIX}heiraten @p · ${COMMAND_PREFIX}scheidung · ${COMMAND_PREFIX}ruf @p · ${COMMAND_PREFIX}vergleich @p`);
+  }
+}
+
+// ====================================================================
+// Farm – Anbau, Gießen, Ernte
+// ====================================================================
+async function farmCmd(ctx) {
+  const { cmd, args, senderJid, reply, COMMAND_PREFIX } = ctx;
+  const farm = mgrs.farm;
+  if (!farm) { await reply('🌾 Farm-Modul nicht verfügbar.'); return; }
+
+  const fmtWaitLocal = (ms) => {
+    if (ms <= 0) return 'jetzt';
+    if (ms < 3_600_000) return `${Math.ceil(ms / 60_000)} Min`;
+    return `${(ms / 3_600_000).toFixed(1)} Std`;
+  };
+
+  switch (cmd) {
+    case 'farm': case 'farmstatus': case 'felder': case 'ackerland': {
+      const data = await farm.getFarm(senderJid);
+      const { meta, plots } = data;
+      const plotLines = plots.map((p) => {
+        if (!p.crop) return `[${p.slot}] 🟫 Leer`;
+        if (p.status === 'bereit') return `[${p.slot}] ${p.crop.emoji} ${p.crop.name} ✅ BEREIT!`;
+        const bar = '▓'.repeat(Math.floor(p.progress / 10)) + '░'.repeat(10 - Math.floor(p.progress / 10));
+        const wStr = p.watered ? ' 💧' : '';
+        return `[${p.slot}] ${p.crop.emoji} ${p.crop.name}${wStr}\n    [${bar}] ${p.progress}% – fertig in ${fmtWaitLocal(p.readyIn)}`;
+      });
+      await reply(
+        `🌾 *Deine Farm* (Level ${meta.farmLevel})\n` +
+        `Felder: ${meta.total_plots} | Erntezähler: ${meta.total_harvested}\n\n` +
+        `${plotLines.join('\n')}\n\n` +
+        `${COMMAND_PREFIX}saen <pflanze> <slot> · ${COMMAND_PREFIX}giessen · ${COMMAND_PREFIX}farmernte`
+      );
+      return;
+    }
+    case 'farmshop': case 'saatgut': case 'samen': case 'pflanzenliste': {
+      const crops = farm.getCropList();
+      const lines = crops.map((c) =>
+        `${c.emoji} *${c.name}* [${c.id}]\nSamen: ${fmt(c.seedCost)} | Ertrag: ${fmt(c.sellPrice)} | Wachstum: ${fmtWaitLocal(c.growMs)} | +${c.xp} XP`
+      );
+      await reply(`🌱 *Pflanzenliste*\n\n${lines.join('\n\n')}\n\nPflanzen: ${COMMAND_PREFIX}saen <id> <slot>`);
+      return;
+    }
+    case 'saen': case 'saat': case 'bepflanzen': {
+      const cropId = (args[0] || '').toLowerCase();
+      const slot   = parseInt(args[1], 10);
+      if (!cropId || isNaN(slot)) {
+        await reply(`Nutzung: ${COMMAND_PREFIX}saen <pflanze-id> <slot>\nBeispiel: ${COMMAND_PREFIX}saen weizen 0\nListe: ${COMMAND_PREFIX}farmshop`);
+        return;
+      }
+      const r = await farm.plant(senderJid, slot, cropId);
+      if (!r.ok) { await reply(`❌ ${r.reason}`); return; }
+      await reply(`🌱 *${r.crop.emoji} ${r.crop.name}* in Slot ${r.slot} gepflanzt!\nWächst in: ${fmtWaitLocal(r.crop.growMs)}\n💡 Tipp: ${COMMAND_PREFIX}giessen für 25% schnelleres Wachstum`);
+      return;
+    }
+    case 'giessen': case 'bewaessern': {
+      const r = await farm.water(senderJid);
+      if (!r.ok) { await reply(`❌ ${r.reason}`); return; }
+      await reply(`💧 *Gegossen!* ${r.count} Feld${r.count > 1 ? 'er' : ''} sind jetzt 25% schneller wachsen.`);
+      return;
+    }
+    case 'farmernte': case 'farmaernten': {
+      const r = await farm.harvest(senderJid);
+      if (!r.ok) { await reply(`❌ ${r.reason}`); return; }
+      const lines = r.harvested.map((h) => `${h.crop.emoji} ${h.crop.name} [Slot ${h.slot}] → +${fmt(h.crop.sellPrice)}`);
+      await reply(`🌾 *Ernte eingefahren!*\n\n${lines.join('\n')}\n\n💰 Gesamt: +${fmt(r.totalEarned)}\n⭐ +${r.totalXp} XP`);
+      try { if (mgrs.quest) await mgrs.quest.track(senderJid, 'harvest'); } catch (_) {}
+      return;
+    }
+    case 'neuesfeld': case 'feldkaufen': case 'farmerweitern': {
+      const r = await farm.buyPlot(senderJid);
+      if (!r.ok) { await reply(`❌ ${r.reason}`); return; }
+      await reply(`✅ *Neues Feld gekauft!*\nDu hast jetzt ${r.newTotal} Felder.\nKosten: ${fmt(r.cost)}`);
+      return;
+    }
+    case 'farmlevel': case 'farminfo': {
+      const data = await farm.getFarm(senderJid);
+      const { meta } = data;
+      const xpForNext = (meta.farmLevel) * 500;
+      const xpInLevel = (meta.farm_xp || 0) % 500;
+      const bar = '█'.repeat(Math.floor((xpInLevel / xpForNext) * 10)) + '░'.repeat(10 - Math.floor((xpInLevel / xpForNext) * 10));
+      await reply(`🌾 *Farm-Level ${meta.farmLevel}*\n[${bar}] ${xpInLevel}/${xpForNext} XP\n\nErntezähler: ${meta.total_harvested}\nFelder: ${meta.total_plots}/${require('./future-update/farming').MAX_PLOTS}`);
+      return;
+    }
+    default:
+      await reply(`🌾 *Farm-Befehle*\n${COMMAND_PREFIX}farm · ${COMMAND_PREFIX}farmshop · ${COMMAND_PREFIX}saen <pflanze> <slot>\n${COMMAND_PREFIX}giessen · ${COMMAND_PREFIX}farmernte · ${COMMAND_PREFIX}neuesfeld · ${COMMAND_PREFIX}farmlevel`);
+  }
+}
+
+// ====================================================================
 // Kurzhilfe für Spielbefehle
 // ====================================================================
 function gameHelp(prefix) {
@@ -1038,14 +1401,17 @@ function gameHelp(prefix) {
     `💰 *Wirtschaft*\n${prefix}balance · ${prefix}daily · ${prefix}arbeiten · ${prefix}miete · ${prefix}vermögen · ${prefix}pay @p <betrag> · ${prefix}level · ${prefix}rich\n` +
     `🏠 *Häuser*\n${prefix}markt · ${prefix}kaufen <id> · ${prefix}verkaufen <id> · ${prefix}inventar\n` +
     `🏦 *Bank*\n${prefix}einzahlen <n> · ${prefix}auszahlen <n> · ${prefix}zinsen\n` +
-    `🎲 *Casino*\n${prefix}slots <n> · ${prefix}coinflip kopf <n> · ${prefix}blackjack <n> · ${prefix}poker <n> · ${prefix}crash <n> 1.8x · ${prefix}keno <n> 3 7 11 15 19\n` +
+    `🎲 *Casino*\n${prefix}slots <n> · ${prefix}coinflip kopf <n> · ${prefix}blackjack <n> · ${prefix}poker <n> · ${prefix}crash <n> 1.8x · ${prefix}keno <n> 3 7 11\n` +
     `🎁 *Glück*\n${prefix}glücksrad <n> · ${prefix}rubbellos · ${prefix}box · ${prefix}lotto <n>\n` +
     `🛒 *Shop*\n${prefix}shop · ${prefix}kaufenitem <id> · ${prefix}items · ${prefix}einkommen · ${prefix}crafting\n` +
     `🌍 *Welt*\n${prefix}karte · ${prefix}reisen <region> · ${prefix}kämpfen · ${prefix}jagd · ${prefix}sammeln · ${prefix}erkunden\n` +
     `💼 *Berufe*\n${prefix}berufe · ${prefix}beruf · ${prefix}berufsarbeit · ${prefix}berufseinnahmen\n` +
+    `⚔️ *Arena*\n${prefix}arena @p <einsatz> · ${prefix}arenaannehmen · ${prefix}arenastats · ${prefix}arenatop\n` +
+    `👥 *Sozial*\n${prefix}profil · ${prefix}bio <text> · ${prefix}titel <text> · ${prefix}freundschaft @p · ${prefix}heiraten @p · ${prefix}ruf @p\n` +
+    `🌾 *Farm*\n${prefix}farm · ${prefix}saen <pflanze> <slot> · ${prefix}giessen · ${prefix}farmernte · ${prefix}farmshop\n` +
     `🎯 *Quests*\n${prefix}quests · ${prefix}claim <id>\n` +
     `⚔️ *Gilde*\n${prefix}clan info · ${prefix}clan erstellen <Name> <TAG> · ${prefix}clan top\n` +
-    `✨ ${prefix}prestige · ${prefix}achievements · ${prefix}profil · ${prefix}hilfewelt · ${prefix}hilfeberuf`;
+    `✨ ${prefix}prestige · ${prefix}achievements · ${prefix}hilfewelt · ${prefix}hilfeberuf · ${prefix}hilfearena · ${prefix}hilfesozialen · ${prefix}hilfefarm`;
 }
 
 // Befehle, die mit bestehenden index.js-Spaßbefehlen kollidieren und daher NUR
