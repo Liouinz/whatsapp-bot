@@ -1540,6 +1540,9 @@ app.get('/group', async (req, res) => {
   const gc = effectiveGroupConfig(id);
   const saved = req.query.saved ? '<p class="muted">✅ Gespeichert.</p>' : '';
   const chk = (b) => (b ? 'checked' : '');
+  const gameOn = !!(config.gameGroups && config.gameGroups[id]);
+  let gamesReady = false;
+  try { gamesReady = gameLayer.isReady(); } catch (_) { gamesReady = false; }
 
   function cmdSelect(key) {
     const val = gc.commands[key];
@@ -1602,6 +1605,13 @@ app.get('/group', async (req, res) => {
         <textarea class="input" name="welcome_message" placeholder="Willkommen @{user} in der Gruppe! 🎉">${escapeHtml(gc.welcome.message || '')}</textarea>
       </div>
       <div class="card">
+        <h2>🎮 Spiele & Wirtschaft</h2>
+        <p class="muted">Schaltet das komplette Spiel-/RPG- und Wirtschaftssystem (Arena, Farm, Casino, Berufe, Quests …) <b>nur für diese Gruppe</b> frei. Entspricht dem Befehl <b>${COMMAND_PREFIX}spielgruppe an</b>.</p>
+        ${gamesReady ? '' : '<p class="muted">⚠️ Die Spiele-Datenbank ist serverseitig nicht aktiv. Der Schalter wird gespeichert, wirkt aber erst, sobald die Spiele-Datenbank (Turso) verbunden ist.</p>'}
+        <label class="opt"><span>🎮 Spiele in dieser Gruppe <b>freigeschaltet</b></span>
+          <input type="checkbox" name="gameGroup" ${chk(gameOn)}></label>
+      </div>
+      <div class="card">
         <h2>📋 Gruppenregeln</h2>
         <p class="muted">Diese Regeln werden mit !regeln angezeigt. Leer lassen = Standardregeln.</p>
         <textarea class="input" name="rules" placeholder="1. Sei respektvoll…" style="min-height:100px">${escapeHtml(gc.rules || '')}</textarea>
@@ -1648,8 +1658,12 @@ app.post('/group/save', async (req, res) => {
     },
     rules: rulesText,
   };
+  // Spielmodus pro Gruppe (separat in config.gameGroups gespeichert)
+  if (!config.gameGroups) config.gameGroups = {};
+  if (req.body.gameGroup !== undefined) config.gameGroups[id] = true;
+  else delete config.gameGroups[id];
   await persist();
-  logger.info({ group: id, active: config.groups[id].active }, 'Gruppen-Konfiguration gespeichert');
+  logger.info({ group: id, active: config.groups[id].active, games: !!config.gameGroups[id] }, 'Gruppen-Konfiguration gespeichert');
   res.redirect(`/group?id=${encodeURIComponent(id)}&key=${keyVal}&saved=1`);
 });
 
@@ -1797,7 +1811,8 @@ app.get('/community', async (req, res) => {
             <h2 style="margin:0">🏘️ ${escapeHtml(c.name)}</h2>
             <span class="chip">${activeCount}/${c.groups.length} aktiv</span>
           </div>
-          <div class="row" style="gap:8px;margin:10px 0">
+          <div class="row" style="gap:8px;margin:10px 0;flex-wrap:wrap">
+            <a href="/community/settings?parent=${encodeURIComponent(c.parent)}&key=${keyEnc}" class="action-btn btn-blue">⚙️ Einstellungen für alle Gruppen</a>
             <form method="POST" action="/community/toggle?key=${keyEnc}" style="display:inline">
               <input type="hidden" name="parent" value="${escapeHtml(c.parent)}"><input type="hidden" name="enable" value="1">
               <button type="submit" class="action-btn btn-green">✅ Alle aktivieren</button>
@@ -1825,6 +1840,150 @@ app.post('/community/toggle', async (req, res) => {
     logger.info({ parent, enable, n }, 'Community umgeschaltet');
   }
   res.redirect(`/community${keyParam}`);
+});
+
+// Pro-Community Einstellungen – Seite (gilt für ALLE Gruppen dieser Community)
+app.get('/community/settings', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!requireAuth(req, res)) return;
+  const keyParam = keyOf(req);
+  const keyEnc = encodeURIComponent(req.query.key);
+  const parent = String(req.query.parent || '');
+
+  if (botState.connected) await refreshGroups();
+  const community = getCommunities().find((c) => c.parent === parent);
+  if (!parent || !community) {
+    return res.status(404).send(page('Nicht gefunden',
+      `<div class="card"><h1>Community nicht gefunden</h1><a href="/community${keyParam}"><button>Zurück</button></a></div>`));
+  }
+
+  const grps = community.groups;
+  const chk = (b) => (b ? 'checked' : '');
+  const saved = req.query.saved ? '<p class="muted">✅ Auf alle Gruppen angewendet.</p>' : '';
+
+  // Aktuellen Stand aus den Gruppen ableiten (Vorbelegung des Formulars)
+  const cfgs = grps.map((g) => effectiveGroupConfig(g.id));
+  const everyActive = grps.length > 0 && cfgs.every((c) => c.active);
+  const everyGame = grps.length > 0 && grps.every((g) => !!(config.gameGroups && config.gameGroups[g.id]));
+  const ref = cfgs[0] || effectiveGroupConfig('__none__');
+  const mod = ref.moderation || {};
+  let gamesReady = false;
+  try { gamesReady = gameLayer.isReady(); } catch (_) { gamesReady = false; }
+
+  res.send(page(`Einstellungen – ${community.name}`, `
+    ${navBar(keyParam, 'community')}
+    <div class="card">
+      <div class="row"><h1>⚙️ ${escapeHtml(community.name)}</h1>
+        <a href="/community${keyParam}">← zurück</a></div>
+      <p class="muted">Diese Einstellungen gelten für <b>alle ${grps.length} Gruppen</b> dieser Community. Beim Speichern werden sie auf jede Gruppe angewendet. Einzelne Gruppen kannst du danach weiterhin separat feinjustieren.</p>
+      ${saved}
+    </div>
+    <form method="POST" action="/community/settings/save?key=${keyEnc}">
+      <input type="hidden" name="parent" value="${escapeHtml(parent)}">
+      <div class="card">
+        <h2>Status</h2>
+        <label class="opt"><span>Bot in allen Gruppen <b>aktiv</b></span>
+          <input type="checkbox" name="active" ${chk(everyActive)}></label>
+      </div>
+      <div class="card">
+        <h2>🎮 Spiele & Wirtschaft</h2>
+        <p class="muted">Schaltet das komplette Spiel-/RPG- und Wirtschaftssystem in allen Gruppen dieser Community frei.</p>
+        ${gamesReady ? '' : '<p class="muted">⚠️ Die Spiele-Datenbank ist serverseitig nicht aktiv. Der Schalter wird gespeichert, wirkt aber erst, sobald die Spiele-Datenbank (Turso) verbunden ist.</p>'}
+        <label class="opt"><span>🎮 Spiele in allen Gruppen <b>freigeschaltet</b></span>
+          <input type="checkbox" name="gameGroup" ${chk(everyGame)}></label>
+      </div>
+      <div class="card">
+        <h2>Moderation</h2>
+        <p class="muted">Damit der Bot Nachrichten löschen kann, muss er in der jeweiligen Gruppe <b>Admin</b> sein.</p>
+        <label class="opt"><span>🤬 Beleidigungen löschen + verwarnen</span>
+          <input type="checkbox" name="mod_badwords" ${chk(mod.badwords)}></label>
+        <label class="opt"><span>🔗 Links löschen</span>
+          <input type="checkbox" name="mod_links" ${chk(mod.links)}></label>
+        <label class="opt"><span>Verwarnungen bis Stummschaltung</span>
+          <input class="input" style="width:80px" type="number" min="1" max="10" name="warnLimit" value="${Number(mod.warnLimit) || 3}"></label>
+        <label class="opt"><span>🐌 Slowmode (Sekunden, 0 = aus)</span>
+          <input class="input" style="width:80px" type="number" min="0" max="3600" name="slowmode" value="${Number(mod.slowmode) || 0}"></label>
+        <p class="muted" style="margin-top:12px">Zusätzliche verbotene Wörter (kommagetrennt):</p>
+        <textarea class="input" name="extraBadwords" placeholder="z. B. idiot, depp">${escapeHtml((mod.extraBadwords || []).join(', '))}</textarea>
+      </div>
+      <div class="card">
+        <h2>👋 Willkommensnachrichten</h2>
+        <label class="opt"><span>Neue Mitglieder begrüßen</span>
+          <input type="checkbox" name="welcome_enabled" ${chk(ref.welcome?.enabled)}></label>
+        <p class="muted" style="margin-top:8px">Nachrichtentext ({user} = Nummer des neuen Mitglieds):</p>
+        <textarea class="input" name="welcome_message" placeholder="Willkommen @{user} in der Gruppe! 🎉">${escapeHtml(ref.welcome?.message || '')}</textarea>
+      </div>
+      <div class="card">
+        <h2>📋 Gruppenregeln</h2>
+        <p class="muted">Diese Regeln werden mit !regeln angezeigt. Leer lassen = Standardregeln.</p>
+        <textarea class="input" name="rules" placeholder="1. Sei respektvoll…" style="min-height:100px">${escapeHtml(ref.rules || '')}</textarea>
+      </div>
+      <div class="card">
+        <h2>📢 Ankündigung (optional)</h2>
+        <p class="muted">Wird beim Speichern <b>einmalig</b> an alle aktiven Gruppen dieser Community gesendet (nur bei aktiver Verbindung). Leer lassen = nichts senden.</p>
+        <textarea class="input" name="announcement" placeholder="Nachricht an die Community …"></textarea>
+      </div>
+      <div class="card"><button type="submit">💾 Auf alle ${grps.length} Gruppen anwenden</button></div>
+    </form>`));
+});
+
+// Pro-Community Einstellungen – Speichern (auf alle Gruppen der Community anwenden)
+app.post('/community/settings/save', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const keyVal = encodeURIComponent(req.query.key);
+  const parent = String(req.body.parent || '');
+  if (!parent) return res.status(400).send('Fehlende Community-ID.');
+
+  const community = getCommunities().find((c) => c.parent === parent);
+  if (!community) return res.status(404).send('Community nicht gefunden.');
+
+  const b = req.body;
+  const active = b.active !== undefined;
+  const gameOn = b.gameGroup !== undefined;
+  const extra = String(b.extraBadwords || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const warnLimit = Math.min(10, Math.max(1, Number(b.warnLimit) || 3));
+  const slowmode = Math.min(3600, Math.max(0, Number(b.slowmode) || 0));
+  const welcomeEnabled = b.welcome_enabled !== undefined;
+  const welcomeMsg = String(b.welcome_message || '').trim() || null;
+  const rulesText = String(b.rules || '').trim() || null;
+
+  if (!config.gameGroups) config.gameGroups = {};
+  for (const g of community.groups) {
+    const existing = config.groups[g.id] || defaultGroupConfig();
+    config.groups[g.id] = {
+      ...existing,
+      active,
+      moderation: {
+        ...(existing.moderation || {}),
+        badwords: b.mod_badwords !== undefined,
+        links: b.mod_links !== undefined,
+        warnLimit, slowmode, extraBadwords: extra,
+      },
+      welcome: { enabled: welcomeEnabled, message: welcomeMsg },
+      rules: rulesText,
+    };
+    if (gameOn) config.gameGroups[g.id] = true;
+    else delete config.gameGroups[g.id];
+  }
+  await persist();
+  logger.info({ parent, groups: community.groups.length, active, games: gameOn }, 'Community-Einstellungen auf alle Gruppen angewendet');
+
+  // Optionale Ankündigung an aktive Gruppen dieser Community
+  const announcement = String(b.announcement || '').trim();
+  if (announcement && botState.connected && botState.sock) {
+    let sent = 0;
+    for (const g of community.groups) {
+      if (config.groups[g.id]?.active === false) continue;
+      try {
+        await botState.sock.sendMessage(g.id, { text: announcement });
+        sent += 1;
+        await new Promise((r) => setTimeout(r, 300));
+      } catch (_) {}
+    }
+    logger.info({ parent, sent }, 'Community-Ankündigung gesendet');
+  }
+
+  res.redirect(`/community/settings?parent=${encodeURIComponent(parent)}&key=${keyVal}&saved=1`);
 });
 
 // Community-weite Globaleinstellungen – Seite
