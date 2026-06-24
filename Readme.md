@@ -15,23 +15,22 @@ Render-Free-Dienst gegen Inaktivität wach.
   `!slowmode`, `!del`, `!remind` u. v. m. (siehe `!hilfe` bzw. die Web-Seite `/befehle`).
 - **Moderation** (pro Gruppe optional): löscht Beleidigungen (mit Verwarnung &
   Soft-Mute) und/oder Links und meldet das. Der Bot muss dafür **Gruppen-Admin** sein.
-- **Web-Oberfläche (Minimal):** Derzeit auf das Nötigste reduziert – Login, QR-Login
-  und ein **Panel**, über das der vollständige **Blueprint** (`bot-blueprint.md`)
-  heruntergeladen werden kann. Diese Datei beschreibt alles für den geplanten
-  Neuaufbau (Funktionen, Technik, Speicher-Zugang, Daten-Schema, Verbesserungen,
-  UI-Design). Der Bot selbst (Verbindung, Moderation, Befehle) läuft normal weiter.
+- **Web-Oberfläche (auf den Download reduziert):** Nach dem Login gibt es nur noch
+  **einen Download-Button** für den vollständigen **Blueprint** (`bot-blueprint.md`).
+  Diese Datei beschreibt alles für den geplanten Neuaufbau (Funktionen, Technik,
+  Speicher-Zugang, Daten-Schema, Verbesserungen, UI-Design). Alle anderen Web-Seiten
+  (Dashboard, Einstellungen, QR, Steuerung …) wurden entfernt. Der Bot-Kern
+  (Verbindung, Moderation, Befehle) läuft normal weiter; der QR-Code zum Verbinden
+  erscheint nur noch im **Server-Terminal/Log**.
 
 ## Endpoints
 
-| Pfad         | Schutz        | Zweck                                          |
-| ------------ | ------------- | ---------------------------------------------- |
-| `/ping`      | offen         | Health-Check für externe Uptime-Monitore       |
-| `/healthz`   | offen         | JSON-Health (powered/connected/uptime)         |
-| `/`          | offen         | Anmeldeseite (Passwort)                         |
-| `/status`    | Session       | JSON-Status                                    |
-| `/qr`        | Session       | WhatsApp-Login-QR-Code                         |
-| `/panel`     | Session       | Minimal-Panel: Status, Steuerung, Download     |
-| `/blueprint` | Session       | Download der `bot-blueprint.md`                |
+| Pfad         | Schutz   | Zweck                                     |
+| ------------ | -------- | ----------------------------------------- |
+| `/ping`      | offen    | Health-Check für externe Uptime-Monitore  |
+| `/healthz`   | offen    | JSON-Health (powered/connected/uptime)    |
+| `/`          | offen    | Anmeldeseite → nach Login: Download-Seite  |
+| `/blueprint` | Session  | Download der `bot-blueprint.md`           |
 
 ## Lokal testen
 

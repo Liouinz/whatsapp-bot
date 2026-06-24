@@ -723,59 +723,10 @@ function page(title, body, opts = {}) {
   const refresh = opts.refresh
     ? `<meta http-equiv="refresh" content="${opts.refresh};url=${opts.refreshUrl || ''}">`
     : '';
-  const off = !botState.powered;
-  const bodyClass = off ? ' class="poweroff"' : '';
-  // Globaler Hinweis-Banner, wenn der Bot ausgeschaltet ist (auf allen Innenseiten).
-  const banner = (off && opts.power !== false)
-    ? `<div class="power-banner">🔴 Der Bot ist ausgeschaltet. Der Server läuft weiter – schalte ihn im Dashboard wieder ein.</div>`
-    : '';
-  // Wegklickbarer Verbindungs-Hinweis (nur wenn Bot an, aber WhatsApp getrennt)
-  const noConnBanner = (botState.powered && !botState.connected && opts.power !== false)
-    ? `<div class="conn-banner" id="connBanner">🔌 Keine WhatsApp-Verbindung&ensp;
-         <a href="/qr">Jetzt verbinden</a>
-         <button onclick="document.getElementById('connBanner').remove();localStorage.setItem('connDismissed','1')" style="width:auto;padding:3px 10px;margin:0 0 0 8px;font-size:.85rem;background:rgba(255,255,255,.12)">×</button>
-       </div>
-       <script>(function(){if(localStorage.getItem('connDismissed')==='1'){var b=document.getElementById('connBanner');if(b)b.remove();}})();</script>`
-    : '';
-  // Innenseiten enthalten die Sidebar (via navBar) → App-Shell-Layout mit
-  // linkem Innenabstand. Login/QR/Fehlerseiten haben keine Sidebar → zentriert.
-  const hasShell = /class="sidebar"/.test(body);
-  const contentClass = hasShell ? 'content has-shell' : 'content bare';
   return `<!doctype html><html lang="de"><head>
     <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
     ${refresh}<title>${escapeHtml(title)}</title><style>${STYLE}</style></head>
-    <body${bodyClass}>${LEAVES}<div class="${contentClass}">${banner}${noConnBanner}${body}${opts.script || ''}</div></body></html>`;
-}
-
-// Strom-/Steuerungspanel: Bot an/aus, Bot neu starten, Server neu starten.
-function powerPanel() {
-  const on = botState.powered;
-  const conn = botState.connected;
-  const statusTxt = !on
-    ? 'Ausgeschaltet – der Server läuft weiter, der Bot reagiert nicht.'
-    : conn ? 'Eingeschaltet & mit WhatsApp verbunden.' : 'Eingeschaltet – verbindet sich…';
-  const onOffBtn = on
-    ? `<form method="post" action="/power/off" onsubmit="return confirm('Bot wirklich ausschalten? Der Server bleibt online, der Bot reagiert dann nicht mehr.')">
-         <button class="pbtn pbtn-off">⏻ Bot ausschalten<small>Bot pausiert · Server bleibt an</small></button></form>`
-    : `<form method="post" action="/power/on">
-         <button class="pbtn pbtn-on">⚡ Bot einschalten<small>Verarbeitung & Verbindung starten</small></button></form>`;
-  return `
-  <div class="power-card">
-    <div class="power-head">
-      <div class="power-orb ${on ? 'on' : 'off'}"></div>
-      <div>
-        <div class="power-title">${on ? '🟢 Bot ist AN' : '⚪ Bot ist AUS'}</div>
-        <div class="power-sub">${statusTxt}</div>
-      </div>
-    </div>
-    <div class="power-actions">
-      ${onOffBtn}
-      <form method="post" action="/bot/restart" onsubmit="return confirm('Bot neu starten? Die WhatsApp-Verbindung wird kurz getrennt und neu aufgebaut.')">
-        <button class="pbtn pbtn-restart">🔄 Bot neu starten<small>Verbindung neu aufbauen · Server bleibt an</small></button></form>
-      <form method="post" action="/server/restart" onsubmit="return confirm('GANZEN Server neu starten? Der Prozess wird beendet und von der Plattform neu gestartet. Daten kommen aus der Cloud.')">
-        <button class="pbtn pbtn-server">♻️ Server neu starten<small>Kompletter Neustart · lädt Cloud-Daten</small></button></form>
-    </div>
-  </div>`;
+    <body><div class="content bare">${body}${opts.script || ''}</div></body></html>`;
 }
 
 function requireAuth(req, res) {
@@ -839,82 +790,26 @@ app.get('/healthz', (_req, res) => {
   });
 });
 
-// ---------- Strom-/Steuerungs-Endpunkte (passwortgeschützt) ----------
-// Bot AUS: pausiert die Verarbeitung & trennt die WhatsApp-Verbindung,
-// der Webserver bleibt aber online. Zustand wird in der Cloud gespeichert.
-app.post('/power/off', async (req, res) => {
-  if (!requireAuth(req, res)) return;
-  botState.powered = false;
-  botState.paused = true;
-  config.botPowered = false;
-  try { await persist(); } catch (e) { logger.warn({ e }, 'persist (power off) fehlgeschlagen'); }
-  try { botState.sock?.end?.(new Error('per Website ausgeschaltet')); } catch (_) {}
-  botState.connected = false;
-  logger.warn('🔴 Bot per Website AUSGESCHALTET – Webserver bleibt online.');
-  res.redirect(`/panel`);
-});
-
-// Bot AN: nimmt die Verarbeitung wieder auf und verbindet neu.
-app.post('/power/on', async (req, res) => {
-  if (!requireAuth(req, res)) return;
-  botState.powered = true;
-  botState.paused = false;
-  config.botPowered = true;
-  try { await persist(); } catch (e) { logger.warn({ e }, 'persist (power on) fehlgeschlagen'); }
-  if (!botState.connected && !botState.reconnecting) {
-    botState.lastConnectedAt = botState.lastConnectedAt || Date.now();
-    startBot().catch((e) => { logger.error({ e }, 'Einschalten: Start fehlgeschlagen'); scheduleReconnect('Power-On'); });
+// Startseite: nicht angemeldet → Login; angemeldet → Download-Seite.
+app.get('/', (req, res) => {
+  if (sessionOk(req)) {
+    return res.send(page('Blueprint herunterladen', `
+      <div class="card hero">
+        <div class="logo">🤖</div>
+        <h1 class="gradient-text" style="font-size:clamp(1.6rem,6vw,2.1rem)">Bot-Blueprint</h1>
+        <p class="muted" style="max-width:420px;margin:8px auto 18px">Die vollständige Spezifikationsdatei für den Neuaufbau.</p>
+        <a href="/blueprint"><button class="glow-btn">⬇️ Blueprint herunterladen</button></a>
+      </div>
+      <div class="card" style="text-align:center"><a href="/logout">⎋ Abmelden</a></div>`));
   }
-  logger.info('🟢 Bot per Website EINGESCHALTET.');
-  res.redirect(`/panel`);
-});
-
-// Bot NEU STARTEN: trennt die WhatsApp-Verbindung sauber und baut sie neu auf,
-// ohne den Server (und damit die Web-Oberfläche) zu beenden.
-app.post('/bot/restart', async (req, res) => {
-  if (!requireAuth(req, res)) return;
-  botState.powered = true;
-  botState.paused = false;
-  config.botPowered = true;
-  try { await persist(); } catch (_) {}
-  logger.warn('🔄 Bot-Neustart (Verbindung) angefordert.');
-  try { botState.sock?.end?.(new Error('Neustart angefordert')); } catch (_) {}
-  botState.connected = false;
-  botState.reconnecting = false;
-  setTimeout(() => {
-    startBot().catch((e) => { logger.error({ e }, 'Bot-Neustart fehlgeschlagen'); scheduleReconnect('Neustart'); });
-  }, 1500);
-  res.redirect(`/panel`);
-});
-
-// SERVER NEU STARTEN: beendet den Prozess. Render (oder ein Prozess-Manager)
-// startet ihn automatisch neu; dabei werden alle Daten frisch aus der Cloud geladen.
-app.post('/server/restart', async (req, res) => {
-  if (!requireAuth(req, res)) return;
-  // powered-Status beibehalten, damit der Bot nach dem Neustart so weiterläuft wie jetzt.
-  config.botPowered = botState.powered;
-  try { await persist(); } catch (_) {}
-  logger.warn('♻️ SERVER-Neustart angefordert – Prozess wird beendet, Plattform startet neu.');
-  res.redirect(`/panel`);
-  setTimeout(() => process.exit(0), 800);
-});
-
-// Startseite: Anmeldung mit Augen-Symbol
-app.get('/', (_req, res) => {
-  const statusBadge = botState.connected
-    ? '<span class="status on">✅ verbunden</span>'
-    : botState.qr
-      ? '<span class="status off">⭕ wartet auf QR-Scan</span>'
-      : '<span class="status off">⭕ getrennt</span>';
   const script = `<script>(function(){var p=document.getElementById('pw'),e=document.getElementById('eye');
     e.addEventListener('click',function(){if(p.type==='password'){p.type='text';e.textContent='🙈';}
     else{p.type='password';e.textContent='👁️';}p.focus();});})();</script>`;
-  res.send(page('WhatsApp-Bot', `
+  res.send(page('Anmelden', `
     <div class="card hero">
       <div class="logo">🤖</div>
-      <h1 class="gradient-text" style="font-size:clamp(1.6rem,6vw,2.1rem)">WhatsApp-Bot</h1>
-      <p class="muted" style="max-width:380px;margin:8px auto 14px">Melde dich an, um Gruppen, Moderation & Communities zu verwalten.</p>
-      <div>${statusBadge}</div>
+      <h1 class="gradient-text" style="font-size:clamp(1.6rem,6vw,2.1rem)">Bot-Blueprint</h1>
+      <p class="muted" style="max-width:380px;margin:8px auto 14px">Melde dich an, um die Datei herunterzuladen.</p>
     </div>
     <form class="card" method="post" action="/login">
       <h2>🔑 Anmelden</h2>
@@ -923,21 +818,7 @@ app.get('/', (_req, res) => {
         <button type="button" class="eye" id="eye" aria-label="Passwort anzeigen">👁️</button>
       </div>
       <button type="submit" class="glow-btn">Weiter →</button>
-    </form>
-    <p class="muted" style="text-align:center;font-size:.78rem;opacity:.6;margin-top:4px">🔒 Sichere, passwortgeschützte Verwaltung</p>`, { script }));
-});
-
-app.get('/status', (req, res) => {
-  // Enthält die Bot-Nummer → nur mit Cookie-Session. Öffentliche Monitore nutzen /healthz.
-  if (!sessionOk(req)) return res.status(401).json({ error: 'unauthorized' });
-  res.json({
-    status: botState.connected ? 'verbunden' : 'getrennt',
-    nummer: botState.me ? botState.me.id.split(':')[0] : null,
-    qrVerfuegbar: Boolean(botState.qr),
-    aktiveGruppen: activeGroupCount(),
-    moderationsAktionen: botState.moderation.actionsTotal,
-    uptimeSekunden: Math.round((Date.now() - botState.startedAt) / 1000),
-  });
+    </form>`, { script }));
 });
 
 app.post('/login', (req, res) => {
@@ -953,11 +834,11 @@ app.post('/login', (req, res) => {
   }
   noteLoginOk(ip);
   const token = crypto.randomBytes(32).toString('hex');
-  if (activeSessions.size >= 50) activeSessions.clear(); // Verhindert unbegrenzte Session-Akkumulation
+  if (activeSessions.size >= 50) activeSessions.clear();
   activeSessions.add(token);
   const secure = process.env.NODE_ENV !== 'development';
   res.setHeader('Set-Cookie', `sess=${token}; HttpOnly; ${secure ? 'Secure; ' : ''}SameSite=Strict; Max-Age=86400; Path=/`);
-  res.redirect('/panel');
+  res.redirect('/');
 });
 
 app.get('/logout', (req, res) => {
@@ -965,78 +846,6 @@ app.get('/logout', (req, res) => {
   if (t) activeSessions.delete(t);
   res.setHeader('Set-Cookie', 'sess=; HttpOnly; Secure; SameSite=Strict; Max-Age=0; Path=/');
   res.redirect('/');
-});
-
-// QR-Code-Seite
-app.get('/qr', async (req, res) => {
-  res.set('Cache-Control', 'no-store');
-  if (!requireAuth(req, res)) return;
-
-  if (botState.connected) {
-    return res.send(page('Verbunden', `
-      <div class="card">
-        <h1>✅ Verbunden</h1>
-        <p class="muted">Erfolgreich verbunden – weiter zum Panel…</p>
-        <a href="/panel"><button>Weiter zum Panel →</button></a>
-      </div>`, { refresh: 2, refreshUrl: `/panel` }));
-  }
-  if (!botState.qr) {
-    return res.send(page('Warte auf QR', `
-      <div class="card" style="text-align:center">
-        <h1>⏳ QR-Code wird vorbereitet…</h1>
-        <p class="muted">Die Seite lädt automatisch neu.</p>
-      </div>`, { refresh: 8, refreshUrl: `/qr` }));
-  }
-  try {
-    const qrImage = await QRCode.toDataURL(botState.qr, { width: 360, margin: 1 });
-    res.send(page('WhatsApp QR-Code', `
-      <div class="card" style="text-align:center">
-        <h1>📲 WhatsApp verbinden</h1>
-        <p class="muted">WhatsApp → Einstellungen → <b>Verknüpfte Geräte</b> → <b>Gerät hinzufügen</b></p>
-        <div class="qr"><img src="${qrImage}" alt="QR Code"></div>
-        <p class="muted">Der Code aktualisiert sich automatisch.</p>
-        <a href="/panel" style="display:inline-block;margin-top:14px"><button style="background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);border-radius:12px;padding:10px 22px;cursor:pointer;color:#e9ecf3;font-weight:600">← Zurück zum Panel</button></a>
-      </div>`, { refresh: 25, refreshUrl: `/qr` }));
-  } catch (err) {
-    logger.error({ err }, 'Fehler beim Erzeugen des QR-Codes');
-    res.status(500).send('Fehler beim Erzeugen des QR-Codes.');
-  }
-});
-
-// ── Minimal-Panel: Status, Steuerung & Blueprint-Download ──────────────
-app.get('/panel', (req, res) => {
-  if (!requireAuth(req, res)) return;
-  const connected = botState.connected;
-  const statusBadge = connected
-    ? '<span class="status on">✅ WhatsApp verbunden</span>'
-    : botState.qr
-      ? '<span class="status off">⭕ wartet auf QR-Scan</span>'
-      : '<span class="status off">⭕ getrennt</span>';
-  const nummer = botState.me ? botState.me.id.split(':')[0] : '–';
-  const uptime = formatDuration(Date.now() - botState.startedAt);
-  res.send(page('Bot-Panel', `
-    <div class="card hero">
-      <div class="logo">🤖</div>
-      <h1 class="gradient-text" style="font-size:clamp(1.6rem,6vw,2.1rem)">WhatsApp-Bot</h1>
-      <p class="muted" style="max-width:420px;margin:8px auto 14px">Minimal-Panel. Der Bot läuft im Hintergrund weiter – hier lädst du den
-      vollständigen <b>Blueprint</b> für den Neuaufbau herunter.</p>
-      <div>${statusBadge}</div>
-    </div>
-    ${powerPanel()}
-    <div class="card" style="text-align:center">
-      <h2>📄 Bot-Blueprint</h2>
-      <p class="muted" style="max-width:460px;margin:6px auto 14px">Eine einzige Datei mit allem: alle Funktionen &amp; Features der alten Version,
-      die komplette Technik, der <b>Speicher-Zugang</b>, das Daten-Schema, die Pflicht-Verbesserungen,
-      die neue Struktur-Idee und die UI-Design-Spezifikation.</p>
-      <a href="/blueprint"><button class="glow-btn">⬇️ Blueprint herunterladen</button></a>
-    </div>
-    <div class="card">
-      <h2>📡 Status</h2>
-      <p class="muted">Nummer: <b>${escapeHtml(nummer)}</b> · Laufzeit: <b>${escapeHtml(uptime)}</b> · aktive Gruppen: <b>${activeGroupCount()}</b> · Speicher: <b>${store.usingTurso() ? 'Turso' : store.usingMongo() ? 'MongoDB' : 'Datei (flüchtig)'}</b></p>
-      <a href="/qr"><button>📲 WhatsApp verbinden / QR-Code</button></a>
-    </div>
-    <div class="card" style="text-align:center"><a href="/logout">⎋ Abmelden</a></div>
-  `));
 });
 
 // Blueprint-Datei als Download ausliefern (passwortgeschützt)
@@ -1053,7 +862,7 @@ app.get('/blueprint', (req, res) => {
   } catch (err) {
     logger.error({ err }, 'Blueprint-Datei konnte nicht gelesen werden');
     res.status(500).send(page('Fehler',
-      '<div class="card"><h1>⚠️ Blueprint nicht gefunden</h1><p class="muted">Die Datei bot-blueprint.md fehlt auf dem Server.</p><a href="/panel"><button>Zurück</button></a></div>'));
+      '<div class="card"><h1>⚠️ Blueprint nicht gefunden</h1><p class="muted">Die Datei bot-blueprint.md fehlt auf dem Server.</p><a href="/"><button>Zurück</button></a></div>'));
   }
 });
 
@@ -1227,7 +1036,7 @@ async function startBot() {
     const { connection, lastDisconnect, qr } = update;
     if (qr) {
       botState.qr = qr;
-      logger.info('Neuer QR-Code – im Browser unter /qr scannen (nach Login)');
+      logger.info('Neuer QR-Code – im Server-Terminal/Log scannen');
       qrcodeTerminal.generate(qr, { small: true });
     }
     if (connection === 'open') {
