@@ -667,13 +667,13 @@ function parentJidOf(g) {
   return lp.id || lp.jid || null;
 }
 function communityName(parentJid) {
-  const g = botState.groups.find((x) => x.id === parentJid);
+  const g = getGroupsCached().find((x) => x.id === parentJid);
   return g ? (g.subject || 'Community') : `Community ${(parentJid || '').split('@')[0].slice(-6)}`;
 }
 // Gruppiert alle bekannten Gruppen nach ihrer Community (linkedParent).
 function getCommunities() {
   const map = new Map();
-  for (const g of botState.groups) {
+  for (const g of getGroupsCached()) {
     const parent = parentJidOf(g);
     if (!parent) continue;
     if (!map.has(parent)) map.set(parent, { parent, name: communityName(parent), groups: [] });
@@ -1954,8 +1954,11 @@ app.get('/lookup', async (req, res) => {
   const keyParam = keyOf(req);
   const keyEnc = encodeURIComponent(req.query.key);
   const rawNum = String(req.query.num || '');
-  // Normalisierung: +, Leerzeichen, Bindestriche, Klammern, Slashes entfernen; 00 → Ländercode
-  const num = rawNum.replace(/[\s\-\/().+]/g, '').replace(/^00/, '').replace(/\D/g, '');
+  // Normalisierung: alle Symbole entfernen, dann 00-Präfix und (0)-Ortskennzahl nach Ländervorwahl strippen
+  const rawStripped = rawNum.replace(/[\s\-\/().+]/g, '').replace(/\D/g, '');
+  const num = rawStripped.startsWith('00')
+    ? rawStripped.slice(2)
+    : rawStripped.replace(/^(\d{1,3})0(\d{7,})$/, '$1$2');
 
   const searchForm = `
     <form class="card" method="get" action="/lookup">

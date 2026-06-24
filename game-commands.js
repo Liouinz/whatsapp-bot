@@ -1118,7 +1118,7 @@ async function arenaCmd(ctx) {
       if (!r.ok) { await reply(`❌ ${r.reason}`); return; }
       const winnerLabel = fmtUser(r.winner);
       const loserLabel  = fmtUser(r.loser);
-      const roundLog    = r.log.join(' | ');
+      const roundLog    = (r.log || []).join(' | ');
       await reply(`⚔️ *Arena-Kampf – ${r.rounds} Runden!*\n\n${roundLog}\n\n🏆 *Sieger: ${winnerLabel}*\n💰 Gewinn: +${fmt(r.prize)} (5% Gebühr: ${fmt(r.tax)})\n${loserLabel} verliert ${fmt(r.bet)}`);
       return;
     }
