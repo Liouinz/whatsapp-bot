@@ -1,0 +1,14 @@
+{
+  "name": "blueprint-download",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Minimale Platzhalter-Seite, die nur die Blueprint-Datei zum Download anbietet. Ersetzt den alten WhatsApp-Bot.",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
