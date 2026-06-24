@@ -920,8 +920,25 @@ function escapeHtml(str) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
-function keyOf(req) {
-  return `?key=${encodeURIComponent(req.query.key)}`;
+// ---------- Session-Cookie-Verwaltung (kein npm-Paket nötig) ----------
+// Tokens leben nur im RAM — bei Server-Neustart muss der Nutzer sich erneut anmelden.
+const activeSessions = new Set();
+
+function parseCookies(req) {
+  const cookies = {};
+  for (const part of (req.headers.cookie || '').split(';')) {
+    const idx = part.indexOf('=');
+    if (idx < 0) continue;
+    const k = part.slice(0, idx).trim();
+    const v = part.slice(idx + 1).trim();
+    if (k) cookies[decodeURIComponent(k)] = decodeURIComponent(v);
+  }
+  return cookies;
+}
+
+function sessionOk(req) {
+  const t = parseCookies(req).sess;
+  return Boolean(t && activeSessions.has(t));
 }
 
 // ---------- Login-Bruteforce-Schutz (In-Memory) ----------
@@ -1204,10 +1221,10 @@ function page(title, body, opts = {}) {
   // Wegklickbarer Verbindungs-Hinweis (nur wenn Bot an, aber WhatsApp getrennt)
   const noConnBanner = (botState.powered && !botState.connected && opts.power !== false)
     ? `<div class="conn-banner" id="connBanner">🔌 Keine WhatsApp-Verbindung&ensp;
-         <a href="/qr" id="connLink">Jetzt verbinden</a>
+         <a href="/qr">Jetzt verbinden</a>
          <button onclick="document.getElementById('connBanner').remove();localStorage.setItem('connDismissed','1')" style="width:auto;padding:3px 10px;margin:0 0 0 8px;font-size:.85rem;background:rgba(255,255,255,.12)">×</button>
        </div>
-       <script>(function(){var k=new URLSearchParams(location.search).get('key');var l=document.getElementById('connLink');if(k&&l)l.href='/qr?key='+encodeURIComponent(k);if(localStorage.getItem('connDismissed')==='1'){var b=document.getElementById('connBanner');if(b)b.remove();}})();</script>`
+       <script>(function(){if(localStorage.getItem('connDismissed')==='1'){var b=document.getElementById('connBanner');if(b)b.remove();}})();</script>`
     : '';
   // Innenseiten enthalten die Sidebar (via navBar) → App-Shell-Layout mit
   // linkem Innenabstand. Login/QR/Fehlerseiten haben keine Sidebar → zentriert.
@@ -1220,16 +1237,16 @@ function page(title, body, opts = {}) {
 }
 
 // Strom-/Steuerungspanel: Bot an/aus, Bot neu starten, Server neu starten.
-function powerPanel(keyParam) {
+function powerPanel() {
   const on = botState.powered;
   const conn = botState.connected;
   const statusTxt = !on
     ? 'Ausgeschaltet – der Server läuft weiter, der Bot reagiert nicht.'
     : conn ? 'Eingeschaltet & mit WhatsApp verbunden.' : 'Eingeschaltet – verbindet sich…';
   const onOffBtn = on
-    ? `<form method="post" action="/power/off${keyParam}" onsubmit="return confirm('Bot wirklich ausschalten? Der Server bleibt online, der Bot reagiert dann nicht mehr.')">
+    ? `<form method="post" action="/power/off" onsubmit="return confirm('Bot wirklich ausschalten? Der Server bleibt online, der Bot reagiert dann nicht mehr.')">
          <button class="pbtn pbtn-off">⏻ Bot ausschalten<small>Bot pausiert · Server bleibt an</small></button></form>`
-    : `<form method="post" action="/power/on${keyParam}">
+    : `<form method="post" action="/power/on">
          <button class="pbtn pbtn-on">⚡ Bot einschalten<small>Verarbeitung & Verbindung starten</small></button></form>`;
   return `
   <div class="power-card">
@@ -1242,9 +1259,9 @@ function powerPanel(keyParam) {
     </div>
     <div class="power-actions">
       ${onOffBtn}
-      <form method="post" action="/bot/restart${keyParam}" onsubmit="return confirm('Bot neu starten? Die WhatsApp-Verbindung wird kurz getrennt und neu aufgebaut.')">
+      <form method="post" action="/bot/restart" onsubmit="return confirm('Bot neu starten? Die WhatsApp-Verbindung wird kurz getrennt und neu aufgebaut.')">
         <button class="pbtn pbtn-restart">🔄 Bot neu starten<small>Verbindung neu aufbauen · Server bleibt an</small></button></form>
-      <form method="post" action="/server/restart${keyParam}" onsubmit="return confirm('GANZEN Server neu starten? Der Prozess wird beendet und von der Plattform neu gestartet. Daten kommen aus der Cloud.')">
+      <form method="post" action="/server/restart" onsubmit="return confirm('GANZEN Server neu starten? Der Prozess wird beendet und von der Plattform neu gestartet. Daten kommen aus der Cloud.')">
         <button class="pbtn pbtn-server">♻️ Server neu starten<small>Kompletter Neustart · lädt Cloud-Daten</small></button></form>
     </div>
   </div>`;
@@ -1252,8 +1269,8 @@ function powerPanel(keyParam) {
 
 // Gemeinsame Navigationsleiste für alle Innenseiten
 // Seitenleiste (App-Shell). Gruppierte Navigation + Live-Status + Logout.
-// Signatur bleibt navBar(keyParam, active), damit alle Routen unverändert funktionieren.
-function navBar(keyParam, active = '') {
+// Signatur bleibt navBar(active), damit alle Routen unverändert funktionieren.
+function navBar(active = '') {
   const groups = [
     ['Übersicht', [
       ['dashboard', '📊', 'Dashboard'],
@@ -1285,7 +1302,7 @@ function navBar(keyParam, active = '') {
   ];
   const renderGroup = ([cap, items]) => {
     const links = items.map(([path, icon, label]) =>
-      `<a href="/${path}${keyParam}" class="sb-link ${active === path ? 'active' : ''}">` +
+      `<a href="/${path}" class="sb-link ${active === path ? 'active' : ''}">` +
       `<span class="ic">${icon}</span><span class="lbl">${label}</span></a>`
     ).join('');
     return `<div class="sb-group"><div class="sb-cap">${cap}</div>${links}</div>`;
@@ -1301,14 +1318,14 @@ function navBar(keyParam, active = '') {
     </div>
     <div class="sb-status">${statusDot}</div>
     ${groups.map(renderGroup).join('')}
-    <div class="sb-foot"><a href="/${keyParam}">⎋ Abmelden</a></div>
+    <div class="sb-foot"><a href="/logout">⎋ Abmelden</a></div>
   </aside>`;
 }
 
 function requireAuth(req, res) {
-  if (!passwordOk(req.query.key)) {
+  if (!sessionOk(req)) {
     res.status(401).send(page('Zugriff verweigert',
-      '<div class="card"><h1>🔒 Zugriff verweigert</h1><p class="muted">Falsches oder fehlendes Passwort.</p><a href="/"><button>Zurück zur Anmeldung</button></a></div>'));
+      '<div class="card"><h1>🔒 Zugriff verweigert</h1><p class="muted">Bitte melde dich an.</p><a href="/"><button>Zurück zur Anmeldung</button></a></div>'));
     return false;
   }
   return true;
@@ -1372,7 +1389,6 @@ app.get('/healthz', (_req, res) => {
 // der Webserver bleibt aber online. Zustand wird in der Cloud gespeichert.
 app.post('/power/off', async (req, res) => {
   if (!requireAuth(req, res)) return;
-  const keyParam = keyOf(req);
   botState.powered = false;
   botState.paused = true;
   config.botPowered = false;
@@ -1380,13 +1396,12 @@ app.post('/power/off', async (req, res) => {
   try { botState.sock?.end?.(new Error('per Website ausgeschaltet')); } catch (_) {}
   botState.connected = false;
   logger.warn('🔴 Bot per Website AUSGESCHALTET – Webserver bleibt online.');
-  res.redirect(`/dashboard${keyParam}`);
+  res.redirect(`/dashboard`);
 });
 
 // Bot AN: nimmt die Verarbeitung wieder auf und verbindet neu.
 app.post('/power/on', async (req, res) => {
   if (!requireAuth(req, res)) return;
-  const keyParam = keyOf(req);
   botState.powered = true;
   botState.paused = false;
   config.botPowered = true;
@@ -1396,14 +1411,13 @@ app.post('/power/on', async (req, res) => {
     startBot().catch((e) => { logger.error({ e }, 'Einschalten: Start fehlgeschlagen'); scheduleReconnect('Power-On'); });
   }
   logger.info('🟢 Bot per Website EINGESCHALTET.');
-  res.redirect(`/dashboard${keyParam}`);
+  res.redirect(`/dashboard`);
 });
 
 // Bot NEU STARTEN: trennt die WhatsApp-Verbindung sauber und baut sie neu auf,
 // ohne den Server (und damit die Web-Oberfläche) zu beenden.
 app.post('/bot/restart', async (req, res) => {
   if (!requireAuth(req, res)) return;
-  const keyParam = keyOf(req);
   botState.powered = true;
   botState.paused = false;
   config.botPowered = true;
@@ -1415,19 +1429,18 @@ app.post('/bot/restart', async (req, res) => {
   setTimeout(() => {
     startBot().catch((e) => { logger.error({ e }, 'Bot-Neustart fehlgeschlagen'); scheduleReconnect('Neustart'); });
   }, 1500);
-  res.redirect(`/dashboard${keyParam}`);
+  res.redirect(`/dashboard`);
 });
 
 // SERVER NEU STARTEN: beendet den Prozess. Render (oder ein Prozess-Manager)
 // startet ihn automatisch neu; dabei werden alle Daten frisch aus der Cloud geladen.
 app.post('/server/restart', async (req, res) => {
   if (!requireAuth(req, res)) return;
-  const keyParam = keyOf(req);
   // powered-Status beibehalten, damit der Bot nach dem Neustart so weiterläuft wie jetzt.
   config.botPowered = botState.powered;
   try { await persist(); } catch (_) {}
   logger.warn('♻️ SERVER-Neustart angefordert – Prozess wird beendet, Plattform startet neu.');
-  res.redirect(`/dashboard${keyParam}`);
+  res.redirect(`/dashboard`);
   setTimeout(() => process.exit(0), 800);
 });
 
@@ -1448,10 +1461,10 @@ app.get('/', (_req, res) => {
       <p class="muted" style="max-width:380px;margin:8px auto 14px">Melde dich an, um Gruppen, Moderation & Communities zu verwalten.</p>
       <div>${statusBadge}</div>
     </div>
-    <form class="card" method="get" action="/go">
+    <form class="card" method="post" action="/login">
       <h2>🔑 Anmelden</h2>
       <div class="pwwrap">
-        <input id="pw" class="input" type="password" name="key" placeholder="Passwort" autofocus required>
+        <input id="pw" class="input" type="password" name="password" placeholder="Passwort" autofocus required>
         <button type="button" class="eye" id="eye" aria-label="Passwort anzeigen">👁️</button>
       </div>
       <button type="submit" class="glow-btn">Weiter →</button>
@@ -1460,8 +1473,8 @@ app.get('/', (_req, res) => {
 });
 
 app.get('/status', (req, res) => {
-  // Enthält die Bot-Nummer → nur mit gültigem Passwort. Monitore nutzen /healthz.
-  if (!passwordOk(req.query.key)) return res.status(401).json({ error: 'unauthorized' });
+  // Enthält die Bot-Nummer → nur mit Cookie-Session. Öffentliche Monitore nutzen /healthz.
+  if (!sessionOk(req)) return res.status(401).json({ error: 'unauthorized' });
   res.json({
     status: botState.connected ? 'verbunden' : 'getrennt',
     nummer: botState.me ? botState.me.id.split(':')[0] : null,
@@ -1472,42 +1485,51 @@ app.get('/status', (req, res) => {
   });
 });
 
-app.get('/go', (req, res) => {
+app.post('/login', (req, res) => {
   const ip = req.ip || 'unknown';
   if (loginBlocked(ip)) {
     return res.status(429).send(page('Zu viele Versuche',
       '<div class="card"><h1>⏳ Zu viele Fehlversuche</h1><p class="muted">Bitte warte ein paar Minuten und versuche es dann erneut.</p><a href="/"><button>Zurück</button></a></div>'));
   }
-  if (!passwordOk(req.query.key)) {
+  if (!passwordOk(req.body.password)) {
     noteLoginFail(ip);
     return res.status(401).send(page('Falsches Passwort',
-      '<div class="card"><h1>🔒 Falsches Passwort</h1><a href="/"><button>Erneut versuchen</button></a></div>'));
+      '<div class="card"><h1>🔒 Falsches Passwort</h1><p class="muted">Das eingegebene Passwort ist falsch.</p><a href="/"><button>Erneut versuchen</button></a></div>'));
   }
   noteLoginOk(ip);
-  const keyParam = keyOf(req);
-  res.redirect(`/dashboard${keyParam}`);
+  const token = crypto.randomBytes(32).toString('hex');
+  activeSessions.add(token);
+  const secure = process.env.NODE_ENV !== 'development';
+  res.setHeader('Set-Cookie', `sess=${token}; HttpOnly; ${secure ? 'Secure; ' : ''}SameSite=Strict; Max-Age=86400; Path=/`);
+  res.redirect('/dashboard');
+});
+
+app.get('/logout', (req, res) => {
+  const t = parseCookies(req).sess;
+  if (t) activeSessions.delete(t);
+  res.setHeader('Set-Cookie', 'sess=; HttpOnly; Secure; SameSite=Strict; Max-Age=0; Path=/');
+  res.redirect('/');
 });
 
 // QR-Code-Seite
 app.get('/qr', async (req, res) => {
   res.set('Cache-Control', 'no-store');
   if (!requireAuth(req, res)) return;
-  const keyParam = keyOf(req);
 
   if (botState.connected) {
     return res.send(page('Verbunden', `
       <div class="card">
         <h1>✅ Verbunden</h1>
         <p class="muted">Erfolgreich verbunden – weiter zu den Einstellungen…</p>
-        <a href="/settings${keyParam}"><button>Weiter zu den Einstellungen →</button></a>
-      </div>`, { refresh: 2, refreshUrl: `/settings${keyParam}` }));
+        <a href="/settings"><button>Weiter zu den Einstellungen →</button></a>
+      </div>`, { refresh: 2, refreshUrl: `/settings` }));
   }
   if (!botState.qr) {
     return res.send(page('Warte auf QR', `
       <div class="card" style="text-align:center">
         <h1>⏳ QR-Code wird vorbereitet…</h1>
         <p class="muted">Die Seite lädt automatisch neu.</p>
-      </div>`, { refresh: 8, refreshUrl: `/qr${keyParam}` }));
+      </div>`, { refresh: 8, refreshUrl: `/qr` }));
   }
   try {
     const qrImage = await QRCode.toDataURL(botState.qr, { width: 360, margin: 1 });
@@ -1517,7 +1539,7 @@ app.get('/qr', async (req, res) => {
         <p class="muted">WhatsApp → Einstellungen → <b>Verknüpfte Geräte</b> → <b>Gerät hinzufügen</b></p>
         <div class="qr"><img src="${qrImage}" alt="QR Code"></div>
         <p class="muted">Der Code aktualisiert sich automatisch.</p>
-      </div>`, { refresh: 25, refreshUrl: `/qr${keyParam}` }));
+      </div>`, { refresh: 25, refreshUrl: `/qr` }));
   } catch (err) {
     logger.error({ err }, 'Fehler beim Erzeugen des QR-Codes');
     res.status(500).send('Fehler beim Erzeugen des QR-Codes.');
@@ -1528,7 +1550,6 @@ app.get('/qr', async (req, res) => {
 app.get('/settings', async (req, res) => {
   res.set('Cache-Control', 'no-store');
   if (!requireAuth(req, res)) return;
-  const keyParam = keyOf(req);
 
   if (botState.connected) await refreshGroups();
   const nummer = botState.me ? botState.me.id.split(':')[0] : '–';
@@ -1554,7 +1575,7 @@ app.get('/settings', async (req, res) => {
         : `<div class="avatar" style="display:flex;align-items:center;justify-content:center;font-size:1.3rem">👥</div>`;
       groupsHtml += `
         <a class="grp" data-active="${gc.active ? 1 : 0}" data-name="${escapeHtml((g.subject || 'unbenannt').toLowerCase())}" data-size="${g.size || 0}" data-activity="${activity}"
-           href="/group?id=${encodeURIComponent(g.id)}&key=${encodeURIComponent(req.query.key)}">
+           href="/group?id=${encodeURIComponent(g.id)}">
           ${avatar}
           <span class="meta"><span class="name">${escapeHtml(g.subject || 'Unbenannt')}${badge} ${activeBadge}</span>
             <span class="muted">${g.size || 0} Mitglieder · ${activity} Aktivität</span></span>
@@ -1566,7 +1587,7 @@ app.get('/settings', async (req, res) => {
   const totalMembers = groups.reduce((s, g) => s + (g.size || 0), 0);
   const connBadge = botState.connected ? '<span class="status on">verbunden</span>' : '<span class="status off">offline</span>';
   res.send(page('Einstellungen', `
-    ${navBar(keyParam, 'settings')}
+    ${navBar('settings')}
     <div class="card">
       <div class="row"><h1>⚙️ Gruppen-Übersicht</h1>${connBadge}</div>
       <p class="muted">Nummer: <b>${escapeHtml(nummer)}</b></p>
@@ -1597,9 +1618,9 @@ app.get('/settings', async (req, res) => {
       <div id="grpList">${groupsHtml}</div>
     </div>
     <div class="card row" style="flex-wrap:wrap;gap:10px">
-      <a href="/settings${keyParam}">🔄 Neu laden</a>
-      <a href="/lookup${keyParam}">🔎 Nummer suchen</a>
-      <a href="/dashboard${keyParam}">📊 Dashboard</a>
+      <a href="/settings">🔄 Neu laden</a>
+      <a href="/lookup">🔎 Nummer suchen</a>
+      <a href="/dashboard">📊 Dashboard</a>
     </div>`,
     { script: `<script>
       var curFilter='all';
@@ -1637,12 +1658,10 @@ app.get('/group', async (req, res) => {
   res.set('Cache-Control', 'no-store');
   if (!requireAuth(req, res)) return;
   const id = String(req.query.id || '');
-  const keyVal = encodeURIComponent(req.query.key);
-  const keyParam = keyOf(req);
   const group = getGroupsCached().find((g) => g.id === id);
   if (!id || !group) {
     return res.status(404).send(page('Nicht gefunden',
-      `<div class="card"><h1>Gruppe nicht gefunden</h1><a href="/settings${keyParam}"><button>Zurück</button></a></div>`));
+      `<div class="card"><h1>Gruppe nicht gefunden</h1><a href="/settings"><button>Zurück</button></a></div>`));
   }
 
   const gc = effectiveGroupConfig(id);
@@ -1670,17 +1689,17 @@ app.get('/group', async (req, res) => {
 
   const parentJ = parentJidOf(group);
   const comBadge = parentJ
-    ? `<a href="/community${keyParam}" class="chip" style="text-decoration:none">🏘️ ${escapeHtml(communityName(parentJ))}</a>`
+    ? `<a href="/community" class="chip" style="text-decoration:none">🏘️ ${escapeHtml(communityName(parentJ))}</a>`
     : '';
   res.send(page('Gruppe konfigurieren', `
-    ${navBar(keyParam, '')}
+    ${navBar('')}
     <div class="card">
       <div class="row"><h1>⚙️ ${escapeHtml(group.subject || 'Gruppe')}</h1>
-        <a href="/settings${keyParam}">← zurück</a></div>
-      <p class="muted">${group.size || 0} Mitglieder ${comBadge} · <a href="/group/members?id=${encodeURIComponent(id)}&key=${encodeURIComponent(req.query.key)}">👥 Mitglieder anzeigen</a></p>
+        <a href="/settings">← zurück</a></div>
+      <p class="muted">${group.size || 0} Mitglieder ${comBadge} · <a href="/group/members?id=${encodeURIComponent(id)}">👥 Mitglieder anzeigen</a></p>
       ${saved}
     </div>
-    <form method="POST" action="/group/save?id=${encodeURIComponent(id)}&key=${keyVal}">
+    <form method="POST" action="/group/save?id=${encodeURIComponent(id)}">
       <div class="card">
         <h2>Status</h2>
         <label class="opt"><span>Bot in dieser Gruppe <b>aktiv</b></span>
@@ -1732,7 +1751,6 @@ app.get('/group', async (req, res) => {
 app.post('/group/save', async (req, res) => {
   if (!requireAuth(req, res)) return;
   const id = String(req.query.id || '');
-  const keyVal = encodeURIComponent(req.query.key);
   if (!id) return res.status(400).send('Fehlende Gruppen-ID.');
 
   const commands = {};
@@ -1772,7 +1790,7 @@ app.post('/group/save', async (req, res) => {
   else delete config.gameGroups[id];
   await persist();
   logger.info({ group: id, active: config.groups[id].active, games: !!config.gameGroups[id] }, 'Gruppen-Konfiguration gespeichert');
-  res.redirect(`/group?id=${encodeURIComponent(id)}&key=${keyVal}&saved=1`);
+  res.redirect(`/group?id=${encodeURIComponent(id)}&saved=1`);
 });
 
 // Mitglieder einer Gruppe
@@ -1780,15 +1798,14 @@ app.get('/group/members', async (req, res) => {
   res.set('Cache-Control', 'no-store');
   if (!requireAuth(req, res)) return;
   const id = String(req.query.id || '');
-  const keyParam = keyOf(req);
   const group = getGroupsCached().find((g) => g.id === id);
   if (!id || !group) {
     return res.status(404).send(page('Nicht gefunden',
-      `<div class="card"><h1>Gruppe nicht gefunden</h1><a href="/settings${keyParam}"><button>Zurück</button></a></div>`));
+      `<div class="card"><h1>Gruppe nicht gefunden</h1><a href="/settings"><button>Zurück</button></a></div>`));
   }
   if (!botState.connected) {
     return res.status(503).send(page('Nicht verbunden',
-      `<div class="card"><h1>⚠️ Nicht verbunden</h1><a href="/settings${keyParam}"><button>Zurück</button></a></div>`));
+      `<div class="card"><h1>⚠️ Nicht verbunden</h1><a href="/settings"><button>Zurück</button></a></div>`));
   }
 
   const meta = await getGroupMeta(id);
@@ -1804,16 +1821,15 @@ app.get('/group/members', async (req, res) => {
       (isSelfBot ? '<span class="tag tag-bot">🤖 Bot</span>' : '');
     const encodedJid = encodeURIComponent(p.id);
     const grpEnc = encodeURIComponent(id);
-    const keyEnc = encodeURIComponent(req.query.key);
     const actionBtns = !isSelfBot ? `
-      <a href="/member?jid=${encodedJid}&group=${grpEnc}&key=${keyEnc}" class="action-btn btn-blue">📋 Profil</a>
-      <form method="POST" action="/member/action?key=${keyEnc}" style="display:inline" onsubmit="return confirm('Wirklich muten?')">
+      <a href="/member?jid=${encodedJid}&group=${grpEnc}" class="action-btn btn-blue">📋 Profil</a>
+      <form method="POST" action="/member/action" style="display:inline" onsubmit="return confirm('Wirklich muten?')">
         <input type="hidden" name="action" value="mute">
         <input type="hidden" name="targetJid" value="${escapeHtml(p.id)}">
         <input type="hidden" name="groupJid" value="${escapeHtml(id)}">
         <button type="submit" class="action-btn btn-yellow">🔇 Mute</button>
       </form>
-      <form method="POST" action="/member/action?key=${keyEnc}" style="display:inline" onsubmit="return confirm('Wirklich kicken?')">
+      <form method="POST" action="/member/action" style="display:inline" onsubmit="return confirm('Wirklich kicken?')">
         <input type="hidden" name="action" value="kick">
         <input type="hidden" name="targetJid" value="${escapeHtml(p.id)}">
         <input type="hidden" name="groupJid" value="${escapeHtml(id)}">
@@ -1826,13 +1842,13 @@ app.get('/group/members', async (req, res) => {
   }
 
   res.send(page(`Mitglieder – ${group.subject}`, `
-    ${navBar(keyParam, '')}
+    ${navBar('')}
     <div class="card">
       <div class="row">
         <h1>👥 ${escapeHtml(group.subject || 'Gruppe')}</h1>
-        <a href="/group?id=${encodeURIComponent(id)}&key=${encodeURIComponent(req.query.key)}">← zurück</a>
+        <a href="/group?id=${encodeURIComponent(id)}">← zurück</a>
       </div>
-      <p class="muted">${participants.length} Mitglieder · <a href="/group/stats?id=${encodeURIComponent(id)}&key=${encodeURIComponent(req.query.key)}">🏆 Leaderboard</a></p>
+      <p class="muted">${participants.length} Mitglieder · <a href="/group/stats?id=${encodeURIComponent(id)}">🏆 Leaderboard</a></p>
     </div>
     <div class="card">
       <input type="search" id="memSearch" class="search-bar" placeholder="🔍 Nummer suchen…" oninput="filterMem(this.value)">
@@ -1846,7 +1862,6 @@ app.get('/group/members', async (req, res) => {
 app.get('/reports', (req, res) => {
   res.set('Cache-Control', 'no-store');
   if (!requireAuth(req, res)) return;
-  const keyParam = keyOf(req);
   const reports = (config.reports || []).slice().reverse();
 
   let rows = '';
@@ -1861,11 +1876,11 @@ app.get('/reports', (req, res) => {
   }
 
   res.send(page('Meldungen', `
-    ${navBar(keyParam, 'reports')}
+    ${navBar('reports')}
     <div class="card">
       <div class="row">
         <h1>📋 Meldungen</h1>
-        <a href="/settings${keyParam}">← zurück</a>
+        <a href="/settings">← zurück</a>
       </div>
       <p class="muted">${reports.length} Meldung(en) gesamt</p>
     </div>
@@ -1876,8 +1891,8 @@ app.get('/reports', (req, res) => {
       </table>
     </div>
     <div class="card row">
-      <a href="/settings${keyParam}">⚙️ Einstellungen</a>
-      <a href="/dashboard${keyParam}">📊 Dashboard</a>
+      <a href="/settings">⚙️ Einstellungen</a>
+      <a href="/dashboard">📊 Dashboard</a>
     </div>`));
 });
 
@@ -1885,14 +1900,12 @@ app.get('/reports', (req, res) => {
 app.get('/community', async (req, res) => {
   res.set('Cache-Control', 'no-store');
   if (!requireAuth(req, res)) return;
-  const keyParam = keyOf(req);
-  const keyEnc = encodeURIComponent(req.query.key);
 
   if (botState.connected) await refreshGroups();
   const communities = getCommunities();
   const connBadge2 = botState.connected ? '<span class="status on">verbunden</span>' : '<span class="status off">offline</span>';
 
-  let body = `${navBar(keyParam, 'community')}
+  let body = `${navBar('community')}
     <div class="card">
       <div class="row"><h1>🏘️ Communities</h1>${connBadge2}</div>
       <p class="muted">Der Bot erkennt automatisch, welche Gruppen zu welcher Community gehören.
@@ -1908,7 +1921,7 @@ app.get('/community', async (req, res) => {
       const grpHtml = c.groups.map((g) => {
         const gc = effectiveGroupConfig(g.id);
         const chip = gc.active ? '<span class="chip on">● aktiv</span>' : '<span class="chip off">○ inaktiv</span>';
-        return `<a class="grp" href="/group?id=${encodeURIComponent(g.id)}&key=${keyEnc}">
+        return `<a class="grp" href="/group?id=${encodeURIComponent(g.id)}">
           <span class="meta"><span class="name">${escapeHtml(g.subject || 'Unbenannt')} ${chip}</span>
             <span class="muted">${g.size || 0} Mitglieder</span></span>
           <span style="font-size:1.2rem">⚙️</span></a>`;
@@ -1920,12 +1933,12 @@ app.get('/community', async (req, res) => {
             <span class="chip">${activeCount}/${c.groups.length} aktiv</span>
           </div>
           <div class="row" style="gap:8px;margin:10px 0;flex-wrap:wrap">
-            <a href="/community/settings?parent=${encodeURIComponent(c.parent)}&key=${keyEnc}" class="action-btn btn-blue">⚙️ Einstellungen für alle Gruppen</a>
-            <form method="POST" action="/community/toggle?key=${keyEnc}" style="display:inline">
+            <a href="/community/settings?parent=${encodeURIComponent(c.parent)}" class="action-btn btn-blue">⚙️ Einstellungen für alle Gruppen</a>
+            <form method="POST" action="/community/toggle" style="display:inline">
               <input type="hidden" name="parent" value="${escapeHtml(c.parent)}"><input type="hidden" name="enable" value="1">
               <button type="submit" class="action-btn btn-green">✅ Alle aktivieren</button>
             </form>
-            <form method="POST" action="/community/toggle?key=${keyEnc}" style="display:inline">
+            <form method="POST" action="/community/toggle" style="display:inline">
               <input type="hidden" name="parent" value="${escapeHtml(c.parent)}"><input type="hidden" name="enable" value="0">
               <button type="submit" class="action-btn btn-red">⛔ Alle deaktivieren</button>
             </form>
@@ -1940,29 +1953,26 @@ app.get('/community', async (req, res) => {
 // Community komplett an/aus
 app.post('/community/toggle', async (req, res) => {
   if (!requireAuth(req, res)) return;
-  const keyParam = keyOf(req);
   const parent = String(req.body.parent || '');
   const enable = String(req.body.enable) === '1';
   if (parent) {
     const n = await setCommunityActive(parent, enable);
     logger.info({ parent, enable, n }, 'Community umgeschaltet');
   }
-  res.redirect(`/community${keyParam}`);
+  res.redirect(`/community`);
 });
 
 // Pro-Community Einstellungen – Seite (gilt für ALLE Gruppen dieser Community)
 app.get('/community/settings', async (req, res) => {
   res.set('Cache-Control', 'no-store');
   if (!requireAuth(req, res)) return;
-  const keyParam = keyOf(req);
-  const keyEnc = encodeURIComponent(req.query.key);
   const parent = String(req.query.parent || '');
 
   if (botState.connected) await refreshGroups();
   const community = getCommunities().find((c) => c.parent === parent);
   if (!parent || !community) {
     return res.status(404).send(page('Nicht gefunden',
-      `<div class="card"><h1>Community nicht gefunden</h1><a href="/community${keyParam}"><button>Zurück</button></a></div>`));
+      `<div class="card"><h1>Community nicht gefunden</h1><a href="/community"><button>Zurück</button></a></div>`));
   }
 
   const grps = community.groups;
@@ -1979,14 +1989,14 @@ app.get('/community/settings', async (req, res) => {
   try { gamesReady = gameLayer.isReady(); } catch (_) { gamesReady = false; }
 
   res.send(page(`Einstellungen – ${community.name}`, `
-    ${navBar(keyParam, 'community')}
+    ${navBar('community')}
     <div class="card">
       <div class="row"><h1>⚙️ ${escapeHtml(community.name)}</h1>
-        <a href="/community${keyParam}">← zurück</a></div>
+        <a href="/community">← zurück</a></div>
       <p class="muted">Diese Einstellungen gelten für <b>alle ${grps.length} Gruppen</b> dieser Community. Beim Speichern werden sie auf jede Gruppe angewendet. Einzelne Gruppen kannst du danach weiterhin separat feinjustieren.</p>
       ${saved}
     </div>
-    <form method="POST" action="/community/settings/save?key=${keyEnc}">
+    <form method="POST" action="/community/settings/save">
       <input type="hidden" name="parent" value="${escapeHtml(parent)}">
       <div class="card">
         <h2>Status</h2>
@@ -2038,7 +2048,6 @@ app.get('/community/settings', async (req, res) => {
 // Pro-Community Einstellungen – Speichern (auf alle Gruppen der Community anwenden)
 app.post('/community/settings/save', async (req, res) => {
   if (!requireAuth(req, res)) return;
-  const keyVal = encodeURIComponent(req.query.key);
   const parent = String(req.body.parent || '');
   if (!parent) return res.status(400).send('Fehlende Community-ID.');
 
@@ -2091,27 +2100,25 @@ app.post('/community/settings/save', async (req, res) => {
     logger.info({ parent, sent }, 'Community-Ankündigung gesendet');
   }
 
-  res.redirect(`/community/settings?parent=${encodeURIComponent(parent)}&key=${keyVal}&saved=1`);
+  res.redirect(`/community/settings?parent=${encodeURIComponent(parent)}&saved=1`);
 });
 
 // Community-weite Globaleinstellungen – Seite
 app.get('/community/global', async (req, res) => {
   res.set('Cache-Control', 'no-store');
   if (!requireAuth(req, res)) return;
-  const keyParam = keyOf(req);
-  const keyEnc = encodeURIComponent(req.query.key);
   const gs = config.globalSettings || {};
   const mod = gs.moderation || {};
 
   const toggleRow = (name, label, checked, note = '') =>
     `<label class="toggle-row"><span>${label}${note ? `<small class="muted"> – ${note}</small>` : ''}</span><input type="hidden" name="${name}" value="0"><input type="checkbox" name="${name}" value="1"${checked ? ' checked' : ''}></label>`;
 
-  res.send(page('Global-Einstellungen', `${navBar(keyParam, 'community/global')}
-    <div class="page-header"><h1>🌐 Globaleinstellungen</h1><a href="/community${keyParam}">← Communities</a></div>
+  res.send(page('Global-Einstellungen', `${navBar('community/global')}
+    <div class="page-header"><h1>🌐 Globaleinstellungen</h1><a href="/community">← Communities</a></div>
     <div class="card" style="border:2px solid #ff9800;background:rgba(255,152,0,.08)">
       <p>⚠️ <b>Achtung:</b> Wenn Synchronisation aktiv ist, überschreiben diese Einstellungen alle Gruppeneinstellungen beim Speichern.</p>
     </div>
-    <form method="POST" action="/community/global/save?key=${keyEnc}">
+    <form method="POST" action="/community/global/save">
       <div class="card">
         <h2>🔄 Synchronisation</h2>
         ${toggleRow('syncEnabled', 'Sync aktiviert', gs.syncEnabled, 'Einstellungen auf alle Gruppen anwenden')}
@@ -2142,7 +2149,7 @@ app.get('/community/global', async (req, res) => {
       </div>
       <div class="card" style="display:flex;gap:10px;flex-wrap:wrap">
         <button type="submit" class="glow-btn">💾 Speichern & Synchronisieren</button>
-        <a href="/community${keyParam}" style="align-self:center">Abbrechen</a>
+        <a href="/community" style="align-self:center">Abbrechen</a>
       </div>
     </form>`));
 });
@@ -2150,7 +2157,6 @@ app.get('/community/global', async (req, res) => {
 // Community-weite Globaleinstellungen – Speichern & Sync
 app.post('/community/global/save', async (req, res) => {
   if (!requireAuth(req, res)) return;
-  const keyParam = keyOf(req);
   const b = req.body;
 
   const gs = {
@@ -2211,15 +2217,13 @@ app.post('/community/global/save', async (req, res) => {
   }
 
   persist();
-  res.redirect(`/community/global?key=${encodeURIComponent(req.query.key)}&saved=1`);
+  res.redirect(`/community/global?saved=1`);
 });
 
 // Globale Nummern-Suche – alle Infos & gemeinsame Gruppen
 app.get('/lookup', async (req, res) => {
   res.set('Cache-Control', 'no-store');
   if (!requireAuth(req, res)) return;
-  const keyParam = keyOf(req);
-  const keyEnc = encodeURIComponent(req.query.key);
   const rawNum = String(req.query.num || '');
   // Normalisierung: alle Symbole entfernen, dann 00-Präfix und (0)-Ortskennzahl nach Ländervorwahl strippen
   const rawStripped = rawNum.replace(/[\s\-\/().+]/g, '').replace(/\D/g, '');
@@ -2229,7 +2233,6 @@ app.get('/lookup', async (req, res) => {
 
   const searchForm = `
     <form class="card" method="get" action="/lookup">
-      <input type="hidden" name="key" value="${escapeHtml(req.query.key)}">
       <h2>🔎 Nummer nachschlagen</h2>
       <p class="muted">Gib eine Telefonnummer ein — Format egal: +49 151…, 0049151…, 491511234567. Der Bot normalisiert automatisch.</p>
       <input type="search" name="num" class="search-bar" placeholder="+49 151 1234567" value="${escapeHtml(rawNum)}" autofocus>
@@ -2237,7 +2240,7 @@ app.get('/lookup', async (req, res) => {
     </form>`;
 
   if (!num) {
-    return res.send(page('Nummer-Suche', `${navBar(keyParam, 'lookup')}${searchForm}`));
+    return res.send(page('Nummer-Suche', `${navBar('lookup')}${searchForm}`));
   }
 
   if (botState.connected) {
@@ -2299,12 +2302,12 @@ app.get('/lookup', async (req, res) => {
         </div>
         ${marriageLine}
         <div class="row" style="margin-top:10px;gap:6px;justify-content:flex-start">
-          <a href="/member?jid=${encodeURIComponent(targetJid)}&group=${encodeURIComponent(g.id)}&key=${keyEnc}" class="action-btn btn-blue">📋 Profil</a>
-          <form method="POST" action="/member/action?key=${keyEnc}" style="display:inline" onsubmit="return confirm('Wirklich muten?')">
+          <a href="/member?jid=${encodeURIComponent(targetJid)}&group=${encodeURIComponent(g.id)}" class="action-btn btn-blue">📋 Profil</a>
+          <form method="POST" action="/member/action" style="display:inline" onsubmit="return confirm('Wirklich muten?')">
             <input type="hidden" name="action" value="mute"><input type="hidden" name="targetJid" value="${escapeHtml(targetJid)}"><input type="hidden" name="groupJid" value="${escapeHtml(g.id)}">
             <button type="submit" class="action-btn btn-yellow">🔇 Mute</button>
           </form>
-          <form method="POST" action="/member/action?key=${keyEnc}" style="display:inline" onsubmit="return confirm('Wirklich kicken?')">
+          <form method="POST" action="/member/action" style="display:inline" onsubmit="return confirm('Wirklich kicken?')">
             <input type="hidden" name="action" value="kick"><input type="hidden" name="targetJid" value="${escapeHtml(targetJid)}"><input type="hidden" name="groupJid" value="${escapeHtml(g.id)}">
             <button type="submit" class="action-btn btn-red">🚫 Kick</button>
           </form>
@@ -2328,18 +2331,17 @@ app.get('/lookup', async (req, res) => {
     : `<div class="card"><h1>👤 ${escapeHtml(num)}</h1>
         <p class="muted">Diese Nummer wurde in keiner gemeinsamen Gruppe gefunden.</p></div>`;
 
-  res.send(page(`Nummer ${num}`, `${navBar(keyParam, 'lookup')}${searchForm}${summary}${groupCards.join('')}`));
+  res.send(page(`Nummer ${num}`, `${navBar('lookup')}${searchForm}${summary}${groupCards.join('')}`));
 });
 
 // Mitglieder-Profil
 app.get('/member', async (req, res) => {
   res.set('Cache-Control', 'no-store');
   if (!requireAuth(req, res)) return;
-  const keyParam = keyOf(req);
   const targetJid = String(req.query.jid || '');
   const groupJid  = String(req.query.group || '');
   if (!targetJid || !groupJid) {
-    return res.status(400).send(page('Fehler', `<div class="card"><h1>Fehlende Parameter</h1><a href="/settings${keyParam}"><button>Zurück</button></a></div>`));
+    return res.status(400).send(page('Fehler', `<div class="card"><h1>Fehlende Parameter</h1><a href="/settings"><button>Zurück</button></a></div>`));
   }
   const num = targetJid.split('@')[0];
   const group = getGroupsCached().find((g) => g.id === groupJid);
@@ -2363,7 +2365,6 @@ app.get('/member', async (req, res) => {
     `<tr><td>${new Date(b.at).toLocaleString('de-DE')}</td><td>${escapeHtml(b.bannedBy || '–')}</td><td>${escapeHtml(b.reason || '–')}</td></tr>`
   ).join('') || '<tr><td colspan="3" class="muted">Keine Einträge</td></tr>';
 
-  const keyEnc = encodeURIComponent(req.query.key);
   const grpEnc = encodeURIComponent(groupJid);
   const jidEnc = encodeURIComponent(targetJid);
   const warnReasons = (warnings.reasons && warnings.reasons.length)
@@ -2372,27 +2373,27 @@ app.get('/member', async (req, res) => {
       ).join('')
     : '<p class="muted">Keine Verwarnungsgründe gespeichert.</p>';
   const warnActions = `
-    <form method="POST" action="/member/action?key=${keyEnc}" style="display:inline">
+    <form method="POST" action="/member/action" style="display:inline">
       <input type="hidden" name="action" value="warn"><input type="hidden" name="targetJid" value="${escapeHtml(targetJid)}"><input type="hidden" name="groupJid" value="${escapeHtml(groupJid)}">
       <input type="text" name="reason" class="input" placeholder="Grund (optional)" style="width:auto;display:inline-block;min-width:160px;margin:0 6px 0 0">
       <button type="submit" class="action-btn btn-yellow">⚠️ Verwarnen</button>
     </form>
-    <form method="POST" action="/member/action?key=${keyEnc}" style="display:inline">
+    <form method="POST" action="/member/action" style="display:inline">
       <input type="hidden" name="action" value="unwarn"><input type="hidden" name="targetJid" value="${escapeHtml(targetJid)}"><input type="hidden" name="groupJid" value="${escapeHtml(groupJid)}">
       <button type="submit" class="action-btn btn-blue">↩️ −1 Verwarnung</button>
     </form>
-    <form method="POST" action="/member/action?key=${keyEnc}" style="display:inline" onsubmit="return confirm('Alle Verwarnungen löschen?')">
+    <form method="POST" action="/member/action" style="display:inline" onsubmit="return confirm('Alle Verwarnungen löschen?')">
       <input type="hidden" name="action" value="clearwarn"><input type="hidden" name="targetJid" value="${escapeHtml(targetJid)}"><input type="hidden" name="groupJid" value="${escapeHtml(groupJid)}">
       <button type="submit" class="action-btn btn-green">🧹 Alle löschen</button>
     </form>`;
 
   res.send(page(`Profil – ${num}`, `
-    ${navBar(keyParam, '')}
+    ${navBar('')}
     <div class="card">
       <div class="row"><h1>👤 ${escapeHtml(num)}</h1>
-        <a href="/group/members?id=${encodeURIComponent(groupJid)}&key=${encodeURIComponent(req.query.key)}">← zurück</a>
+        <a href="/group/members?id=${encodeURIComponent(groupJid)}">← zurück</a>
       </div>
-      <p class="muted">Gruppe: <b>${escapeHtml(group?.subject || groupJid)}</b> · <a href="/lookup?num=${encodeURIComponent(num)}&key=${encodeURIComponent(req.query.key)}">🔎 alle Gruppen dieser Nummer</a></p>
+      <p class="muted">Gruppe: <b>${escapeHtml(group?.subject || groupJid)}</b> · <a href="/lookup?num=${encodeURIComponent(num)}">🔎 alle Gruppen dieser Nummer</a></p>
     </div>
     <div class="card">
       <h2>📊 Aktivität</h2>
@@ -2423,13 +2424,12 @@ app.get('/member', async (req, res) => {
 // Mitglieder-Aktionen vom Web (kick/mute/warn)
 app.post('/member/action', async (req, res) => {
   if (!requireAuth(req, res)) return;
-  const keyParam = keyOf(req);
   const { action, targetJid, groupJid } = req.body;
   if (!action || !targetJid || !groupJid) return res.status(400).send('Fehlende Parameter');
 
   const sock = botState.sock;
   if (!sock || !botState.connected) {
-    return res.status(503).send(page('Fehler', `<div class="card"><h1>Bot nicht verbunden</h1><a href="/settings${keyParam}"><button>Zurück</button></a></div>`));
+    return res.status(503).send(page('Fehler', `<div class="card"><h1>Bot nicht verbunden</h1><a href="/settings"><button>Zurück</button></a></div>`));
   }
 
   const reason = String(req.body.reason || '').trim();
@@ -2468,9 +2468,9 @@ app.post('/member/action', async (req, res) => {
 
   // Warn-Aktionen führen zurück aufs Profil, Kick/Mute zurück zur Mitgliederliste
   if (['warn', 'unwarn', 'clearwarn'].includes(action)) {
-    res.redirect(`/member?jid=${encodeURIComponent(targetJid)}&group=${encodeURIComponent(groupJid)}&key=${encodeURIComponent(req.query.key)}&done=${action}`);
+    res.redirect(`/member?jid=${encodeURIComponent(targetJid)}&group=${encodeURIComponent(groupJid)}&done=${action}`);
   } else {
-    res.redirect(`/group/members?id=${encodeURIComponent(groupJid)}&key=${encodeURIComponent(req.query.key)}&done=${action}`);
+    res.redirect(`/group/members?id=${encodeURIComponent(groupJid)}&done=${action}`);
   }
 });
 
@@ -2478,7 +2478,6 @@ app.post('/member/action', async (req, res) => {
 app.get('/banlog', (req, res) => {
   res.set('Cache-Control', 'no-store');
   if (!requireAuth(req, res)) return;
-  const keyParam = keyOf(req);
 
   const entries = [];
   for (const [gid, gc] of Object.entries(config.groups)) {
@@ -2498,9 +2497,9 @@ app.get('/banlog', (req, res) => {
   ).join('') || '<tr><td colspan="5" class="muted">Keine Einträge vorhanden.</td></tr>';
 
   res.send(page('Ban-Log', `
-    ${navBar(keyParam, 'banlog')}
+    ${navBar('banlog')}
     <div class="card">
-      <div class="row"><h1>🚫 Ban-Log</h1><a href="/settings${keyParam}">← zurück</a></div>
+      <div class="row"><h1>🚫 Ban-Log</h1><a href="/settings">← zurück</a></div>
       <p class="muted">${entries.length} Einträge gesamt</p>
     </div>
     <div class="card" style="overflow-x:auto">
@@ -2515,7 +2514,6 @@ app.get('/banlog', (req, res) => {
 app.get('/fehlerlog', (req, res) => {
   res.set('Cache-Control', 'no-store');
   if (!requireAuth(req, res)) return;
-  const keyParam = keyOf(req);
   const log = [...botState.errorLog].reverse();
 
   const rows = log.map((e) => {
@@ -2533,7 +2531,7 @@ app.get('/fehlerlog', (req, res) => {
   }).join('') || '<p class="muted">Keine Fehler aufgezeichnet — alles läuft problemlos. 🎉</p>';
 
   res.send(page('Fehlerlog', `
-    ${navBar(keyParam, 'fehlerlog')}
+    ${navBar('fehlerlog')}
     <div class="card">
       <div class="row"><h1>⚠️ Fehlerlog</h1></div>
       <p class="muted">${log.length} / 200 Einträge &ensp;·&ensp; <b>Nur RAM</b> – wird bei Server-Neustart zurückgesetzt.</p>
@@ -2548,7 +2546,6 @@ app.get('/fehlerlog', (req, res) => {
 app.get('/activity', (req, res) => {
   res.set('Cache-Control', 'no-store');
   if (!requireAuth(req, res)) return;
-  const keyParam = keyOf(req);
 
   const log = [...botState.activityLog].reverse();
   const rows = log.map((e) => {
@@ -2563,13 +2560,13 @@ app.get('/activity', (req, res) => {
   }).join('') || '<p class="muted">Noch keine Aktivität aufgezeichnet.</p>';
 
   res.send(page('Aktivitäts-Log', `
-    ${navBar(keyParam, 'activity')}
+    ${navBar('activity')}
     <div class="card">
-      <div class="row"><h1>📡 Live-Aktivität</h1><a href="/settings${keyParam}">← zurück</a></div>
+      <div class="row"><h1>📡 Live-Aktivität</h1><a href="/settings">← zurück</a></div>
       <p class="muted">Letzte ${log.length} Einträge</p>
     </div>
     <div class="card">${rows}</div>`,
-    { refresh: 15, refreshUrl: `/activity${keyParam}` }
+    { refresh: 15, refreshUrl: `/activity` }
   ));
 });
 
@@ -2577,7 +2574,6 @@ app.get('/activity', (req, res) => {
 app.get('/search', (req, res) => {
   res.set('Cache-Control', 'no-store');
   if (!requireAuth(req, res)) return;
-  const keyParam = keyOf(req);
   const q = String(req.query.q || '').toLowerCase().trim();
 
   let resultsHtml = '';
@@ -2588,7 +2584,7 @@ app.get('/search', (req, res) => {
       resultsHtml += `<div class="card"><h2>🏘️ Communities (${comHits.length})</h2>`;
       for (const c of comHits) {
         const activeCount = c.groups.filter((g) => effectiveGroupConfig(g.id).active).length;
-        resultsHtml += `<a class="grp" href="/community${keyParam}">
+        resultsHtml += `<a class="grp" href="/community">
           <span class="meta"><span class="name">🏘️ ${escapeHtml(c.name)}</span>
           <span class="muted">${c.groups.length} Gruppen · ${activeCount} aktiv</span></span><span>→</span></a>`;
       }
@@ -2604,7 +2600,7 @@ app.get('/search', (req, res) => {
         const gc = effectiveGroupConfig(g.id);
         const parent = parentJidOf(g);
         const comTag = parent ? `<span class="chip">🏘️ ${escapeHtml(communityName(parent))}</span>` : '';
-        resultsHtml += `<a class="grp" href="/group?id=${encodeURIComponent(g.id)}&key=${encodeURIComponent(req.query.key)}">
+        resultsHtml += `<a class="grp" href="/group?id=${encodeURIComponent(g.id)}">
           <span class="meta"><span class="name">${escapeHtml(g.subject || 'Unbenannt')} ${gc.active ? '<span class="chip on">● aktiv</span>' : '<span class="chip off">○ inaktiv</span>'} ${comTag}</span>
           <span class="muted">${g.size || 0} Mitglieder</span></span><span>⚙️</span></a>`;
       }
@@ -2629,13 +2625,12 @@ app.get('/search', (req, res) => {
   }
 
   res.send(page('Suche', `
-    ${navBar(keyParam, 'search')}
+    ${navBar('search')}
     <div class="card">
-      <div class="row"><h1>🔍 Suche</h1><a href="/lookup${keyParam}">🔎 Nummer-Suche</a></div>
-      <p class="muted">Durchsuche Communities, Gruppen & Meldungen. Für eine bestimmte Nummer nutze die <a href="/lookup${keyParam}">Nummer-Suche</a>.</p>
+      <div class="row"><h1>🔍 Suche</h1><a href="/lookup">🔎 Nummer-Suche</a></div>
+      <p class="muted">Durchsuche Communities, Gruppen & Meldungen. Für eine bestimmte Nummer nutze die <a href="/lookup">Nummer-Suche</a>.</p>
     </div>
     <form class="card" method="get" action="/search">
-      <input type="hidden" name="key" value="${escapeHtml(req.query.key)}">
       <input type="search" name="q" class="search-bar" placeholder="Gruppen, Mitglieder, Meldungen…" value="${escapeHtml(req.query.q || '')}" autofocus>
       <button type="submit">Suchen</button>
     </form>
@@ -2646,12 +2641,11 @@ app.get('/search', (req, res) => {
 app.get('/group/stats', async (req, res) => {
   res.set('Cache-Control', 'no-store');
   if (!requireAuth(req, res)) return;
-  const keyParam = keyOf(req);
   const id = String(req.query.id || '');
   const group = getGroupsCached().find((g) => g.id === id);
   if (!id || !group) {
     return res.status(404).send(page('Nicht gefunden',
-      `<div class="card"><h1>Gruppe nicht gefunden</h1><a href="/settings${keyParam}"><button>Zurück</button></a></div>`));
+      `<div class="card"><h1>Gruppe nicht gefunden</h1><a href="/settings"><button>Zurück</button></a></div>`));
   }
   const top = getTopMembers(id, 20);
   const medals = ['🥇', '🥈', '🥉'];
@@ -2664,7 +2658,7 @@ app.get('/group/stats', async (req, res) => {
 
   res.send(page(`Leaderboard – ${group.subject}`, `
     <div class="card">
-      <div class="row"><h1>🏆 Leaderboard</h1><a href="/group?id=${encodeURIComponent(id)}&key=${encodeURIComponent(req.query.key)}">← zurück</a></div>
+      <div class="row"><h1>🏆 Leaderboard</h1><a href="/group?id=${encodeURIComponent(id)}">← zurück</a></div>
       <p class="muted">${escapeHtml(group.subject)} · Top ${top.length} Mitglieder</p>
     </div>
     <div class="card leaderboard">${rows}</div>`));
@@ -2674,8 +2668,6 @@ app.get('/group/stats', async (req, res) => {
 app.get('/anliegen', (req, res) => {
   res.set('Cache-Control', 'no-store');
   if (!requireAuth(req, res)) return;
-  const keyParam = keyOf(req);
-  const keyEnc = encodeURIComponent(req.query.key);
   const list = (config.anliegen || []).slice().reverse();
   const dmOn = Boolean(config.settings?.dmAssistant);
 
@@ -2684,13 +2676,13 @@ app.get('/anliegen', (req, res) => {
       : (a.groups && a.groups.length) ? a.groups.join(', ') : '–';
     const statusChip = a.status === 'erledigt' ? '<span class="chip on">erledigt</span>' : '<span class="chip">offen</span>';
     const doneBtn = a.status === 'erledigt' ? '' : `
-      <form method="POST" action="/anliegen/done?key=${keyEnc}" style="display:inline">
+      <form method="POST" action="/anliegen/done" style="display:inline">
         <input type="hidden" name="id" value="${a.id}">
         <button type="submit" class="action-btn btn-green">✓ erledigt</button>
       </form>`;
     return `<tr>
       <td>${new Date(a.at).toLocaleString('de-DE')}</td>
-      <td><a href="/lookup?num=${encodeURIComponent(a.num)}&key=${keyEnc}">${escapeHtml(a.num)}</a></td>
+      <td><a href="/lookup?num=${encodeURIComponent(a.num)}">${escapeHtml(a.num)}</a></td>
       <td>${escapeHtml(a.text)}</td>
       <td>${escapeHtml(ctx)}</td>
       <td>${statusChip} ${doneBtn}</td>
@@ -2698,12 +2690,12 @@ app.get('/anliegen', (req, res) => {
   }).join('') || '<tr><td colspan="5" class="muted">Noch keine Anliegen eingegangen.</td></tr>';
 
   res.send(page('Anliegen', `
-    ${navBar(keyParam, 'anliegen')}
+    ${navBar('anliegen')}
     <div class="card">
-      <div class="row"><h1>📨 Anliegen</h1><a href="/dashboard${keyParam}">← Dashboard</a></div>
+      <div class="row"><h1>📨 Anliegen</h1><a href="/dashboard">← Dashboard</a></div>
       <p class="muted">Private Anfragen, die Nutzer dem Bot geschickt haben.</p>
     </div>
-    <form class="card" method="POST" action="/global/save?key=${keyEnc}">
+    <form class="card" method="POST" action="/global/save">
       <h2>🤖 DM-Assistent</h2>
       <p class="muted">Wenn aktiv, kann jede Person dem Bot privat schreiben (Nachricht muss mit „${COMMAND_PREFIX}" beginnen)
         und ihr Anliegen wird hier gespeichert. <b>Standardmäßig ausgeschaltet.</b></p>
@@ -2722,29 +2714,26 @@ app.get('/anliegen', (req, res) => {
 // Anliegen als erledigt markieren
 app.post('/anliegen/done', async (req, res) => {
   if (!requireAuth(req, res)) return;
-  const keyParam = keyOf(req);
   const id = Number(req.body.id);
   const a = (config.anliegen || []).find((x) => x.id === id);
   if (a) { a.status = 'erledigt'; await persist(); }
-  res.redirect(`/anliegen${keyParam}`);
+  res.redirect(`/anliegen`);
 });
 
 // Globale Optionen speichern
 app.post('/global/save', async (req, res) => {
   if (!requireAuth(req, res)) return;
-  const keyParam = keyOf(req);
   config.settings = config.settings || {};
   config.settings.dmAssistant = req.body.dmAssistant !== undefined;
   await persist();
   logger.info({ dmAssistant: config.settings.dmAssistant }, 'Globale Optionen gespeichert');
-  res.redirect(`/anliegen${keyParam}`);
+  res.redirect(`/anliegen`);
 });
 
 // Befehls-Übersicht – Nachschlagewerk aller Kommandos
 app.get('/befehle', (req, res) => {
   res.set('Cache-Control', 'no-store');
   if (!requireAuth(req, res)) return;
-  const keyParam = keyOf(req);
 
   // Normalisierung für Suche (Umlaute, ß, Groß-/Kleinschreibung)
   const norm = (s) => (s || '').toLowerCase()
@@ -2814,7 +2803,7 @@ app.get('/befehle', (req, res) => {
   ).join('');
 
   res.send(page('Befehle', `
-    ${navBar(keyParam, 'befehle')}
+    ${navBar('befehle')}
     <div class="card">
       <div class="row"><h1>📖 Befehls-Referenz</h1><span class="chip" id="cmdCountChip">${COMMAND_CATALOG.length} Befehle</span></div>
       <p class="muted">Alle ${COMMAND_CATALOG.length} Befehle mit ausführlicher Beschreibung. Präfix: <b>${escapeHtml(COMMAND_PREFIX)}</b>.
@@ -2859,7 +2848,7 @@ app.get('/befehle', (req, res) => {
 
 // JSON-API für Dashboard-Polling
 app.get('/api/stats', (req, res) => {
-  if (!passwordOk(req.query.key)) return res.status(401).json({ error: 'unauthorized' });
+  if (!sessionOk(req)) return res.status(401).json({ error: 'unauthorized' });
   const mem = process.memoryUsage();
   const totMem = os.totalmem(); const freeMem = os.freemem();
   const upS = Math.round((Date.now() - botState.startedAt) / 1000);
@@ -2893,15 +2882,14 @@ app.get('/api/stats', (req, res) => {
 app.get('/dashboard', (req, res) => {
   res.set('Cache-Control', 'no-store');
   if (!requireAuth(req, res)) return;
-  const keyParam = keyOf(req);
   const nummer = botState.me ? botState.me.id.split(':')[0] : '–';
   const speicher = store.usingTurso() ? 'Turso (Cloud) ✅'
     : store.usingMongo() ? 'MongoDB ✅'
     : 'Datei (flüchtig) ⚠️';
 
   res.send(page('Dashboard', `
-    ${navBar(keyParam, 'dashboard')}
-    ${powerPanel(keyParam)}
+    ${navBar('dashboard')}
+    ${powerPanel()}
     <div class="card">
       <div class="row"><h1>📊 Dashboard</h1><span class="status" id="connStatus">…</span></div>
       <p class="muted">Live-Daten · aktualisiert alle 5 s &ensp;<span id="lastUpdate" class="muted"></span></p>
@@ -2931,16 +2919,15 @@ app.get('/dashboard', (req, res) => {
       </div>
     </div>
     <div class="card row" style="flex-wrap:wrap;gap:10px">
-      <a href="/settings${keyParam}">⚙️ Einstellungen</a>
-      <a href="/community${keyParam}">🏘️ Communities</a>
-      <a href="/anliegen${keyParam}">📨 Anliegen</a>
-      <a href="/banlog${keyParam}">🚫 Ban-Log</a>
-      <a href="/activity${keyParam}">📡 Aktivität</a>
-      <a href="/statistik${keyParam}">📈 Statistik</a>
-      <a href="/server${keyParam}">🖥️ Server</a>
+      <a href="/settings">⚙️ Einstellungen</a>
+      <a href="/community">🏘️ Communities</a>
+      <a href="/anliegen">📨 Anliegen</a>
+      <a href="/banlog">🚫 Ban-Log</a>
+      <a href="/activity">📡 Aktivität</a>
+      <a href="/statistik">📈 Statistik</a>
+      <a href="/server">🖥️ Server</a>
     </div>`,
     { script: `<script>
-      var KEY='${encodeURIComponent(req.query.key)}';
       var startedAt=${botState.startedAt};
       function mb(n){return(n/1048576).toFixed(0)+' MB';}
       function fmt(s){return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m '+(s%60)+'s';}
@@ -2950,7 +2937,7 @@ app.get('/dashboard', (req, res) => {
           cur=Math.min(cur+step,val); el.textContent=cur; if(cur>=val)clearInterval(iv);},30);
       }
       function update(){
-        fetch('/api/stats?key='+KEY).then(function(r){return r.json();}).then(function(d){
+        fetch('/api/stats',{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
           var cs=document.getElementById('connStatus');
           if(cs){cs.textContent=d.connected?'✅ verbunden':'⭕ getrennt';cs.className='status '+(d.connected?'on':'off');}
           var el;
@@ -2980,7 +2967,6 @@ app.get('/dashboard', (req, res) => {
 app.get('/statistik', async (req, res) => {
   res.set('Cache-Control', 'no-store');
   if (!requireAuth(req, res)) return;
-  const keyParam = keyOf(req);
 
   let lbHtml = '';
   if (!botState.gamesReady) {
@@ -3035,20 +3021,19 @@ app.get('/statistik', async (req, res) => {
   }
 
   res.send(page('Statistik', `
-    ${navBar(keyParam, 'statistik')}
+    ${navBar('statistik')}
     <div class="card">
       <h1>📈 Spieler-Statistiken</h1>
       <p class="muted">Leaderboards aus dem Spielsystem — aktueller Stand${botState.gamesReady ? '' : ' (Spiele inaktiv)'}.</p>
     </div>
     ${lbHtml}
-  `, { keyParam }));
+  `));
 });
 
 // ── Server-Metriken ──────────────────────────────────────────────────
 app.get('/server', (req, res) => {
   res.set('Cache-Control', 'no-store');
   if (!requireAuth(req, res)) return;
-  const keyParam = keyOf(req);
 
   const mem = process.memoryUsage();
   const sysTot = os.totalmem(); const sysFree = os.freemem();
@@ -3080,7 +3065,7 @@ app.get('/server', (req, res) => {
      </div>`;
 
   res.send(page('Server', `
-    ${navBar(keyParam, 'server')}
+    ${navBar('server')}
     <div class="card">
       <h1>🖥️ Server-Metriken</h1>
       <p class="muted">System-Informationen · Node ${escapeHtml(process.version)} · Laufzeit: ${escapeHtml(uptime)}</p>
@@ -3103,10 +3088,10 @@ app.get('/server', (req, res) => {
       </div>
     </div>
     <div class="card row" style="gap:10px;flex-wrap:wrap">
-      <a href="/dashboard${keyParam}">📊 Dashboard</a>
-      <a href="/statistik${keyParam}">📈 Spieler-Statistiken</a>
+      <a href="/dashboard">📊 Dashboard</a>
+      <a href="/statistik">📈 Spieler-Statistiken</a>
     </div>
-  `, { keyParam }));
+  `));
 });
 
 const server = app.listen(PORT, () => logger.info(`HTTP-Server läuft auf Port ${PORT}`));
@@ -3282,7 +3267,7 @@ async function startBot() {
     const { connection, lastDisconnect, qr } = update;
     if (qr) {
       botState.qr = qr;
-      logger.info('Neuer QR-Code – im Browser unter /qr?key=... scannen');
+      logger.info('Neuer QR-Code – im Browser unter /qr scannen (nach Login)');
       qrcodeTerminal.generate(qr, { small: true });
     }
     if (connection === 'open') {
