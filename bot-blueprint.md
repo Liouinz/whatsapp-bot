@@ -186,8 +186,8 @@ JSON kann der Neuaufbau übernehmen – siehe Schema in Kapitel 7.
 `communitykick` (= dauerhaft aus ALLEN Community-Gruppen bannen) ·
 `communityunban` · `communitybanlist`
 
-> **Befehls-Beschreibungen** stehen ausführlich in `command-catalog.js` und
-> können 1:1 übernommen werden (deutsche Texte, Nutzung, Beispiele).
+> **Befehls-Beschreibungen** stehen ausführlich in **Kapitel 14** (vollständige
+> Befehls-Referenz, deutsche Texte, Nutzung & Beispiele) und können 1:1 übernommen werden.
 
 ### 6.3 Moderation (Engine: `moderation.js`)
 Pro Gruppe aktivierbar über `group.moderation`. Funktioniert nur, wenn der Bot
@@ -489,7 +489,7 @@ angefügt.
 - [ ] Speicher-Abstraktion portieren (store.js → storage.js).
 - [ ] Moderations-Engine portieren (moderation.js ist schon sauber).
 - [ ] Intelligentes Befehlssystem bauen (Router + Permissions + Middleware).
-- [ ] Befehle einzeln als Dateien anlegen (Texte aus command-catalog.js).
+- [ ] Befehle einzeln als Dateien anlegen (Texte aus Kapitel 14).
 - [ ] Modernes UI nach Design-Spezifikation bauen (Kapitel 10).
 - [ ] Verbindung/Keep-Alive/Reconnect/Crash-Schutz übernehmen.
 - [ ] (Später) Spielmodul optional ergänzen.
@@ -499,3 +499,195 @@ angefügt.
 *Dieses Dokument ist die einzige benötigte Datei für die Neuplanung. Es kann
 kopiert, heruntergeladen und einer anderen KI Schritt für Schritt vorgelegt
 werden.*
+
+---
+
+## 14. 📖 Vollständige Befehls-Referenz (aus der alten Version)
+
+> Alle behaltenen Kern-Befehle (ohne Spiele) mit Beschreibung, Nutzung und Beispiel.
+> Diese Texte können für den Neuaufbau 1:1 übernommen werden.
+
+### Allgemein
+
+**`!hilfe`** — _alle_ · Aliase: `!help`, `!menu`  
+Zeigt alle verfügbaren Befehle des Bots in einer übersichtlichen Liste. Die Anzeige teilt sich in Kern-Befehle und Spiel-Befehle auf. Ideal als erste Anlaufstelle, wenn du nicht weißt, was der Bot kann.  
+Beispiel: `!hilfe`
+
+**`!ping`** — _alle_  
+Testet, ob der Bot erreichbar ist und antwortet mit einer kurzen Latenz-Meldung. Nützlich um zu prüfen, ob der Bot gerade online ist oder reagiert.  
+Beispiel: `!ping`
+
+**`!info`** — _alle_ · Aliase: `!status`  
+Zeigt aktuelle Bot-Informationen: Laufzeit seit Start, Version, verbundene Gruppen, verarbeitete Befehle und ob der Spielmodus aktiv ist. Gibt einen schnellen Überblick über den Gesundheitszustand des Bots.  
+Beispiel: `!info`
+
+**`!id`** — _alle_  
+Gibt die interne WhatsApp-Gruppen-ID (JID) der aktuellen Gruppe aus. Diese ID wird für manche Admin-Aktionen und Konfigurationen benötigt.  
+Beispiel: `!id`
+
+**`!regeln`** — _alle_  
+Zeigt die vom Admin festgelegten Gruppenregeln an. Wurden noch keine Regeln gesetzt, erscheint ein entsprechender Hinweis. Admins können Regeln mit !setregeln festlegen.  
+Beispiel: `!regeln`
+
+**`!gruppe`** — _alle_  
+Zeigt Informationen zur aktuellen Gruppe: Name, Beschreibung, Mitgliederzahl, Admins und weitere Metadaten. Praktisch für einen schnellen Überblick über die Gruppe.  
+Beispiel: `!gruppe`
+
+**`!top`** — _alle_  
+Zeigt die aktivsten Mitglieder der Gruppe anhand ihrer Nachrichtenanzahl. Die Top 10 werden in einer Rangliste dargestellt. Aktivität wird über die Zeit seit dem letzten Reset gemessen.  
+Beispiel: `!top`
+
+**`!stats [@Nutzer]`** — _alle_  
+Zeigt Aktivitäts-Statistiken eines Mitglieds — Nachrichten, Warnungen, Mutes. Ohne Angabe werden deine eigenen Stats angezeigt. Durch Taggen eines anderen Nutzers siehst du dessen Profil.  
+Beispiel: `!stats`
+
+**`!melden [Text]`** — _alle_ · Aliase: `!report`  
+Sendet eine anonyme Meldung an die Admins der Gruppe. Nützlich für Regelbrüche oder Probleme, die diskret gemeldet werden sollen. Die Admins erhalten die Nachricht mit einem Zeitstempel.  
+Beispiel: `!melden Spam in der Gruppe`
+
+### Moderation
+
+**`!sag [Text]`** — _nur Admins_ · Aliase: `!echo`  
+Lässt den Bot den angegebenen Text in der Gruppe wiederholen. Nützlich für Ankündigungen oder Durchsagen, die vom Bot-Account kommen sollen.  
+Beispiel: `!sag Willkommen alle!`
+
+**`!alle [Nachricht]`** — _nur Admins_ · Aliase: `!tagall`  
+Markiert alle Mitglieder der Gruppe und sendet optional eine Nachricht. Sehr nützlich für wichtige Ankündigungen. Bitte sparsam einsetzen, um Mitglieder nicht zu stören.  
+Beispiel: `!alle Meeting in 10 Minuten!`
+
+**`!kick @Nutzer`** — _nur Admins_  
+Entfernt das getaggte Mitglied sofort aus der Gruppe. Der Nutzer kann über den Gruppenlink wieder beitreten. Für permanente Ausschlüsse nutze !ban.  
+Beispiel: `!kick @Max`
+
+**`!ban @Nutzer [Grund]`** — _nur Admins_  
+Kickt das Mitglied und trägt es ins Ban-Log der Gruppe ein. Der Grund wird gespeichert und ist für Admins einsehbar. Das Ban-Log hilft bei der Nachverfolgung von Moderationsmaßnahmen.  
+Beispiel: `!ban @Max Spam`
+
+**`!communitykick @Nutzer [Grund]`** — _nur Inhaber_ · Aliase: `!ckick`, `!comban`, `!communityban`, `!nuke`  
+⚠️ Sperrt eine Person dauerhaft aus ALLEN Gruppen der Community. Diese Maßnahme ist nicht umkehrbar ohne !communityunban. Nur für den Community-Inhaber verfügbar — mit Bedacht einsetzen.  
+Beispiel: `!communitykick @Troll Dauerbeleidigung`
+
+**`!communityunban @Nutzer`** — _nur Inhaber_ · Aliase: `!cunban`  
+Hebt einen Community-weiten Bann auf, sodass die Person wieder Gruppen beitreten kann. Der Eintrag wird aus dem Community-Ban-Log entfernt. Nur für den Inhaber verfügbar.  
+Beispiel: `!communityunban @Max`
+
+**`!communitybanlist`** — _nur Inhaber_ · Aliase: `!cbanlist`  
+Listet alle aktuell dauerhaft gebannten Personen der Community mit Grund und Datum. Nur für den Community-Inhaber einsehbar.  
+Beispiel: `!communitybanlist`
+
+**`!mute @Nutzer [Dauer]`** — _nur Admins_  
+Schaltet ein Mitglied für den angegebenen Zeitraum stumm — der Nutzer kann keine Nachrichten mehr senden. Nach Ablauf der Dauer wird der Mute automatisch aufgehoben. Ohne Zeitangabe gilt der Mute unbegrenzt.  
+Beispiel: `!mute @Max 30m`
+
+**`!unmute @Nutzer`** — _nur Admins_  
+Hebt die Stummschaltung eines Mitglieds sofort auf. Der Nutzer kann danach wieder normal in der Gruppe schreiben.  
+Beispiel: `!unmute @Max`
+
+**`!warn @Nutzer [Grund]`** — _nur Admins_  
+Verwarnt ein Mitglied manuell und trägt die Warnung ins Log ein. Nach einer konfigurierbaren Anzahl von Warnungen kann automatisch ein Kick erfolgen. Der Grund wird gespeichert.  
+Beispiel: `!warn @Max Werbung`
+
+**`!unwarn @Nutzer`** — _nur Admins_  
+Nimmt die letzte Verwarnung eines Mitglieds zurück. Nützlich, wenn eine Verwarnung versehentlich oder zu Unrecht ausgesprochen wurde.  
+Beispiel: `!unwarn @Max`
+
+**`!clearwarn @Nutzer`** — _nur Admins_  
+Löscht alle Verwarnungen eines Mitglieds auf einmal. Sinnvoll nach einer längeren Zeit guten Verhaltens oder nach einem Gespräch mit dem betreffenden Nutzer.  
+Beispiel: `!clearwarn @Max`
+
+**`!warninfo @Nutzer`** — _nur Admins_  
+Zeigt den aktuellen Verwarnungsstand eines Mitglieds: Anzahl der Warnungen, Gründe und Zeitstempel. Hilft Admins bei der Entscheidung über weitere Maßnahmen.  
+Beispiel: `!warninfo @Max`
+
+**`!warnlist`** — _nur Admins_  
+Listet alle aktuell verwarnten Mitglieder der Gruppe mit Anzahl und letztem Grund. Gibt einen schnellen Überblick über den Moderationsstand.  
+Beispiel: `!warnlist`
+
+**`!promote @Nutzer`** — _nur Admins_  
+Befördert ein Mitglied zum Gruppen-Admin. Der Nutzer erhält damit alle Admin-Rechte in der Gruppe. Erfordert, dass der Bot selbst Admin-Rechte hat.  
+Beispiel: `!promote @Max`
+
+**`!demote @Admin`** — _nur Admins_  
+Entzieht einem Admin die Admin-Rechte und stuft ihn auf normales Mitglied zurück. Der Nutzer verliert danach alle Moderationsrechte.  
+Beispiel: `!demote @Max`
+
+**`!link`** — _nur Admins_  
+Ruft den aktuellen Einladungslink der Gruppe ab und sendet ihn in den Chat. Nützlich, um neue Mitglieder einzuladen, ohne Kontaktdaten teilen zu müssen.  
+Beispiel: `!link`
+
+**`!revoke`** — _nur Admins_  
+Widerruft den aktuellen Einladungslink und erstellt sofort einen neuen. Alte Links funktionieren danach nicht mehr — sinnvoll wenn ein Link unerwünscht geteilt wurde.  
+Beispiel: `!revoke`
+
+**`!announce [Nachricht]`** — _nur Admins_  
+Markiert alle Mitglieder und sendet eine formatierte Ankündigung. Ideal für wichtige Informationen, die garantiert jeder sehen soll.  
+Beispiel: `!announce Wartung heute Abend um 21 Uhr`
+
+**`!pin [als Antwort auf eine Nachricht]`** — _nur Admins_  
+Pinnt die zitierte Nachricht in der Gruppe an. Gepinnte Nachrichten sind für alle Mitglieder jederzeit einsehbar. Maximal eine Nachricht kann gleichzeitig angepinnt sein.  
+Beispiel: `!pin`
+
+**`!unpin`** — _nur Admins_  
+Löst die aktuell angepinnte Nachricht in der Gruppe. Danach ist keine Nachricht mehr angepinnt.  
+Beispiel: `!unpin`
+
+**`!setregeln [Regeltext]`** — _nur Admins_  
+Legt den Regeltext der Gruppe fest, der mit !regeln abgerufen werden kann. Der Text wird dauerhaft gespeichert und überschreibt bestehende Regeln.  
+Beispiel: `!setregeln 1. Kein Spam 2. Respektvoller Umgang`
+
+**`!setwelcome [Text]`** — _nur Admins_  
+Legt den Text der Willkommensnachricht fest, die neuen Mitgliedern gesendet wird. {name} wird automatisch durch den Namen des neuen Mitglieds ersetzt.  
+Beispiel: `!setwelcome Willkommen {name}! 🎉`
+
+**`!welcome an|aus`** — _nur Admins_  
+Schaltet automatische Willkommensnachrichten für neue Mitglieder an oder aus. Wenn aktiv, begrüßt der Bot jeden neuen Nutzer mit der festgelegten Nachricht.  
+Beispiel: `!welcome an`
+
+**`!lock`** — _nur Admins_ · Aliase: `!sperren`  
+🔒 Sperrt den Chat, sodass nur noch Admins Nachrichten senden können. Nützlich bei Diskussionen, die außer Kontrolle geraten, oder für Ankündigungen ohne Kommentare.  
+Beispiel: `!lock`
+
+**`!unlock`** — _nur Admins_ · Aliase: `!entsperren`  
+🔓 Öffnet den Chat wieder für alle Mitglieder. Hebt eine vorherige !lock-Sperre auf.  
+Beispiel: `!unlock`
+
+**`!infolock`** — _nur Admins_  
+Beschränkt das Ändern von Gruppeninfo (Name, Beschreibung, Bild) auf Admins. Verhindert, dass normale Mitglieder Gruppendetails verändern.  
+Beispiel: `!infolock`
+
+**`!infounlock`** — _nur Admins_  
+Erlaubt wieder allen Mitgliedern das Ändern der Gruppeninfo. Hebt eine vorherige !infolock-Sperre auf.  
+Beispiel: `!infounlock`
+
+**`!setname [Neuer Name]`** — _nur Admins_  
+Ändert den Namen der Gruppe auf den angegebenen Text. Der neue Name ist sofort für alle Mitglieder sichtbar. Maximal 25 Zeichen.  
+Beispiel: `!setname Meine Supergruppe`
+
+**`!setdesc [Beschreibung]`** — _nur Admins_  
+Ändert die Gruppenbeschreibung auf den angegebenen Text. Eine gute Beschreibung hilft neuen Mitgliedern, die Gruppe und ihre Regeln zu verstehen.  
+Beispiel: `!setdesc Offizielle Gruppe für Fans`
+
+**`!del [als Antwort auf eine Nachricht]`** — _nur Admins_ · Aliase: `!loeschen`, `!löschen`, `!delete`  
+Löscht die zitierte Nachricht aus der Gruppe. Funktioniert nur, wenn der Bot die entsprechende Nachricht löschen kann (eigene Nachrichten oder mit Admin-Rechten).  
+Beispiel: `!del`
+
+**`!admins`** — _nur Admins_  
+Markiert alle Admins der Gruppe in einer Nachricht. Nützlich, wenn du die Aufmerksamkeit aller Moderatoren benötigst.  
+Beispiel: `!admins`
+
+**`!ephemeral [Sekunden|off]`** — _nur Admins_  
+Setzt verschwindende Nachrichten für die Gruppe. Nachrichten werden nach dem angegebenen Zeitraum (in Sekunden) automatisch gelöscht. Mit "off" wird die Funktion deaktiviert.  
+Beispiel: `!ephemeral 86400`
+
+**`!addmode admin|all`** — _nur Admins_  
+Legt fest, wer Mitglieder zur Gruppe hinzufügen darf: "admin" für Admins-only oder "all" für alle. Kontrolliert das Wachstum der Gruppe.  
+Beispiel: `!addmode admin`
+
+**`!slowmode [Sekunden|off]`** — _nur Admins_  
+Aktiviert den Slowmode: Mitglieder müssen nach jeder Nachricht die angegebene Anzahl Sekunden warten. Mit "off" wird der Slowmode deaktiviert. Ideal gegen Spam und Flut.  
+Beispiel: `!slowmode 30`
+
+**`!remind [Dauer] [Text]`** — _nur Admins_ · Aliase: `!erinnerung`, `!erinnere`  
+Erstellt eine geplante Erinnerung, die nach der angegebenen Zeit (z. B. 30m, 2h) in der Gruppe gesendet wird. Maximal 60 Minuten. Praktisch für zeitkritische Ankündigungen.  
+Beispiel: `!remind 30m Meeting startet!`
+
