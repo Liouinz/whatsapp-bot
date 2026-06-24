@@ -59,10 +59,32 @@ const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
         ? [args[0], args[1]]
         : [{}, args[0]];
       if (botState.errorLog.length >= 200) botState.errorLog.shift();
-      botState.errorLog.push({ at: Date.now(), level: lvl, msg: String(msg || ''), detail: data });
+      botState.errorLog.push({ at: Date.now(), level: lvl, msg: String(msg || ''), detail: safeErrDetail(data) });
     } catch (_) {}
   };
 });
+
+// Serialisiert ein Logger-Detail-Objekt sicher (circular-safe, Errors lesbar,
+// gekürzt). Verhindert Crash/Memory-Retention im Fehlerlog.
+function safeErrDetail(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data) || Object.keys(data).length === 0) return null;
+  const seen = new WeakSet();
+  try {
+    const s = JSON.stringify(data, (k, v) => {
+      if (v instanceof Error) return { name: v.name, message: v.message, stack: v.stack };
+      if (typeof v === 'bigint') return v.toString();
+      if (typeof v === 'function') return '[Function]';
+      if (typeof v === 'object' && v !== null) {
+        if (seen.has(v)) return '[Circular]';
+        seen.add(v);
+      }
+      return v;
+    }, 2);
+    return s ? s.slice(0, 4000) : null;
+  } catch (_) {
+    try { return String(data).slice(0, 500); } catch (__) { return null; }
+  }
+}
 
 // ---------- Absturzschutz ----------
 // Render Free startet einen abgestürzten Prozess nicht von selbst neu. Damit der Bot
@@ -1160,10 +1182,10 @@ function page(title, body, opts = {}) {
   // Wegklickbarer Verbindungs-Hinweis (nur wenn Bot an, aber WhatsApp getrennt)
   const noConnBanner = (botState.powered && !botState.connected && opts.power !== false)
     ? `<div class="conn-banner" id="connBanner">🔌 Keine WhatsApp-Verbindung&ensp;
-         <a href="/qr${opts.keyParam || ''}">Jetzt verbinden</a>
+         <a href="/qr" id="connLink">Jetzt verbinden</a>
          <button onclick="document.getElementById('connBanner').remove();localStorage.setItem('connDismissed','1')" style="width:auto;padding:3px 10px;margin:0 0 0 8px;font-size:.85rem;background:rgba(255,255,255,.12)">×</button>
        </div>
-       <script>if(localStorage.getItem('connDismissed')==='1'){var b=document.getElementById('connBanner');if(b)b.remove();}</script>`
+       <script>(function(){var k=new URLSearchParams(location.search).get('key');var l=document.getElementById('connLink');if(k&&l)l.href='/qr?key='+encodeURIComponent(k);if(localStorage.getItem('connDismissed')==='1'){var b=document.getElementById('connBanner');if(b)b.remove();}})();</script>`
     : '';
   // Innenseiten enthalten die Sidebar (via navBar) → App-Shell-Layout mit
   // linkem Innenabstand. Login/QR/Fehlerseiten haben keine Sidebar → zentriert.
@@ -2433,9 +2455,8 @@ app.get('/fehlerlog', (req, res) => {
       ? '<span style="background:rgba(220,53,69,.25);color:#ff6b6b;padding:2px 8px;border-radius:20px;font-size:.78rem;font-weight:700">ERROR</span>'
       : '<span style="background:rgba(255,152,0,.2);color:#ffa726;padding:2px 8px;border-radius:20px;font-size:.78rem;font-weight:700">WARN</span>';
     const time = new Date(e.at).toLocaleString('de-DE');
-    const hasDetail = e.detail && Object.keys(e.detail).length > 0;
-    const detail = hasDetail
-      ? `<pre style="margin:6px 0 0;font-size:.75rem;overflow-x:auto;background:rgba(0,0,0,.25);padding:8px;border-radius:8px">${escapeHtml(JSON.stringify(e.detail, null, 2))}</pre>`
+    const detail = e.detail
+      ? `<pre style="margin:6px 0 0;font-size:.75rem;overflow-x:auto;background:rgba(0,0,0,.25);padding:8px;border-radius:8px">${escapeHtml(e.detail)}</pre>`
       : '';
     return `<div class="log-entry" style="border-left:3px solid ${e.level === 'error' ? '#ff6b6b' : '#ffa726'};padding:8px 12px;margin:4px 0;border-radius:0 8px 8px 0;background:rgba(255,255,255,.04)">
       <div class="row" style="gap:8px;flex-wrap:wrap">${lvlBadge}<b style="font-size:.85rem">${escapeHtml(e.msg)}</b><span class="muted" style="font-size:.78rem;margin-left:auto">${escapeHtml(time)}</span></div>
@@ -2506,8 +2527,8 @@ app.get('/search', (req, res) => {
       resultsHtml += '</div>';
     }
 
-    // Gruppen suchen
-    const grpHits = botState.groups.filter((g) =>
+    // Gruppen suchen (offline-fähig via Cache)
+    const grpHits = getGroupsCached().filter((g) =>
       (g.subject || '').toLowerCase().includes(q) || g.id.includes(q));
     if (grpHits.length) {
       resultsHtml += `<div class="card"><h2>👥 Gruppen (${grpHits.length})</h2>`;
@@ -2904,7 +2925,7 @@ app.get('/statistik', async (req, res) => {
     const fmtRow = (i, userId, a, b, c) => {
       const medals = ['🥇','🥈','🥉'];
       const rank = i < 3 ? medals[i] : `#${i+1}`;
-      const num = userId.replace(/@.*/,'');
+      const num = String(userId || '').replace(/@.*/,'');
       return `<tr><td>${rank}</td><td><code style="font-size:.82rem">${escapeHtml(num)}</code></td><td>${escapeHtml(String(a||0))}</td><td>${escapeHtml(String(b||0))}</td><td>${escapeHtml(String(c||''))}</td></tr>`;
     };
 
