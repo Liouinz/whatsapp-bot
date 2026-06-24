@@ -13,6 +13,7 @@
  */
 
 const crypto = require('crypto');
+const os = require('os');
 const express = require('express');
 const pino = require('pino');
 const QRCode = require('qrcode');
@@ -29,6 +30,8 @@ const store = require('./store');
 const { createModeration } = require('./moderation');
 // Spiel-/Wirtschafts-Integration (eigenständig, defensiv geladen)
 const gameLayer = require('./game-commands');
+// Vollständige Befehls-Dokumentation (offline-fähig, keine DB-Abhängigkeit)
+const { COMMAND_CATALOG } = require('./command-catalog');
 
 const PORT = process.env.PORT || 3000;
 // Eingebautes Standard-Passwort, in Render per QR_PASSWORD überschreibbar.
@@ -703,6 +706,12 @@ function persistDebounced() {
   }, 60 * 1000);
 }
 
+// Gibt live-Gruppen zurück wenn verbunden, sonst den persistierten Cache.
+function getGroupsCached() {
+  if (botState.connected && botState.groups.length > 0) return botState.groups;
+  return (config.groupCache || []);
+}
+
 // ---------- Aktivitäts-Tracking ----------
 function activityLogPush(entry) {
   botState.activityLog.push({ ...entry, at: Date.now() });
@@ -980,6 +989,10 @@ const STYLE = `
   .cmd-row:hover{border-color:rgba(127,209,255,.4)}
   .cmd-name{font-size:.95rem;font-weight:700;color:#7fd1ff;background:rgba(127,209,255,.12);padding:2px 8px;border-radius:7px}
   .cmd-section h2{margin-bottom:6px}
+  .cmd-card{border:1px solid rgba(255,255,255,.08);border-radius:12px;margin:6px 0;background:rgba(255,255,255,.03);overflow:hidden;transition:border-color .15s}
+  .cmd-card:hover{border-color:rgba(127,209,255,.35)}
+  .cmd-card[open]{border-color:rgba(99,102,241,.4);background:rgba(99,102,241,.04)}
+  .cmd-card summary::-webkit-details-marker{display:none}
   .leaderboard{counter-reset:rank}
   .lb-row{display:flex;align-items:center;gap:10px;padding:9px 12px;
     border:1px solid rgba(255,255,255,.08);border-radius:10px;margin:5px 0;background:rgba(255,255,255,.03)}
@@ -1054,6 +1067,9 @@ const STYLE = `
   .power-banner{max-width:760px;margin:0 auto 16px;padding:13px 18px;border-radius:16px;font-weight:700;
     background:linear-gradient(135deg,rgba(248,113,113,.18),rgba(220,38,38,.1));
     border:1px solid rgba(248,113,113,.4);color:#fecaca;display:flex;align-items:center;gap:10px}
+  .conn-banner{max-width:760px;margin:0 auto 16px;padding:10px 18px;border-radius:14px;font-size:.9rem;font-weight:600;
+    background:rgba(251,191,36,.10);border:1px solid rgba(251,191,36,.35);color:#fde68a;
+    display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   body.poweroff .sidebar,body.poweroff .card:not(.power-card),body.poweroff .stat,body.poweroff .topbar{
     filter:grayscale(1) brightness(.82);transition:filter .5s ease}
   body.poweroff{background:#070809}
@@ -1124,6 +1140,14 @@ function page(title, body, opts = {}) {
   const banner = (off && opts.power !== false)
     ? `<div class="power-banner">🔴 Der Bot ist ausgeschaltet. Der Server läuft weiter – schalte ihn im Dashboard wieder ein.</div>`
     : '';
+  // Wegklickbarer Verbindungs-Hinweis (nur wenn Bot an, aber WhatsApp getrennt)
+  const noConnBanner = (botState.powered && !botState.connected && opts.power !== false)
+    ? `<div class="conn-banner" id="connBanner">🔌 Keine WhatsApp-Verbindung&ensp;
+         <a href="/qr${opts.keyParam || ''}">Jetzt verbinden</a>
+         <button onclick="document.getElementById('connBanner').remove();localStorage.setItem('connDismissed','1')" style="width:auto;padding:3px 10px;margin:0 0 0 8px;font-size:.85rem;background:rgba(255,255,255,.12)">×</button>
+       </div>
+       <script>if(localStorage.getItem('connDismissed')==='1'){var b=document.getElementById('connBanner');if(b)b.remove();}</script>`
+    : '';
   // Innenseiten enthalten die Sidebar (via navBar) → App-Shell-Layout mit
   // linkem Innenabstand. Login/QR/Fehlerseiten haben keine Sidebar → zentriert.
   const hasShell = /class="sidebar"/.test(body);
@@ -1131,7 +1155,7 @@ function page(title, body, opts = {}) {
   return `<!doctype html><html lang="de"><head>
     <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
     ${refresh}<title>${title}</title><style>${STYLE}</style></head>
-    <body${bodyClass}>${LEAVES}<div class="${contentClass}">${banner}${body}${opts.script || ''}</div></body></html>`;
+    <body${bodyClass}>${LEAVES}<div class="${contentClass}">${banner}${noConnBanner}${body}${opts.script || ''}</div></body></html>`;
 }
 
 // Strom-/Steuerungspanel: Bot an/aus, Bot neu starten, Server neu starten.
@@ -1188,6 +1212,10 @@ function navBar(keyParam, active = '') {
       ['lookup', '🔎', 'Nummer'],
       ['search', '🔍', 'Suche'],
       ['anliegen', '📨', 'Anliegen'],
+    ]],
+    ['Statistiken', [
+      ['statistik', '📈', 'Statistik'],
+      ['server', '🖥️', 'Server'],
     ]],
     ['Verbindung', [
       ['qr', '📲', 'QR-Code'],
@@ -1396,23 +1424,15 @@ app.get('/settings', async (req, res) => {
   if (!requireAuth(req, res)) return;
   const keyParam = keyOf(req);
 
-  if (!botState.connected) {
-    return res.send(page('Nicht verbunden', `
-      <div class="card">
-        <h1>⚠️ Noch nicht verbunden</h1>
-        <p class="muted">Bitte zuerst die Nummer per QR-Code verbinden.</p>
-        <a href="/qr${keyParam}"><button>Zum QR-Code →</button></a>
-      </div>`, { refresh: 6, refreshUrl: `/settings${keyParam}` }));
-  }
-
-  await refreshGroups();
+  if (botState.connected) await refreshGroups();
   const nummer = botState.me ? botState.me.id.split(':')[0] : '–';
+  const groups = getGroupsCached();
 
   let groupsHtml = '';
-  if (botState.groups.length === 0) {
-    groupsHtml = '<p class="muted">Keine Gruppen gefunden. Füge den Bot zu einer Gruppe hinzu und lade neu.</p>';
+  if (groups.length === 0) {
+    groupsHtml = '<p class="muted">Keine Gruppen im Cache. Verbinde den Bot, um Gruppen zu laden.</p>';
   } else {
-    for (const g of botState.groups) {
+    for (const g of groups) {
       const gc = effectiveGroupConfig(g.id);
       const stats = config.groups[g.id]?.memberStats || {};
       const activity = Object.values(stats).reduce((a, m) => a + (m.messages || 0) + (m.commands || 0), 0);
@@ -1437,15 +1457,16 @@ app.get('/settings', async (req, res) => {
     }
   }
 
-  const totalMembers = botState.groups.reduce((s, g) => s + (g.size || 0), 0);
+  const totalMembers = groups.reduce((s, g) => s + (g.size || 0), 0);
+  const connBadge = botState.connected ? '<span class="status on">verbunden</span>' : '<span class="status off">offline</span>';
   res.send(page('Einstellungen', `
     ${navBar(keyParam, 'settings')}
     <div class="card">
-      <div class="row"><h1>⚙️ Gruppen-Übersicht</h1><span class="status on">verbunden</span></div>
+      <div class="row"><h1>⚙️ Gruppen-Übersicht</h1>${connBadge}</div>
       <p class="muted">Nummer: <b>${escapeHtml(nummer)}</b></p>
       <div class="stats" style="margin-top:12px">
         <div class="stat"><div class="k">Aktive Gruppen</div><div class="v">${activeGroupCount()}</div></div>
-        <div class="stat"><div class="k">Gruppen gesamt</div><div class="v">${botState.groups.length}</div></div>
+        <div class="stat"><div class="k">Gruppen gesamt</div><div class="v">${groups.length}</div></div>
         <div class="stat"><div class="k">Mitglieder gesamt</div><div class="v">${totalMembers}</div></div>
       </div>
     </div>
@@ -1747,16 +1768,13 @@ app.get('/community', async (req, res) => {
   const keyParam = keyOf(req);
   const keyEnc = encodeURIComponent(req.query.key);
 
-  if (!botState.connected) {
-    return res.send(page('Communities', `${navBar(keyParam, 'community')}
-      <div class="card"><h1>⚠️ Nicht verbunden</h1><a href="/qr${keyParam}"><button>Zum QR-Code →</button></a></div>`));
-  }
-  await refreshGroups();
+  if (botState.connected) await refreshGroups();
   const communities = getCommunities();
+  const connBadge2 = botState.connected ? '<span class="status on">verbunden</span>' : '<span class="status off">offline</span>';
 
   let body = `${navBar(keyParam, 'community')}
     <div class="card">
-      <div class="row"><h1>🏘️ Communities</h1><span class="status on">verbunden</span></div>
+      <div class="row"><h1>🏘️ Communities</h1>${connBadge2}</div>
       <p class="muted">Der Bot erkennt automatisch, welche Gruppen zu welcher Community gehören.
         Du kannst eine ganze Community auf einmal ein- oder ausschalten und einzelne Gruppen weiter feinjustieren.</p>
     </div>`;
@@ -1938,39 +1956,47 @@ app.get('/lookup', async (req, res) => {
   const keyParam = keyOf(req);
   const keyEnc = encodeURIComponent(req.query.key);
   const rawNum = String(req.query.num || '');
-  const num = rawNum.replace(/\D/g, '');
+  // Normalisierung: +, Leerzeichen, Bindestriche, Klammern, Slashes entfernen; 00 → Ländercode
+  const num = rawNum.replace(/[\s\-\/().+]/g, '').replace(/^00/, '').replace(/\D/g, '');
 
   const searchForm = `
     <form class="card" method="get" action="/lookup">
       <input type="hidden" name="key" value="${escapeHtml(req.query.key)}">
       <h2>🔎 Nummer nachschlagen</h2>
-      <p class="muted">Gib eine Telefonnummer ein (nur Ziffern, mit Ländervorwahl, z. B. 491511234567).</p>
-      <input type="search" name="num" class="search-bar" placeholder="491511234567" value="${escapeHtml(num)}" autofocus>
+      <p class="muted">Gib eine Telefonnummer ein — Format egal: +49 151…, 0049151…, 491511234567. Der Bot normalisiert automatisch.</p>
+      <input type="search" name="num" class="search-bar" placeholder="+49 151 1234567" value="${escapeHtml(rawNum)}" autofocus>
       <button type="submit">Suchen</button>
     </form>`;
 
   if (!num) {
     return res.send(page('Nummer-Suche', `${navBar(keyParam, 'lookup')}${searchForm}`));
   }
-  if (!botState.connected) {
-    return res.send(page('Nummer-Suche', `${navBar(keyParam, 'lookup')}${searchForm}
-      <div class="card"><p class="muted">⚠️ Bot nicht verbunden – Gruppen können nicht geladen werden.</p></div>`));
-  }
 
-  await refreshGroups();
-  // Metadaten aller Gruppen (gecacht) parallel laden
-  await Promise.allSettled(botState.groups.map((g) => getGroupMeta(g.id)));
+  if (botState.connected) {
+    await refreshGroups();
+    await Promise.allSettled(botState.groups.map((g) => getGroupMeta(g.id)));
+  }
 
   const targetJid = `${num}@s.whatsapp.net`;
   let totalMsg = 0, totalCmd = 0, totalWarn = 0;
   const groupCards = [];
   const communitySet = new Set();
 
-  for (const g of botState.groups) {
+  // Suche in live-Gruppen (wenn verbunden) oder Statistik-Cache offline
+  const searchGroups = botState.connected && botState.groups.length > 0 ? botState.groups : getGroupsCached();
+  for (const g of searchGroups) {
     const meta = botState.groupMeta[g.id]?.meta;
-    if (!meta) continue;
-    const member = meta.participants.find((p) => p.id.split('@')[0] === num);
-    if (!member) continue;
+    // Live-Suche via Teilnehmerliste; offline via memberStats-Keys
+    let member = null;
+    if (meta) {
+      member = meta.participants.find((p) => p.id.split('@')[0] === num) || null;
+      if (!member) continue;
+    } else {
+      // Offline: prüfen ob Aktivitätsdaten vorhanden
+      const stats = config.groups[g.id]?.memberStats || {};
+      if (!Object.prototype.hasOwnProperty.call(stats, num)) continue;
+      member = { admin: null }; // Rolle unbekannt offline
+    }
 
     const parent = parentJidOf(g);
     if (parent) communitySet.add(communityName(parent));
@@ -2419,65 +2445,147 @@ app.get('/befehle', (req, res) => {
   if (!requireAuth(req, res)) return;
   const keyParam = keyOf(req);
 
-  // Aliase pro Befehl umkehren ({ ziel: [alias, ...] })
-  const aliasMap = {};
-  for (const [alias, target] of Object.entries(ALIAS)) {
-    (aliasMap[target] = aliasMap[target] || []).push(alias);
-  }
+  // Normalisierung für Suche (Umlaute, ß, Groß-/Kleinschreibung)
+  const norm = (s) => (s || '').toLowerCase()
+    .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss');
 
-  // Thematische Gruppierung anhand bekannter Befehlsschlüssel
-  const groupsDef = [
-    ['📋 Allgemein', ['hilfe', 'ping', 'info', 'id', 'regeln', 'zeit', 'würfel', 'gruppe', 'top', 'stats', 'melden']],
-    ['🛡️ Admin – Moderation', ['kick', 'ban', 'mute', 'unmute', 'warn', 'unwarn', 'clearwarn', 'warninfo', 'warnlist', 'del', 'slowmode']],
-    ['🛡️ Admin – Gruppe', ['promote', 'demote', 'link', 'revoke', 'announce', 'pin', 'unpin', 'admins', 'setname', 'setdesc', 'setregeln', 'setwelcome', 'welcome', 'lock', 'unlock', 'infolock', 'infounlock', 'ephemeral', 'addmode', 'remind', 'sag', 'alle']],
-    ['🎮 Spiele & Spaß', ['marry', 'divorce', 'profil', '8ball', 'münze', 'rps', 'joke', 'fakt', 'quote', 'truth', 'dare', 'riddle', 'antwort', 'quiz', 'roulette', 'ship', 'rate', 'choose', 'number', 'calc', 'reverse', 'timer', 'poll', 'would', 'nhie', 'mostlikely', 'iq', 'simp', 'vibe', 'mock', 'emojify', 'roll', 'horoskop']],
-    ['💞 Soziales', ['kiss', 'hug', 'slap', 'poke', 'compliment']],
-  ];
-  const known = new Set(groupsDef.flatMap(([, keys]) => keys));
-  const rest = COMMANDS.filter((c) => !known.has(c.key)).map((c) => c.key);
-  if (rest.length) groupsDef.push(['Sonstiges', rest]);
+  // Kategorien in Anzeige-Reihenfolge mit Icons
+  const CATEGORY_ICONS = {
+    'Allgemein': '📋', 'Moderation': '🛡️', 'Spaß': '🎮', 'Sozial': '💞',
+    'Wirtschaft': '💰', 'Bank': '🏦', 'Casino': '🎰', 'Shop': '🛒',
+    'Quests': '📜', 'Gilde': '⚔️', 'Welt': '🌍', 'Berufe': '🔧',
+    'Arena': '🏟️', 'Profil': '👤', 'Farm': '🌾', 'Admin': '🔑',
+  };
+  const CATEGORY_ORDER = Object.keys(CATEGORY_ICONS);
+  const sortedCats = [...new Set(COMMAND_CATALOG.map((c) => c.category))]
+    .sort((a, b) => {
+      const ai = CATEGORY_ORDER.indexOf(a); const bi = CATEGORY_ORDER.indexOf(b);
+      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+    });
 
-  const byKey = Object.fromEntries(COMMANDS.map((c) => [c.key, c]));
-  const renderCmd = (key) => {
-    const c = byKey[key];
-    if (!c) return '';
-    const adminBadge = c.adminDefault ? '<span class="tag tag-admin">🛡️ nur Admins</span>' : '<span class="tag tag-bot">👥 alle</span>';
-    const aliases = (aliasMap[key] || []).length
-      ? `<div class="muted" style="font-size:.78rem;margin-top:3px">auch: ${aliasMap[key].map((a) => COMMAND_PREFIX + escapeHtml(a)).join(', ')}</div>`
+  const accessBadge = (a) => a === 'inhaber'
+    ? '<span class="tag tag-creator">👑 Inhaber</span>'
+    : a === 'admin' ? '<span class="tag tag-admin">🛡️ Admin</span>'
+    : '<span class="tag tag-bot">👥 alle</span>';
+
+  const renderCmdCard = (entry) => {
+    const searchStr = norm([entry.cmd, ...entry.aliases, entry.desc, entry.category, entry.usage, entry.example].join(' '));
+    const aliasStr = entry.aliases.length
+      ? `<div style="font-size:.78rem;color:var(--muted);margin-top:2px">auch: ${entry.aliases.map((a) => `<code style="font-size:.75rem">${COMMAND_PREFIX}${escapeHtml(a)}</code>`).join(' ')}</div>`
       : '';
-    return `<div class="cmd-row" data-search="${escapeHtml((key + ' ' + c.desc + ' ' + (aliasMap[key] || []).join(' ')).toLowerCase())}">
-      <div style="flex:1;min-width:0">
-        <code class="cmd-name">${COMMAND_PREFIX}${escapeHtml(key)}</code> ${adminBadge}
-        <div class="muted" style="margin-top:2px">${escapeHtml(c.desc)}</div>
-        ${aliases}
+    return `<details class="cmd-card" data-search="${escapeHtml(searchStr)}" data-cat="${escapeHtml(entry.category)}">
+      <summary style="list-style:none;cursor:pointer;display:flex;align-items:flex-start;gap:10px;padding:12px 14px">
+        <div style="flex:1;min-width:0">
+          <code class="cmd-name">${COMMAND_PREFIX}${escapeHtml(entry.cmd)}</code>
+          ${accessBadge(entry.access)}
+          ${aliasStr}
+          <div class="muted" style="margin-top:4px;font-size:.87rem">${escapeHtml(entry.desc.split('.')[0])}.</div>
+        </div>
+        <span style="font-size:.8rem;color:var(--muted);flex:0 0 auto;padding-top:2px">▾</span>
+      </summary>
+      <div style="padding:0 14px 14px;border-top:1px solid rgba(255,255,255,.06);margin-top:6px">
+        <p style="margin:10px 0 6px;font-size:.9rem;line-height:1.6">${escapeHtml(entry.desc)}</p>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px;font-size:.83rem">
+          <div><span class="muted">Nutzung:</span> <code style="background:rgba(255,255,255,.07);padding:2px 7px;border-radius:6px">${escapeHtml(entry.usage)}</code></div>
+          <div><span class="muted">Beispiel:</span> <code style="background:rgba(99,102,241,.15);padding:2px 7px;border-radius:6px;color:#c4b5fd">${escapeHtml(entry.example)}</code></div>
+        </div>
       </div>
-    </div>`;
+    </details>`;
   };
 
-  const sections = groupsDef.map(([title, keys]) => {
-    const rows = keys.map(renderCmd).join('');
-    if (!rows) return '';
-    return `<div class="card cmd-section"><h2>${title} <span class="muted" style="font-size:.85rem">(${keys.filter((k) => byKey[k]).length})</span></h2>${rows}</div>`;
+  const gameNote = '<div class="muted" style="font-size:.82rem;margin-bottom:8px">🎮 Spiel-Befehle nur in Gruppen mit aktiviertem Spielmodus (<code>!spielgruppe an</code>).</div>';
+  const GAME_CATS = new Set(['Wirtschaft','Casino','Shop','Quests','Gilde','Welt','Berufe','Arena','Profil','Farm']);
+
+  const sections = sortedCats.map((cat) => {
+    const entries = COMMAND_CATALOG.filter((c) => c.category === cat);
+    if (!entries.length) return '';
+    const icon = CATEGORY_ICONS[cat] || '•';
+    const note = GAME_CATS.has(cat) ? gameNote : '';
+    return `<div class="card cmd-section" data-cat-section="${escapeHtml(cat)}">
+      <h2>${icon} ${escapeHtml(cat)} <span class="muted" style="font-size:.82rem">(${entries.length})</span></h2>
+      ${note}
+      ${entries.map(renderCmdCard).join('')}
+    </div>`;
   }).join('');
+
+  const catChips = sortedCats.map((cat) =>
+    `<button type="button" class="seg-btn" data-cat="${escapeHtml(cat)}" onclick="setCat(this)">${CATEGORY_ICONS[cat] || ''} ${escapeHtml(cat)}</button>`
+  ).join('');
 
   res.send(page('Befehle', `
     ${navBar(keyParam, 'befehle')}
     <div class="card">
-      <div class="row"><h1>📖 Befehls-Übersicht</h1><span class="chip">${COMMANDS.length} Befehle</span></div>
-      <p class="muted">Alle verfügbaren Befehle mit Beschreibung. Das Präfix ist „<b>${escapeHtml(COMMAND_PREFIX)}</b>".
-        🛡️ = standardmäßig nur Admins, 👥 = für alle (pro Gruppe in den <a href="/settings${keyParam}">Einstellungen</a> änderbar).</p>
-      <input type="search" id="cmdSearch" class="search-bar" placeholder="🔍 Befehl oder Stichwort suchen…" oninput="filterCmd(this.value)">
+      <div class="row"><h1>📖 Befehls-Referenz</h1><span class="chip" id="cmdCountChip">${COMMAND_CATALOG.length} Befehle</span></div>
+      <p class="muted">Alle ${COMMAND_CATALOG.length} Befehle mit ausführlicher Beschreibung. Präfix: <b>${escapeHtml(COMMAND_PREFIX)}</b>.
+        Klicke auf einen Befehl für Details.</p>
+      <input type="search" id="cmdSearch" class="search-bar" placeholder="🔍 Befehl, Beschreibung oder Stichwort…" oninput="filterCmd(this.value)" autocomplete="off">
+      <div class="seg" id="catFilter" style="flex-wrap:wrap;gap:4px;margin-bottom:8px">
+        <button type="button" class="seg-btn active" data-cat="all" onclick="setCat(this)">Alle</button>
+        ${catChips}
+      </div>
       <p class="muted" id="cmdCount" style="margin:4px 0 0"></p>
     </div>
     ${sections}`,
     { script: `<script>
-      function filterCmd(v){v=(v||'').toLowerCase();var shown=0,total=0;
-        document.querySelectorAll('.cmd-row').forEach(function(el){total++;var ok=el.dataset.search.includes(v);el.style.display=ok?'':'none';if(ok)shown++;});
-        document.querySelectorAll('.cmd-section').forEach(function(sec){var any=sec.querySelectorAll('.cmd-row');var vis=Array.prototype.some.call(any,function(e){return e.style.display!=='none';});sec.style.display=vis?'':'none';});
-        var c=document.getElementById('cmdCount');if(c)c.textContent=shown+' von '+total+' Befehlen';}
+      var _cat='all';
+      function norm(s){return s.replace(/ä/g,'ae').replace(/ö/g,'oe').replace(/ü/g,'ue').replace(/ß/g,'ss');}
+      function setCat(btn){_cat=btn.dataset.cat;
+        document.querySelectorAll('#catFilter .seg-btn').forEach(function(b){b.classList.toggle('active',b===btn)});
+        filterCmd(document.getElementById('cmdSearch').value);}
+      function filterCmd(v){
+        var q=norm((v||'').toLowerCase());
+        var shown=0,total=0;
+        document.querySelectorAll('.cmd-card').forEach(function(el){
+          total++;
+          var catOk=(_cat==='all'||el.dataset.cat===_cat);
+          var textOk=(!q||norm(el.dataset.search).includes(q));
+          var vis=catOk&&textOk;
+          el.style.display=vis?'':'none';
+          if(vis)shown++;
+        });
+        document.querySelectorAll('.cmd-section').forEach(function(sec){
+          if(_cat!=='all'&&sec.dataset.catSection!==_cat){sec.style.display='none';return;}
+          var any=Array.prototype.some.call(sec.querySelectorAll('.cmd-card'),function(e){return e.style.display!=='none';});
+          sec.style.display=any?'':'none';
+        });
+        var c=document.getElementById('cmdCount');if(c)c.textContent=shown+' von '+total+' Befehlen';
+        var ch=document.getElementById('cmdCountChip');if(ch)ch.textContent=shown+' Befehle';
+      }
       filterCmd('');
     </script>` }
   ));
+});
+
+// JSON-API für Dashboard-Polling
+app.get('/api/stats', (req, res) => {
+  if (!passwordOk(req.query.key)) return res.status(401).json({ error: 'unauthorized' });
+  const mem = process.memoryUsage();
+  const totMem = os.totalmem(); const freeMem = os.freemem();
+  const upS = Math.round((Date.now() - botState.startedAt) / 1000);
+  let disk = null;
+  try {
+    const fs = require('fs');
+    const st = fs.statfsSync(process.cwd());
+    disk = { free: st.bfree * st.bsize, total: st.blocks * st.bsize };
+  } catch (_) {}
+  res.json({
+    connected: botState.connected, powered: botState.powered, gamesReady: botState.gamesReady,
+    upS, nummer: botState.me ? botState.me.id.split(':')[0] : null,
+    commandCount: botState.commandCount, modTotal: botState.moderation.actionsTotal,
+    activeGroups: activeGroupCount(), totalGroups: getGroupsCached().length,
+    lastCmd: botState.lastCommand ? botState.lastCommand.cmd : null,
+    lastCmdAt: botState.lastCommand ? botState.lastCommand.at : null,
+    lastMod: botState.moderation.lastAction,
+    reports: (config.reports || []).length, anliegen: (config.anliegen || []).length,
+    messages: Object.values(config.groups).reduce((s, g) =>
+      s + Object.values(g.memberStats || {}).reduce((a, m) => a + (m.messages || 0), 0), 0),
+    bans: Object.values(config.groups).reduce((s, g) => s + (g.banLog || []).length, 0),
+    activityLog: botState.activityLog.length,
+    ram: { heapUsed: mem.heapUsed, heapTotal: mem.heapTotal, rss: mem.rss, sysFree: freeMem, sysTotal: totMem },
+    cpu: { loadavg: os.loadavg(), cpus: os.cpus().length },
+    disk, node: process.version,
+    storage: store.usingTurso() ? 'turso' : store.usingMongo() ? 'mongo' : 'file',
+  });
 });
 
 // Live-Dashboard
@@ -2485,21 +2593,7 @@ app.get('/dashboard', (req, res) => {
   res.set('Cache-Control', 'no-store');
   if (!requireAuth(req, res)) return;
   const keyParam = keyOf(req);
-
-  const mem = process.memoryUsage();
-  const mb = (n) => (n / 1024 / 1024).toFixed(0) + ' MB';
-  const upS = Math.round((Date.now() - botState.startedAt) / 1000);
-  const uptime = `${Math.floor(upS / 3600)}h ${Math.floor((upS % 3600) / 60)}m ${upS % 60}s`;
   const nummer = botState.me ? botState.me.id.split(':')[0] : '–';
-  const last = botState.lastCommand
-    ? `${escapeHtml(botState.lastCommand.cmd)} (${new Date(botState.lastCommand.at).toLocaleTimeString('de-DE')})`
-    : '–';
-  const lastMod = botState.moderation.lastAction
-    ? `${escapeHtml(botState.moderation.lastAction)}`
-    : '–';
-  const statusBadge = botState.connected
-    ? '<span class="status on">✅ verbunden</span>'
-    : '<span class="status off">⭕ getrennt</span>';
   const speicher = store.usingTurso() ? 'Turso (Cloud) ✅'
     : store.usingMongo() ? 'MongoDB ✅'
     : 'Datei (flüchtig) ⚠️';
@@ -2508,37 +2602,31 @@ app.get('/dashboard', (req, res) => {
     ${navBar(keyParam, 'dashboard')}
     ${powerPanel(keyParam)}
     <div class="card">
-      <div class="row"><h1>📊 Dashboard</h1>${statusBadge}</div>
-      <p class="muted">Live-Daten vom Server · aktualisiert alle 10 s</p>
-      <p class="muted" style="margin-top:6px">🎮 Wirtschaft/Spiele: ${botState.gamesReady ? '<b style="color:var(--good)">aktiv</b> (Turso verbunden)' : 'inaktiv (keine Turso-DB)'}</p>
+      <div class="row"><h1>📊 Dashboard</h1><span class="status" id="connStatus">…</span></div>
+      <p class="muted">Live-Daten · aktualisiert alle 5 s &ensp;<span id="lastUpdate" class="muted"></span></p>
+      <p class="muted" style="margin-top:4px">🎮 Wirtschaft/Spiele: ${botState.gamesReady ? '<b style="color:var(--good)">aktiv</b> (Turso)' : 'inaktiv (keine Turso-DB)'}</p>
     </div>
     <div class="card">
-      <div class="stats">
-        <div class="stat"><div class="k">Nummer</div><div class="v">${escapeHtml(nummer)}</div></div>
-        <div class="stat"><div class="k">Laufzeit</div><div class="v">${uptime}</div></div>
-        <div class="stat"><div class="k">Aktive Gruppen</div><div class="v">${activeGroupCount()}</div></div>
-        <div class="stat"><div class="k">Gruppen gesamt</div><div class="v">${botState.groups.length}</div></div>
-        <div class="stat"><div class="k">Befehle verarbeitet</div><div class="v">${botState.commandCount}</div></div>
-        <div class="stat"><div class="k">Letzter Befehl</div><div class="v" style="font-size:1rem">${last}</div></div>
-        <div class="stat"><div class="k">Moderations-Aktionen</div><div class="v">${botState.moderation.actionsTotal}</div></div>
-        <div class="stat"><div class="k">Letzte Moderation</div><div class="v" style="font-size:1rem">${lastMod}</div></div>
-        <div class="stat"><div class="k">RAM (Heap)</div><div class="v">${mb(mem.heapUsed)}</div></div>
-        <div class="stat"><div class="k">Speicher</div><div class="v" style="font-size:1rem">${speicher}</div></div>
+      <div class="stats" id="statsGrid">
+        <div class="stat"><div class="k">Nummer</div><div class="v" style="font-size:1.1rem">${escapeHtml(nummer)}</div></div>
+        <div class="stat"><div class="k">Laufzeit</div><div class="v" id="uptime">–</div></div>
+        <div class="stat"><div class="k">Aktive Gruppen</div><div class="v" id="s-ag">–</div></div>
+        <div class="stat"><div class="k">Gruppen gesamt</div><div class="v" id="s-tg">–</div></div>
+        <div class="stat"><div class="k">Befehle</div><div class="v" id="s-cmd">–</div></div>
+        <div class="stat"><div class="k">Letzter Befehl</div><div class="v" id="s-lcmd" style="font-size:.95rem">–</div></div>
+        <div class="stat"><div class="k">Moderation</div><div class="v" id="s-mod">–</div></div>
+        <div class="stat"><div class="k">RAM (Heap)</div><div class="v" id="s-ram">–</div></div>
+        <div class="stat"><div class="k">Speicher-Backend</div><div class="v" style="font-size:.9rem">${escapeHtml(speicher)}</div></div>
+        <div class="stat"><div class="k">CPU-Kerne</div><div class="v" id="s-cpu">–</div></div>
       </div>
     </div>
     <div class="card">
       <div class="stats">
-        <div class="stat"><div class="k">Nachrichten getrackt</div><div class="v">${
-          Object.values(config.groups).reduce((s, g) =>
-            s + Object.values(g.memberStats || {}).reduce((a, m) => a + (m.messages || 0), 0), 0)
-        }</div></div>
-        <div class="stat"><div class="k">Ban-Einträge</div><div class="v">${
-          Object.values(config.groups).reduce((s, g) => s + (g.banLog || []).length, 0)
-        }</div></div>
-        <div class="stat"><div class="k">Meldungen</div><div class="v">${(config.reports || []).length}</div></div>
-        <div class="stat"><div class="k">Anliegen</div><div class="v">${(config.anliegen || []).length}</div></div>
-        <div class="stat"><div class="k">DM-Assistent</div><div class="v" style="font-size:1rem">${config.settings?.dmAssistant ? 'an ✅' : 'aus ⛔'}</div></div>
-        <div class="stat"><div class="k">Aktivitäts-Log</div><div class="v">${botState.activityLog.length}/100</div></div>
+        <div class="stat"><div class="k">Nachrichten</div><div class="v" id="s-msg">–</div></div>
+        <div class="stat"><div class="k">Ban-Einträge</div><div class="v" id="s-bans">–</div></div>
+        <div class="stat"><div class="k">Meldungen</div><div class="v" id="s-rep">–</div></div>
+        <div class="stat"><div class="k">Anliegen</div><div class="v" id="s-anl">–</div></div>
+        <div class="stat"><div class="k">Aktivitäts-Log</div><div class="v" id="s-alog">–</div></div>
       </div>
     </div>
     <div class="card row" style="flex-wrap:wrap;gap:10px">
@@ -2547,8 +2635,177 @@ app.get('/dashboard', (req, res) => {
       <a href="/anliegen${keyParam}">📨 Anliegen</a>
       <a href="/banlog${keyParam}">🚫 Ban-Log</a>
       <a href="/activity${keyParam}">📡 Aktivität</a>
-      <a href="/search${keyParam}">🔍 Suche</a>
-    </div>`, { refresh: 10, refreshUrl: `/dashboard${keyParam}` }));
+      <a href="/statistik${keyParam}">📈 Statistik</a>
+      <a href="/server${keyParam}">🖥️ Server</a>
+    </div>`,
+    { script: `<script>
+      var KEY='${encodeURIComponent(req.query.key)}';
+      var startedAt=${botState.startedAt};
+      function mb(n){return(n/1048576).toFixed(0)+' MB';}
+      function fmt(s){return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m '+(s%60)+'s';}
+      function countUp(el,val){
+        var cur=parseInt(el.textContent)||0; if(cur===val)return;
+        var step=Math.max(1,Math.round((val-cur)/8)); var iv=setInterval(function(){
+          cur=Math.min(cur+step,val); el.textContent=cur; if(cur>=val)clearInterval(iv);},30);
+      }
+      function update(){
+        fetch('/api/stats?key='+KEY).then(function(r){return r.json();}).then(function(d){
+          var cs=document.getElementById('connStatus');
+          if(cs){cs.textContent=d.connected?'✅ verbunden':'⭕ getrennt';cs.className='status '+(d.connected?'on':'off');}
+          var el;
+          if(el=document.getElementById('uptime'))el.textContent=fmt(d.upS);
+          if(el=document.getElementById('s-ag'))countUp(el,d.activeGroups);
+          if(el=document.getElementById('s-tg'))countUp(el,d.totalGroups);
+          if(el=document.getElementById('s-cmd'))countUp(el,d.commandCount);
+          if(el=document.getElementById('s-lcmd'))el.textContent=d.lastCmd||(d.lastCmdAt?'('+new Date(d.lastCmdAt).toLocaleTimeString('de-DE')+')':'–');
+          if(el=document.getElementById('s-mod'))countUp(el,d.modTotal);
+          if(el=document.getElementById('s-ram'))el.textContent=mb(d.ram.heapUsed);
+          if(el=document.getElementById('s-cpu'))el.textContent=d.cpu.cpus+' Kerne · '+d.cpu.loadavg[0].toFixed(2);
+          if(el=document.getElementById('s-msg'))countUp(el,d.messages);
+          if(el=document.getElementById('s-bans'))countUp(el,d.bans);
+          if(el=document.getElementById('s-rep'))countUp(el,d.reports);
+          if(el=document.getElementById('s-anl'))countUp(el,d.anliegen);
+          if(el=document.getElementById('s-alog'))el.textContent=d.activityLog+'/100';
+          var lu=document.getElementById('lastUpdate');
+          if(lu)lu.textContent='· '+new Date().toLocaleTimeString('de-DE');
+        }).catch(function(){});
+      }
+      update(); setInterval(update,5000);
+    </script>` }
+  ));
+});
+
+// ── Statistik-Seite (Leaderboards) ──────────────────────────────────
+app.get('/statistik', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!requireAuth(req, res)) return;
+  const keyParam = keyOf(req);
+
+  let lbHtml = '';
+  if (!botState.gamesReady) {
+    lbHtml = '<div class="card"><p class="muted">🎮 Spiele sind nicht aktiv (keine Turso-DB konfiguriert). Leaderboards nicht verfügbar.</p></div>';
+  } else {
+    const mgrs = gameLayer.mgrs;
+    const safe = async (label, fn) => {
+      try { return await fn(); } catch (_) { return null; }
+    };
+    const fmtRow = (i, userId, a, b, c) => {
+      const medals = ['🥇','🥈','🥉'];
+      const rank = i < 3 ? medals[i] : `#${i+1}`;
+      const num = userId.replace(/@.*/,'');
+      return `<tr><td>${rank}</td><td><code style="font-size:.82rem">${escapeHtml(num)}</code></td><td>${escapeHtml(String(a||0))}</td><td>${escapeHtml(String(b||0))}</td><td>${escapeHtml(String(c||''))}</td></tr>`;
+    };
+
+    const sections = [];
+
+    const wealth = await safe('wealth', () => mgrs.economy && mgrs.economy.getLeaderboard ? mgrs.economy.getLeaderboard('wealth') : null);
+    if (wealth && wealth.length) {
+      sections.push(`<div class="card"><h2>💰 Reichste Spieler</h2><table><thead><tr><th>#</th><th>Nummer</th><th>Coins</th><th>Level</th><th>Prestige</th></tr></thead><tbody>
+        ${wealth.map((r,i) => fmtRow(i, r.userId||r.user_id, r.balance||r.wealth||0, r.level||0, r.prestige||0)).join('')}
+      </tbody></table></div>`);
+    }
+
+    const arena = await safe('arena', () => mgrs.arena && mgrs.arena.getLeaderboard ? mgrs.arena.getLeaderboard() : null);
+    if (arena && arena.length) {
+      sections.push(`<div class="card"><h2>🏟️ Arena-Rangliste</h2><table><thead><tr><th>#</th><th>Nummer</th><th>Siege</th><th>Niederlagen</th><th>Titel</th></tr></thead><tbody>
+        ${arena.map((r,i) => fmtRow(i, r.userId||r.user_id, r.wins||0, r.losses||0, (r.emoji||'')+(r.title||''))).join('')}
+      </tbody></table></div>`);
+    }
+
+    const rep = await safe('rep', () => mgrs.social && mgrs.social.getTopRep ? mgrs.social.getTopRep() : null);
+    if (rep && rep.length) {
+      sections.push(`<div class="card"><h2>⭐ Ruf-Rangliste</h2><table><thead><tr><th>#</th><th>Nummer</th><th>Ruf</th><th>Titel</th><th></th></tr></thead><tbody>
+        ${rep.map((r,i) => fmtRow(i, r.userId||r.user_id, r.rep||r.reputation||0, (r.emoji||'')+(r.title||''), '')).join('')}
+      </tbody></table></div>`);
+    }
+
+    const world = await safe('world', () => mgrs.world && mgrs.world.getWorldLeaderboard ? mgrs.world.getWorldLeaderboard() : null);
+    if (world && world.length) {
+      sections.push(`<div class="card"><h2>🌍 Weltrangliste</h2><table><thead><tr><th>#</th><th>Nummer</th><th>Kills</th><th>Region</th><th></th></tr></thead><tbody>
+        ${world.map((r,i) => fmtRow(i, r.userId||r.user_id, r.kills||r.totalKills||0, r.region||'–', '')).join('')}
+      </tbody></table></div>`);
+    }
+
+    if (!sections.length) {
+      lbHtml = '<div class="card"><p class="muted">Noch keine Spielerdaten vorhanden. Sobald Spieler aktiv sind, erscheinen hier die Ranglisten.</p></div>';
+    } else {
+      lbHtml = sections.join('');
+    }
+  }
+
+  res.send(page('Statistik', `
+    ${navBar(keyParam, 'statistik')}
+    <div class="card">
+      <h1>📈 Spieler-Statistiken</h1>
+      <p class="muted">Leaderboards aus dem Spielsystem — aktueller Stand${botState.gamesReady ? '' : ' (Spiele inaktiv)'}.</p>
+    </div>
+    ${lbHtml}
+  `, { keyParam }));
+});
+
+// ── Server-Metriken ──────────────────────────────────────────────────
+app.get('/server', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!requireAuth(req, res)) return;
+  const keyParam = keyOf(req);
+
+  const mem = process.memoryUsage();
+  const sysTot = os.totalmem(); const sysFree = os.freemem();
+  const heapPct = Math.round((mem.heapUsed / mem.heapTotal) * 100);
+  const ramPct  = Math.round(((sysTot - sysFree) / sysTot) * 100);
+  const load    = os.loadavg();
+  const cpuCount = os.cpus().length;
+  const mb = (n) => (n / 1048576).toFixed(1) + ' MB';
+  const upS = Math.round((Date.now() - botState.startedAt) / 1000);
+  const uptime = `${Math.floor(upS/3600)}h ${Math.floor((upS%3600)/60)}m`;
+  const storage = store.usingTurso() ? 'Turso Cloud ✅' : store.usingMongo() ? 'MongoDB ✅' : 'Datei (lokal) ⚠️';
+
+  let diskHtml = '';
+  try {
+    const fs = require('fs');
+    const st = fs.statfsSync(process.cwd());
+    const dFree = st.bfree * st.bsize; const dTotal = st.blocks * st.bsize;
+    const dPct = Math.round(((dTotal - dFree) / dTotal) * 100);
+    diskHtml = `<div class="stat"><div class="k">Speicherplatz belegt</div>
+      <div class="v">${mb(dTotal - dFree)} / ${mb(dTotal)}</div>
+      <div style="margin-top:6px;height:6px;background:rgba(255,255,255,.1);border-radius:3px">
+        <div style="width:${dPct}%;height:100%;border-radius:3px;background:${dPct > 85 ? 'var(--bad)' : 'var(--accent)'}"></div>
+      </div></div>`;
+  } catch (_) {}
+
+  const bar = (pct, color) =>
+    `<div style="margin-top:6px;height:6px;background:rgba(255,255,255,.1);border-radius:3px">
+       <div style="width:${pct}%;height:100%;border-radius:3px;background:${color};transition:width .5s"></div>
+     </div>`;
+
+  res.send(page('Server', `
+    ${navBar(keyParam, 'server')}
+    <div class="card">
+      <h1>🖥️ Server-Metriken</h1>
+      <p class="muted">System-Informationen · Node ${escapeHtml(process.version)} · Laufzeit: ${escapeHtml(uptime)}</p>
+    </div>
+    <div class="card">
+      <div class="stats">
+        <div class="stat"><div class="k">Heap-RAM genutzt</div><div class="v">${mb(mem.heapUsed)} / ${mb(mem.heapTotal)}</div>
+          ${bar(heapPct, heapPct > 85 ? 'var(--bad)' : 'var(--accent)')}</div>
+        <div class="stat"><div class="k">System-RAM</div><div class="v">${mb(sysTot - sysFree)} / ${mb(sysTot)}</div>
+          ${bar(ramPct, ramPct > 85 ? 'var(--bad)' : 'var(--accent2)')}</div>
+        <div class="stat"><div class="k">RSS (Prozess)</div><div class="v">${mb(mem.rss)}</div></div>
+        ${diskHtml}
+        <div class="stat"><div class="k">CPU-Kerne</div><div class="v">${cpuCount}</div></div>
+        <div class="stat"><div class="k">CPU-Last (1m)</div><div class="v">${load[0].toFixed(2)}</div>
+          ${bar(Math.min(100, Math.round((load[0]/cpuCount)*100)), load[0] > cpuCount*0.8 ? 'var(--bad)' : 'var(--good)')}</div>
+        <div class="stat"><div class="k">CPU-Last (5m)</div><div class="v">${load[1].toFixed(2)}</div></div>
+        <div class="stat"><div class="k">Laufzeit</div><div class="v">${escapeHtml(uptime)}</div></div>
+        <div class="stat"><div class="k">Speicher-Backend</div><div class="v" style="font-size:.9rem">${escapeHtml(storage)}</div></div>
+        <div class="stat"><div class="k">Node-Version</div><div class="v" style="font-size:1rem">${escapeHtml(process.version)}</div></div>
+      </div>
+    </div>
+    <div class="card row" style="gap:10px;flex-wrap:wrap">
+      <a href="/dashboard${keyParam}">📊 Dashboard</a>
+      <a href="/statistik${keyParam}">📈 Spieler-Statistiken</a>
+    </div>
+  `, { keyParam }));
 });
 
 const server = app.listen(PORT, () => logger.info(`HTTP-Server läuft auf Port ${PORT}`));
@@ -2596,6 +2853,9 @@ async function refreshGroups(force = false) {
       }))
       .sort((a, b) => (a.subject || '').localeCompare(b.subject || ''));
     botState.groupsFetchedAt = Date.now();
+    // Persistiere Gruppen-Cache für offline-Ansicht
+    config.groupCache = botState.groups.map((g) => ({ id: g.id, subject: g.subject, size: g.size, isCommunity: g.isCommunity, community: g.community }));
+    persistDebounced();
     logger.info({ anzahl: botState.groups.length }, 'Gruppen geladen');
     fetchGroupPictures();
   } catch (err) {
