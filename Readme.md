@@ -7,8 +7,12 @@ Render-Free-Dienst gegen Inaktivität wach.
 
 ## Funktionen
 
-- **Befehle** (pro Gruppe ein-/ausschaltbar): `!hilfe`, `!ping`, `!info`, `!id`,
-  `!regeln`, `!sag`, `!alle` (Admins), `!zeit`, `!würfel`, `!gruppe`.
+- **Allgemeine Befehle** (pro Gruppe ein-/ausschaltbar): `!hilfe`, `!ping`,
+  `!info`, `!id`, `!regeln`, `!gruppe`, `!top`, `!stats`, `!melden`.
+- **Moderations-/Admin-Befehle** (pro Gruppe ein-/ausschaltbar): u. a. `!sag`,
+  `!alle`, `!kick`, `!ban`, `!mute`/`!unmute`, `!warn`/`!unwarn`/`!clearwarn`,
+  `!promote`/`!demote`, `!lock`/`!unlock`, `!setregeln`, `!setwelcome`,
+  `!slowmode`, `!del`, `!remind` u. v. m. (siehe `!hilfe` bzw. die Web-Seite `/befehle`).
 - **Moderation** (pro Gruppe optional): löscht Beleidigungen (mit Verwarnung &
   Soft-Mute) und/oder Links und meldet das. Der Bot muss dafür **Gruppen-Admin** sein.
 - **Web-Oberfläche**: QR-Login, Gruppenliste mit Profilbildern, Pro-Gruppen-

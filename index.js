@@ -28,8 +28,6 @@ const {
 
 const store = require('./store');
 const { createModeration } = require('./moderation');
-// Spiel-/Wirtschafts-Integration (eigenständig, defensiv geladen)
-const gameLayer = require('./game-commands');
 // Vollständige Befehls-Dokumentation (offline-fähig, keine DB-Abhängigkeit)
 const { COMMAND_CATALOG } = require('./command-catalog');
 
@@ -96,408 +94,15 @@ process.on('unhandledRejection', (reason) => {
   logger.error({ reason }, 'unhandledRejection abgefangen – Bot läuft weiter');
 });
 
-// ====================================================================
-// Datenarrays für Spiele & Spaß-Befehle
-// ====================================================================
-const JOKES = [
-  'Was macht ein Pirat am Computer? Er drückt die Enter-Taste! 🏴‍☠️',
-  'Treffen sich zwei Magneten. Sagt der eine: „Was soll ich heute bloß anziehen?" 🧲',
-  'Warum können Geister so schlecht lügen? Weil man durch sie hindurchsieht! 👻',
-  'Was ist orange und klingt wie ein Papagei? Eine Karotte. 🥕',
-  'Wie nennt man einen Boomerang, der nicht zurückkommt? Einen Stock. 🪃',
-  'Was sagt ein Mathematiker, wenn er hungrig ist? „Ich könnte ein Stück Pi vertragen." 🥧',
-  'Warum nehmen Skelette keinen Regenschirm mit? Sie haben kein Fleisch zum Nasswerden. 💀',
-  'Was macht eine Wolke mit Juckreiz? Sie geht zum Wolkenkratzer. ☁️',
-  'Wie heißt ein Keks unter einem Baum? Ein schattiges Plätzchen. 🍪',
-  'Warum war die Mathebuch-Seite traurig? Sie hatte zu viele Probleme. 📘',
-  'Was ist grün und steht vor der Tür? Ein Klopfsalat. 🥬',
-  'Wie nennt man einen dicken Vegetarier? Biotonne. 🌱',
-  'Was sagt ein Nilpferd im Schwimmbad? „Nicht hauen, ich bins nur." 🦛',
-  'Warum gehen Ameisen nicht in die Kirche? Weil sie In-sekten sind. 🐜',
-  'Was ist weiß und stört beim Essen? Eine Lawine. 🏔️',
-  'Wie nennt man einen Cowboy ohne Pferd? Sattelschlepper. 🤠',
-  'Warum hat der Pilz so viele Freunde? Weil er ein lustiger Typ ist. 🍄',
-  'Was macht ein Clown im Büro? Faxen. 🤡',
-  'Treffen sich zwei Kerzen. Sagt die eine: „Ist Wasser eigentlich gefährlich?" 🕯️',
-  'Was ist braun und läuft durch den Wald? Eine Wanderschokolade. 🍫',
-  'Warum können Bienen so gut rechnen? Weil sie immer summen. 🐝',
-  'Was sagt der große Stift zum kleinen Stift? „Wachs-mal-stift." ✏️',
-  'Wie nennt man einen Bumerang, der funktioniert? Ein Bumerang. 🪃',
-  'Was ist rot und schlecht für die Zähne? Ein Ziegelstein. 🧱',
-  'Warum sind Fische so schlau? Weil sie in Schulen schwimmen. 🐟',
-  'Was macht ein Pferd auf dem Sofa? Hottehü-hü-hü-fernsehen. 🐴',
-  'Wie nennt man einen Tyrannosaurus, der ein Tor schießt? Dino-mit! 🦖',
-  'Was sagt ein Toast zum anderen? „Schön, dass wir Brüder im Geiste sind." 🍞',
-  'Warum hat der Computer Schnupfen? Er hatte einen Virus. 💻',
-  'Was ist gelb und kann nicht schwimmen? Ein Bagger. 🚜',
-  'Wie nennt man eine Gruppe von Walen, die ein Instrument spielen? Eine Orca-ster. 🐋',
-  'Was macht ein Keks im Krankenhaus? Er liegt im Krümel-bett. 🍪',
-  'Warum war die Banane beim Arzt? Sie fühlte sich nicht gelb genug. 🍌',
-  'Was ist ein Cowboy ohne Hut? Unbedeckt verzweifelt. 🤠',
-  'Wie begrüßen sich zwei Schneemänner? „Riecht es hier nach Karotte?" ⛄',
-  'Was ist das Lieblingsfach von Geistern? Buchstabier-en. 👻',
-  'Warum hat das Handy eine Brille bekommen? Es hat seine Kontakte verloren. 📱',
-  'Was sagt ein Glühwürmchen, wenn es gegen die Wand fliegt? „Aua, ich bin am Ende." ✨',
-  'Wie nennt man einen schlafenden Bullen? Bull-dozer. 🐂',
-  'Was ist klein, braun und läuft durch den Wald? Ein Marathon-Igel. 🦔',
-];
-
-const FACTS = [
-  'Honig verdirbt nie – in ägyptischen Gräbern fand man essbaren Honig. 🍯',
-  'Ein Tag auf der Venus dauert länger als ein Jahr auf der Venus. 🪐',
-  'Oktopusse haben drei Herzen und blaues Blut. 🐙',
-  'Bananen sind botanisch gesehen Beeren – Erdbeeren jedoch nicht. 🍌',
-  'Ein Wimpernschlag dauert etwa 100 Millisekunden. 👁️',
-  'Haie gab es schon vor den Bäumen. 🦈',
-  'Die Eiffelturm-Spitze wächst im Sommer um bis zu 15 cm. 🗼',
-  'Es gibt mehr Sterne im Universum als Sandkörner auf der Erde. ⭐',
-  'Menschen teilen rund 60 % ihrer DNA mit Bananen. 🧬',
-  'Ein Kolibri-Herz schlägt bis zu 1.200-mal pro Minute. 🐦',
-  'Wombat-Kot ist würfelförmig. 🟫',
-  'Der heißeste Punkt der Erde kann über 70 °C heiß werden. 🌡️',
-  'Eine Wolke kann mehrere hundert Tonnen wiegen. ☁️',
-  'Schnecken können bis zu drei Jahre schlafen. 🐌',
-  'Das menschliche Gehirn verbraucht etwa 20 % unserer Energie. 🧠',
-  'Antarktis ist die größte Wüste der Erde. 🏜️',
-  'Eine Gruppe Flamingos heißt „Flamboyance". 🦩',
-  'Kühe haben beste Freundinnen und werden gestresst, wenn sie getrennt sind. 🐄',
-  'Der Mond entfernt sich jährlich etwa 3,8 cm von der Erde. 🌙',
-  'Ein Blitz ist fünfmal heißer als die Oberfläche der Sonne. ⚡',
-  'Tintenfische können ihre Farbe in Sekundenbruchteilen ändern. 🦑',
-  'Das längste Wort im Duden hat 67 Buchstaben (vor einer Reform). 📖',
-  'Pinguine machen Heiratsanträge mit einem Kieselstein. 🐧',
-  'Der Mensch hat etwa so viele Haare wie ein Schimpanse. 🐵',
-  'Erdnüsse sind keine Nüsse, sondern Hülsenfrüchte. 🥜',
-  'Ein Faultier kann den Atem länger anhalten als ein Delfin. 🦥',
-  'Die Internationale Raumstation umrundet die Erde alle 90 Minuten. 🛰️',
-  'Spinnenseide ist stärker als Stahl gleicher Dicke. 🕸️',
-  'Es regnet auf dem Saturn vermutlich Diamanten. 💎',
-  'Der Buchstabe „E" ist der häufigste in der deutschen Sprache. 🔤',
-];
-
-const QUOTES = [
-  'Der Weg ist das Ziel. – Konfuzius',
-  'Wer kämpft, kann verlieren. Wer nicht kämpft, hat schon verloren. – Bertolt Brecht',
-  'Sei du selbst die Veränderung, die du dir wünschst. – Mahatma Gandhi',
-  'Erfolg ist kein Zufall, sondern harte Arbeit. – unbekannt',
-  'Träume nicht dein Leben, lebe deinen Traum. – unbekannt',
-  'Auch der längste Weg beginnt mit dem ersten Schritt. – Laozi',
-  'Das Geheimnis des Vorankommens ist anzufangen. – Mark Twain',
-  'Glück ist kein Ziel, sondern eine Art zu reisen. – unbekannt',
-  'Wer aufhört, besser zu werden, hat aufgehört, gut zu sein. – Philip Rosenthal',
-  'Mut steht am Anfang des Handelns, Glück am Ende. – Demokrit',
-  'Fehler sind die Stufen auf der Treppe zum Erfolg. – unbekannt',
-  'Es ist nie zu spät, das zu werden, was man hätte sein können. – George Eliot',
-  'Wer will, findet Wege. Wer nicht will, findet Gründe. – unbekannt',
-  'Das Leben ist 10 % was passiert und 90 % wie du reagierst. – Charles Swindoll',
-  'Geh nicht nur die glatten Straßen, geh Wege, die noch niemand ging. – unbekannt',
-  'Die beste Zeit, einen Baum zu pflanzen, war vor 20 Jahren. Die zweitbeste ist jetzt. – Sprichwort',
-  'Aus Steinen, die dir in den Weg gelegt werden, kannst du etwas Schönes bauen. – Goethe',
-  'Nichts ist unmöglich, solange du daran glaubst. – unbekannt',
-  'Ein Ziel ohne Plan ist nur ein Wunsch. – Antoine de Saint-Exupéry',
-  'Wer nichts wagt, gewinnt nichts. – Sprichwort',
-  'Veränderung beginnt am Ende deiner Komfortzone. – unbekannt',
-  'Heute ist der erste Tag vom Rest deines Lebens. – unbekannt',
-  'Stärke wächst nicht aus dem, was du kannst, sondern aus dem, was du überwindest. – unbekannt',
-  'Lächle – es ist die einfachste Art, gut auszusehen. – unbekannt',
-  'Der einzige Ort, wo Erfolg vor Arbeit kommt, ist das Wörterbuch. – Vidal Sassoon',
-];
-
-const TRUTHS = [
-  'Was war dein peinlichster Moment?',
-  'In wen warst du zuletzt heimlich verliebt?',
-  'Was ist deine größte Angst?',
-  'Welche Lüge hast du zuletzt erzählt?',
-  'Was ist das Kindischste, das du noch tust?',
-  'Welche App nutzt du am meisten?',
-  'Was würdest du tun, wenn du einen Tag unsichtbar wärst?',
-  'Was ist dein größtes Geheimnis, das du hier verraten würdest?',
-  'Wen aus dieser Gruppe würdest du um Rat fragen?',
-  'Was war dein schlimmster Modefehler?',
-  'Welches Essen kannst du absolut nicht ausstehen?',
-  'Was ist dein heimliches Talent?',
-  'Wann hast du das letzte Mal geweint und warum?',
-  'Welchen Promi findest du heimlich attraktiv?',
-  'Was ist die längste Zeit, die du ohne Duschen verbracht hast?',
-  'Was ist das Verrückteste auf deiner Bucket-List?',
-  'Hast du schon mal jemanden ausspioniert?',
-  'Welches Lied hörst du heimlich gerne?',
-  'Was würden deine Freunde sagen ist deine schlechteste Angewohnheit?',
-  'Was ist dein größter Wunsch für die Zukunft?',
-  'Welche Serie hast du komplett alleine an einem Tag geschaut?',
-  'Was war dein schlimmster Streich?',
-  'Auf welche Lüge in deinem Lebenslauf bist du stolz?',
-  'Welche Person hier kennst du am wenigsten?',
-  'Was ist das Teuerste, das du je spontan gekauft hast?',
-];
-
-const DARES = [
-  'Schick das nächste Emoji, das dir einfällt, 10-mal hintereinander.',
-  'Schreibe die nächsten 3 Nachrichten nur in Großbuchstaben.',
-  'Ändere deinen Status für 1 Stunde auf „Ich liebe diesen Bot".',
-  'Sprich die nächsten 5 Minuten nur in Reimen.',
-  'Schick ein Selfie mit lustigem Gesicht (wenn du dich traust).',
-  'Schreibe ohne den Buchstaben „e" deine nächste Nachricht.',
-  'Singe per Sprachnachricht den Refrain deines Lieblingsliedes.',
-  'Erzähle einen richtig schlechten Witz.',
-  'Schreibe deinem letzten Kontakt „Ich denke an dich".',
-  'Mach 10 Hampelmänner und schick ein Foto danach.',
-  'Beschreibe dich selbst nur mit 3 Emojis.',
-  'Schick deine letzte gemachte Foto-Aufnahme (familienfreundlich!).',
-  'Sag der Gruppe ein ehrliches Kompliment an jede Person.',
-  'Schreibe rückwärts: „Ich bin der Beste hier".',
-  'Imitiere per Sprachnachricht ein Tier deiner Wahl.',
-  'Setze für 30 Minuten ein lustiges Profilbild.',
-  'Tippe nur mit der Nase deine nächste Nachricht.',
-  'Erfinde einen Spitznamen für die Person über dir im Chat.',
-  'Schreibe ein kurzes Gedicht über Pizza.',
-  'Zähle bis 20 auf einer Fremdsprache per Sprachnachricht.',
-  'Schick das peinlichste Bild aus deiner Galerie (familienfreundlich).',
-  'Schreibe 1 Minute lang nur mit Emojis.',
-  'Verkünde der Gruppe deinen geheimen Lieblingssnack.',
-  'Mach Liegestütze, so viele du schaffst, und nenne die Zahl.',
-  'Sprich die nächste Nachricht so, als wärst du ein Nachrichtensprecher.',
-];
-
-const COMPLIMENTS = [
-  'Du bringst jeden Raum zum Strahlen! ✨',
-  'Deine Energie ist einfach ansteckend! ⚡',
-  'Du bist klüger, als du denkst! 🧠',
-  'Mit dir wird es nie langweilig! 🎉',
-  'Du hast ein Herz aus Gold! 💛',
-  'Deine Lache ist die beste! 😄',
-  'Du machst die Welt ein bisschen besser! 🌍',
-  'Auf dich kann man sich immer verlassen! 🤝',
-  'Du bist ein echtes Vorbild! 🌟',
-  'Dein Stil ist einzigartig! 👌',
-  'Du hast die besten Ideen! 💡',
-  'Deine Freundlichkeit kennt keine Grenzen! 🥰',
-  'Du bist stärker, als du glaubst! 💪',
-  'Mit dir ist jeder Tag besser! ☀️',
-  'Du hast einen wunderbaren Humor! 😂',
-  'Deine Geduld ist bewundernswert! 🧘',
-  'Du bist ein echter Schatz! 💎',
-  'Niemand macht das so gut wie du! 🏆',
-  'Deine Kreativität ist grenzenlos! 🎨',
-  'Du bist einfach unbezahlbar! 💯',
-];
-
-const RIDDLES = [
-  { q: 'Was hat einen Hals, aber keinen Kopf?', a: 'flasche' },
-  { q: 'Was wird nasser, je mehr es trocknet?', a: 'handtuch' },
-  { q: 'Was hat viele Zähne, kann aber nicht beißen?', a: 'kamm' },
-  { q: 'Je mehr du davon nimmst, desto größer wird es. Was ist es?', a: 'loch' },
-  { q: 'Was geht hoch und kommt nie wieder runter?', a: 'alter' },
-  { q: 'Was hat Hände, aber kann nicht klatschen?', a: 'uhr' },
-  { q: 'Was kann man nicht halten, auch wenn es ganz dein ist?', a: 'atem' },
-  { q: 'Was läuft, hat aber keine Beine?', a: 'wasser' },
-  { q: 'Was hat einen Boden oben?', a: 'bein' },
-  { q: 'Was wird größer, je mehr man wegnimmt?', a: 'loch' },
-  { q: 'Was ist immer vor dir, kann aber nie gesehen werden?', a: 'zukunft' },
-  { q: 'Was hat Städte, aber keine Häuser; Wälder, aber keine Bäume?', a: 'landkarte' },
-  { q: 'Was kann sprechen ohne Mund und hört ohne Ohren?', a: 'echo' },
-  { q: 'Was hat einen Schlüssel, öffnet aber keine Tür?', a: 'klavier' },
-  { q: 'Was hat ein Auge, kann aber nicht sehen?', a: 'nadel' },
-  { q: 'Was fällt, ohne sich zu verletzen?', a: 'regen' },
-  { q: 'Was hat vier Beine am Morgen, zwei am Mittag, drei am Abend?', a: 'mensch' },
-  { q: 'Was hat einen Kopf und einen Fuß, aber keinen Körper?', a: 'bett' },
-  { q: 'Was gehört dir, wird aber von anderen mehr benutzt?', a: 'name' },
-  { q: 'Was ist leichter als eine Feder, aber selbst der Stärkste kann es nicht lange halten?', a: 'atem' },
-];
-
-// Aktions-Texte für soziale Befehle ({a}=Absender, {b}=Ziel)
-const ACTIONS = {
-  kiss: [
-    '{a} gibt {b} einen süßen Kuss 😘',
-    '{a} küsst {b} auf die Wange 💋',
-    '{a} drückt {b} einen dicken Schmatzer auf 😚',
-    '{a} und {b} teilen einen romantischen Moment 💕',
-    '{a} haucht {b} einen Kuss zu 😽',
-    '{a} küsst {b} unter dem Sternenhimmel 🌟',
-    '{a} schenkt {b} tausend Küsse 💞',
-    '{a} gibt {b} einen Gute-Nacht-Kuss 🌙',
-    '{a} küsst {b} und alle sagen „awww" 🥰',
-    '{a} überrascht {b} mit einem Kuss 💝',
-    '{a} küsst {b} wie im Filmfinale 🎬',
-    '{a} drückt {b} liebevoll an sich und küsst sie 💖',
-    '{a} pustet {b} ein Küsschen rüber 😘',
-    '{a} küsst {b} auf die Stirn 🥹',
-    '{a} und {b} – ein Kuss wie im Märchen 🏰',
-  ],
-  hug: [
-    '{a} umarmt {b} ganz fest 🤗',
-    '{a} drückt {b} liebevoll 🫂',
-    '{a} schenkt {b} eine Bärenumarmung 🐻',
-    '{a} nimmt {b} tröstend in den Arm 🤗',
-    '{a} umarmt {b} und lässt nicht mehr los 💗',
-    '{a} gibt {b} eine warme Umarmung 🔥',
-    '{a} kuschelt sich an {b} 🥰',
-    '{a} hält {b} ganz fest 🫂',
-    '{a} umarmt {b} nach langer Zeit wieder 😭',
-    '{a} schenkt {b} eine Gruppenkuschel-Einladung 🤗',
-    '{a} wirft sich {b} in die Arme 💞',
-    '{a} drückt {b} fest und flüstert „alles wird gut" 🫶',
-    '{a} umarmt {b} so, dass alle neidisch werden 😌',
-    '{a} gibt {b} eine Umarmung voller Wärme ☀️',
-    '{a} hält {b} im Arm wie einen Schatz 💎',
-  ],
-  slap: [
-    '{a} gibt {b} eine spielerische Ohrfeige 👋',
-    '{a} watscht {b} mit einem Fisch ab 🐟',
-    '{a} klatscht {b} eine \u{1F590}\u{FE0F} frech \u{1F606}',
-    '{a} haut {b} mit einem Kissen 🛏️',
-    '{a} gibt {b} einen Klaps auf den Hinterkopf 😅',
-    '{a} schlägt {b} mit einer Gummihuhn 🐔',
-    '{a} ohrfeigt {b} im Spaß 🤚',
-    '{a} verpasst {b} eine Backpfeife der Liebe 💢',
-    '{a} haut {b} mit einer Zeitung 📰',
-    '{a} klatscht {b} ab – aber kräftig! ✋',
-    '{a} schubst {b} freundschaftlich 😜',
-    '{a} watscht {b} mit einem Handschuh ab 🧤',
-    '{a} gibt {b} eine Kopfnuss 🥜',
-    '{a} haut {b} mit einem Baguette 🥖',
-    '{a} boxt {b} sanft in die Schulter 🥊',
-  ],
-  poke: [
-    '{a} stupst {b} an 👉',
-    '{a} pikst {b} in die Seite 😄',
-    '{a} tippt {b} auf die Schulter 👆',
-    '{a} stupst {b} immer wieder an 😆',
-    '{a} kitzelt {b} 🤭',
-    '{a} pikst {b} in die Wange 👉',
-    '{a} weckt {b} mit einem Stupser auf 😴',
-    '{a} stupst {b} und rennt weg 🏃',
-    '{a} pikst {b} – „hey, schau mal!" 👀',
-    '{a} tippt {b} dreimal an 1️⃣2️⃣3️⃣',
-    '{a} stupst {b} verspielt an 🥢',
-    '{a} pikst {b} bis sie lacht 😂',
-    '{a} gibt {b} einen kleinen Schubs 🫳',
-    '{a} stupst {b} mit dem Ellbogen an 💪',
-    '{a} pikst {b} und tut unschuldig 😇',
-  ],
-};
-
-// Quiz-Fragen ({q: Frage, a: Antwort in Kleinbuchstaben})
-const QUIZ = [
-  { q: 'Wie viele Kontinente gibt es?', a: '7' },
-  { q: 'Welches ist das größte Säugetier der Welt?', a: 'blauwal' },
-  { q: 'Wie heißt die Hauptstadt von Australien?', a: 'canberra' },
-  { q: 'Wie viele Beine hat eine Spinne?', a: '8' },
-  { q: 'Welches chemische Element hat das Symbol „O"?', a: 'sauerstoff' },
-  { q: 'In welchem Jahr fiel die Berliner Mauer?', a: '1989' },
-  { q: 'Wie heißt der längste Fluss der Welt?', a: 'nil' },
-  { q: 'Wie viele Saiten hat eine klassische Gitarre?', a: '6' },
-  { q: 'Welcher Planet ist der Sonne am nächsten?', a: 'merkur' },
-  { q: 'Wie nennt man ein Vieleck mit fünf Ecken?', a: 'fünfeck' },
-  { q: 'Welches Tier ist das schnellste an Land?', a: 'gepard' },
-  { q: 'Wie viele Minuten hat ein Tag? (in Stunden gerechnet wären es…)', a: '1440' },
-  { q: 'Wie heißt die Hauptstadt von Japan?', a: 'tokio' },
-  { q: 'Welche Farbe entsteht aus Blau und Gelb?', a: 'grün' },
-  { q: 'Wie viele Spieler stehen bei Fußball pro Team auf dem Feld?', a: '11' },
-  { q: 'Welches Metall ist bei Raumtemperatur flüssig?', a: 'quecksilber' },
-  { q: 'Wie heißt der höchste Berg der Welt?', a: 'mount everest' },
-  { q: 'Wie viele Zähne hat ein erwachsener Mensch normalerweise?', a: '32' },
-  { q: 'Welcher Ozean ist der größte?', a: 'pazifik' },
-  { q: 'Wie nennt man die Wissenschaft der Sterne?', a: 'astronomie' },
-  { q: 'Wie viele Farben hat ein Regenbogen?', a: '7' },
-  { q: 'Welches Land hat die meisten Einwohner?', a: 'indien' },
-  { q: 'Wie heißt das Sonnensystem unserer Galaxie?', a: 'milchstraße' },
-  { q: 'Aus wie vielen Bundesländern besteht Deutschland?', a: '16' },
-  { q: 'Wie viele Herzen hat ein Oktopus?', a: '3' },
-];
-
-// „Würdest du eher…"
-const WOULD = [
-  'Würdest du eher fliegen können oder unsichtbar sein?',
-  'Würdest du eher nie wieder Pizza oder nie wieder Schokolade essen?',
-  'Würdest du eher im Lotto gewinnen oder den perfekten Job finden?',
-  'Würdest du eher Gedanken lesen oder in die Zukunft sehen können?',
-  'Würdest du eher immer zu spät oder immer zu früh sein?',
-  'Würdest du eher ohne Musik oder ohne Filme leben?',
-  'Würdest du eher in der Stadt oder auf dem Land leben?',
-  'Würdest du eher berühmt oder reich sein?',
-  'Würdest du eher nie wieder dein Handy oder nie wieder den Fernseher nutzen?',
-  'Würdest du eher mit Haien oder mit Löwen schwimmen?',
-  'Würdest du eher immer die Wahrheit sagen müssen oder immer lügen müssen?',
-  'Würdest du eher ewig leben oder ein perfektes Leben für 50 Jahre?',
-  'Würdest du eher überall hin teleportieren oder die Zeit anhalten können?',
-  'Würdest du eher der lustigste oder der klügste Mensch im Raum sein?',
-  'Würdest du eher 1 Million heute oder 100.000 jeden Monat ein Jahr lang?',
-  'Würdest du eher nie wieder frieren oder nie wieder schwitzen?',
-  'Würdest du eher im Sommer Winterkleidung oder im Winter Sommerkleidung tragen?',
-  'Würdest du eher dauerhaft tanzen oder dauerhaft singen müssen?',
-  'Würdest du eher jede Sprache sprechen oder jedes Instrument spielen können?',
-  'Würdest du eher auf dem Mars oder auf dem Meeresgrund leben?',
-  'Würdest du eher Superkräfte ohne Kontrolle oder gar keine haben?',
-  'Würdest du eher immer barfuß oder immer mit Handschuhen leben?',
-];
-
-// „Ich hab noch nie…"
-const NHIE = [
-  'Ich hab noch nie eine ganze Nacht durchgemacht.',
-  'Ich hab noch nie ein Bußgeld bekommen.',
-  'Ich hab noch nie heimlich Essen von jemandem geklaut.',
-  'Ich hab noch nie verschlafen und einen wichtigen Termin verpasst.',
-  'Ich hab noch nie jemanden aus Versehen mit falschem Namen angesprochen.',
-  'Ich hab noch nie einen Film im Kino verschlafen.',
-  'Ich hab noch nie eine Lüge erzählt, um mich rauszureden.',
-  'Ich hab noch nie ein Karaoke-Mikrofon in der Hand gehabt.',
-  'Ich hab noch nie etwas zurückgegeben, das ich schon benutzt hatte.',
-  'Ich hab noch nie jemandem heimlich durch Social Media gestalkt.',
-  'Ich hab noch nie einen Wecker 5-mal auf Schlummern gestellt.',
-  'Ich hab noch nie in der Öffentlichkeit hingefallen.',
-  'Ich hab noch nie etwas gegoogelt, um in einer Diskussion recht zu haben.',
-  'Ich hab noch nie ein Geschenk weiterverschenkt.',
-  'Ich hab noch nie so getan, als hätte ich eine Nachricht nicht gesehen.',
-  'Ich hab noch nie beim Spielen geschummelt.',
-  'Ich hab noch nie meinen eigenen Namen falsch geschrieben.',
-  'Ich hab noch nie ein Lied komplett falsch mitgesungen.',
-  'Ich hab noch nie das letzte Stück Kuchen heimlich gegessen.',
-  'Ich hab noch nie aus Faulheit etwas Wichtiges aufgeschoben.',
-  'Ich hab noch nie jemandem versprochen zurückzurufen und es vergessen.',
-  'Ich hab noch nie eine Serie ohne meinen Partner heimlich weitergeschaut.',
-];
-
-// Tageshoroskop-Bausteine (zufällig kombiniert, seeded pro Zeichen + Tag)
-const HOROSKOP = {
-  mood: [
-    'Heute strahlst du pure Energie aus. ⚡', 'Ein ruhiger, ausgeglichener Tag erwartet dich. 🧘',
-    'Deine Laune steckt heute alle an. 😄', 'Sei achtsam – heute zählt das Bauchgefühl. 🌙',
-    'Ein Funke Abenteuerlust begleitet dich. 🔥', 'Heute ist Geduld dein bester Freund. 🌱',
-    'Kreativität sprudelt nur so aus dir heraus. 🎨', 'Ein Hauch Nostalgie liegt in der Luft. 🍂',
-  ],
-  love: [
-    'In der Liebe stehen die Sterne günstig. 💕', 'Ein altes Gefühl könnte wieder aufflammen. 🔥',
-    'Zeig deinen Liebsten, dass du sie schätzt. 🥰', 'Heute ist kein Tag für Liebesdrama – bleib locker. 😌',
-    'Ein nettes Kompliment öffnet heute Türen. 💌', 'Single? Halte die Augen offen. 👀',
-  ],
-  work: [
-    'Beruflich läuft heute vieles wie am Schnürchen. 💼', 'Ein Kollege braucht heute deine Hilfe. 🤝',
-    'Trau dich, deine Idee auszusprechen. 💡', 'Konzentration zahlt sich heute besonders aus. 🎯',
-    'Vermeide voreilige Entscheidungen im Job. ⏳', 'Eine kleine Pause bringt heute große Klarheit. ☕',
-  ],
-  luck: [
-    'Glückszahl des Tages: ', 'Deine Glücksfarbe heute: ', 'Heutiges Glückssymbol: ',
-  ],
-};
-
-const IQ_VERDICTS = [
-  'Einstein wäre neidisch! 🧠', 'Ziemlich schlau! 🤓', 'Solide Köpfchen! 👍',
-  'Geht doch! 🙂', 'Naja… es zählt der Charakter. 😅', 'Ähm… frag lieber Google. 🤡',
-];
-
 // Verfügbare Befehle (für Hilfe-Text und Pro-Gruppen-Schalter)
 // adminDefault: true → Standard "nur Admins" für neue Gruppen
 const COMMANDS = [
   // ---- Allgemein ----
   { key: 'hilfe',      desc: 'zeigt alle verfügbaren Befehle' },
-  { key: 'hilfespiel', desc: 'alle Spiel- & Wirtschaftsbefehle (nur in Spielgruppen)' },
   { key: 'ping',       desc: 'testet, ob der Bot reagiert' },
   { key: 'info',       desc: 'Bot-Status & Laufzeit' },
   { key: 'id',         desc: 'zeigt die Gruppen-ID' },
   { key: 'regeln',     desc: 'zeigt die Gruppenregeln' },
-  { key: 'zeit',       desc: 'aktuelle Uhrzeit & Datum' },
-  { key: 'würfel',     desc: 'würfelt eine Zahl (1–6)' },
   { key: 'gruppe',     desc: 'Infos zur Gruppe anzeigen' },
   { key: 'top',        desc: 'Top aktivste Mitglieder' },
   { key: 'stats',      desc: 'eigene oder fremde Aktivitäts-Statistik' },
@@ -538,46 +143,6 @@ const COMMANDS = [
   { key: 'addmode',    desc: 'wer darf Mitglieder hinzufügen (admin/all)', adminDefault: true },
   { key: 'slowmode',   desc: 'Slowmode setzen (Sekunden, off)', adminDefault: true },
   { key: 'remind',     desc: 'geplante Erinnerung mit Text', adminDefault: true },
-  // ---- Spiele & Spaß ----
-  { key: 'marry',      desc: 'heiraten oder Ehestatus anzeigen' },
-  { key: 'divorce',    desc: 'Ehe beenden 💔' },
-  { key: 'profil',     desc: 'Profilkarte anzeigen' },
-  { key: '8ball',      desc: 'Magic 8-Ball – Antwort auf deine Frage' },
-  { key: 'münze',      desc: 'wirft eine Münze – Kopf oder Zahl' },
-  { key: 'rps',        desc: 'Schere-Stein-Papier gegen den Bot' },
-  { key: 'joke',       desc: 'zufälliger Witz' },
-  { key: 'fakt',       desc: 'interessanter Fakt' },
-  { key: 'quote',      desc: 'Motivationszitat' },
-  { key: 'truth',      desc: 'Wahrheitsfrage (Wahrheit oder Pflicht)' },
-  { key: 'dare',       desc: 'Herausforderung (Wahrheit oder Pflicht)' },
-  { key: 'riddle',     desc: 'Rätsel stellen' },
-  { key: 'antwort',   desc: 'Antwort auf ein aktives Rätsel geben' },
-  { key: 'roulette',   desc: 'russisches Roulette – Glück oder Mute?' },
-  { key: 'ship',       desc: 'Kompatibilität zweier Personen anzeigen' },
-  { key: 'rate',       desc: 'etwas bewerten lassen (0–10)' },
-  { key: 'choose',     desc: 'zufällige Entscheidung zwischen Optionen' },
-  { key: 'number',     desc: 'zufällige Zahl in einem Bereich' },
-  { key: 'calc',       desc: 'mathematischen Ausdruck berechnen' },
-  { key: 'reverse',    desc: 'Text umkehren' },
-  { key: 'timer',      desc: 'Countdown starten (max. 60 Min.)' },
-  { key: 'poll',       desc: 'Abstimmung starten' },
-  { key: 'quiz',       desc: 'Quizfrage – mit !antwort lösen' },
-  { key: 'would',      desc: 'Würdest du eher…?' },
-  { key: 'nhie',       desc: 'Ich hab noch nie…' },
-  { key: 'mostlikely', desc: 'Wer am ehesten…? (zufälliges Mitglied)' },
-  { key: 'iq',         desc: 'IQ-Test (just for fun) 🧠' },
-  { key: 'simp',       desc: 'Simp-Meter 😍' },
-  { key: 'vibe',       desc: 'Vibe-Check ✨' },
-  { key: 'mock',       desc: 'tExT vErSpOtTeN' },
-  { key: 'emojify',    desc: 'Text in Emoji-Buchstaben' },
-  { key: 'roll',       desc: 'Würfel-Roller, z. B. 2d6 🎲' },
-  { key: 'horoskop',   desc: 'Tageshoroskop für dein Sternzeichen ♈' },
-  // ---- Soziale Aktionen ----
-  { key: 'kiss',       desc: 'jemanden küssen 💋' },
-  { key: 'hug',        desc: 'jemanden umarmen 🤗' },
-  { key: 'slap',       desc: 'jemanden (spaßhaft) ohrfeigen 👋' },
-  { key: 'poke',       desc: 'jemanden anstupsen 👉' },
-  { key: 'compliment', desc: 'jemandem ein Kompliment machen 🌟' },
   // ---- Sonstiges ----
   { key: 'melden',     desc: 'Meldung an die Admins schicken' },
 ];
@@ -585,19 +150,10 @@ const COMMANDS = [
 // Alias -> kanonischer Befehl
 const ALIAS = {
   help: 'hilfe', menu: 'hilfe', status: 'info', echo: 'sag', tagall: 'alle',
-  dice: 'würfel', wuerfel: 'würfel',
-  heiraten: 'marry', scheidung: 'divorce',
-  coin: 'münze', muenze: 'münze',
   report: 'melden',
-  witz: 'joke', fakt2: 'fakt', zitat: 'quote',
-  rechner: 'calc', kalkulator: 'calc',
-  umkehren: 'reverse',
-  abstimmung: 'poll',
-  profil2: 'profil',
   sperren: 'lock', entsperren: 'unlock',
   loeschen: 'del', löschen: 'del', delete: 'del',
   erinnerung: 'remind', erinnere: 'remind',
-  würfeln: 'roll',
   ckick: 'communitykick', comban: 'communitykick', communityban: 'communitykick', nuke: 'communitykick',
   cunban: 'communityunban', cbanlist: 'communitybanlist',
 };
@@ -622,12 +178,9 @@ const botState = {
   lastConnectedAt: 0,  // Zeitpunkt der letzten erfolgreichen Verbindung
   powered: true,       // Bot-Hauptschalter (per Website steuerbar). false = pausiert.
   paused: false,       // intern: true während /power off (kein Auto-Reconnect)
-  gamesReady: false,   // true wenn Wirtschaft/Spiele (Turso) aktiv sind
 };
 
-// In-Memory-Maps für laufende Spiele
-const activeRiddles = new Map(); // `${groupJid}:${senderJid}` -> { riddle, expiresAt }
-const activeTimers  = new Map(); // timerId -> { groupJid, senderJid, label }
+// In-Memory-Maps
 const slowmodeLast  = new Map(); // `${groupJid}:${senderJid}` -> timestamp letzter Nachricht
 let _persistTimer   = null;      // Debounced-persist Handle
 
@@ -662,7 +215,6 @@ function defaultGroupConfig() {
     welcome: { enabled: false, message: null },
     memberStats: {},   // { [senderNum]: { messages, commands, warnings, lastSeen } }
     banLog: [],        // [{ num, bannedBy, reason, at }] max 500
-    marriages: {},
   };
 }
 // Migriert legacy-boolean-Werte auf neue String-Werte ('all'|'admin'|false).
@@ -686,7 +238,6 @@ function effectiveGroupConfig(jid) {
     active: g.active !== false,
     commands,
     moderation: { ...d.moderation, ...(g.moderation || {}) },
-    marriages: g.marriages || {},
     rules: g.rules || null,
     welcome: { enabled: false, message: null, ...(g.welcome || {}) },
     memberStats: g.memberStats || {},
@@ -799,20 +350,6 @@ function formatDuration(ms) {
   return `${s}s`;
 }
 
-function safeCalc(expr) {
-  const clean = expr.replace(/\s+/g, '').replace(/\*\*/g, '^');
-  if (!/^[\d+\-*/^().]+$/.test(clean)) return null;
-  const sanitized = clean.replace(/\^/g, '**');
-  try {
-    // eslint-disable-next-line no-new-func
-    const result = Function('"use strict"; return (' + sanitized + ')')();
-    if (typeof result !== 'number' || !isFinite(result)) return null;
-    return parseFloat(result.toPrecision(10));
-  } catch {
-    return null;
-  }
-}
-
 // ---------- DM-Assistent (Privatnachrichten) ----------
 // Standardmäßig aus. Wenn aktiv, nimmt der Bot per Privatchat Anliegen entgegen
 // (Nachricht muss mit dem Befehlspräfix beginnen).
@@ -863,32 +400,6 @@ async function handleDmAssistant(sock, jid, text, msg) {
     ? `\n\n(Erkannt in: ${[...communitySet].join(', ')})`
     : sharedGroups.length ? `\n\n(Gemeinsame Gruppen: ${sharedGroups.join(', ')})` : '';
   await reply(`✅ Danke! Dein Anliegen wurde aufgenommen und an die Admins weitergeleitet.${ctxInfo}`);
-}
-
-// ---------- Ehe-Helfer ----------
-const proposals = new Map(); // `${groupJid}:${targetJid}` → { proposerJid, expiresAt }
-
-function marriageKey(jid1, jid2) {
-  return [jid1, jid2].map((j) => j.split('@')[0]).sort().join('-');
-}
-function findMarriage(groupJid, personJid) {
-  const marriages = config.groups[groupJid]?.marriages || {};
-  for (const [key, m] of Object.entries(marriages)) {
-    if (m.p1 === personJid || m.p2 === personJid) return { key, ...m };
-  }
-  return null;
-}
-function happinessStatus(since) {
-  const days = (Date.now() - since) / (1000 * 60 * 60 * 24);
-  const seed = since % 100;
-  const base = Math.min(100, 60 + days * 0.5 + (seed % 20));
-  const wobble = ((seed * 7 + Math.floor(days) * 3) % 20) - 10;
-  const pct = Math.round(Math.max(20, Math.min(100, base + wobble)));
-  if (pct >= 90) return `${pct}% \u{1F48D} unzertrennlich`;
-  if (pct >= 70) return `${pct}% \u{1F60D} sehr glücklich`;
-  if (pct >= 50) return `${pct}% \u{1F642} ganz gut`;
-  if (pct >= 35) return `${pct}% \u{1F610} läuft so`;
-  return `${pct}% \u{1F624} angespannt`;
 }
 
 function getTargetJid(msg) {
@@ -1293,7 +804,6 @@ function navBar(active = '') {
       ['anliegen', '📨', 'Anliegen'],
     ]],
     ['Statistiken', [
-      ['statistik', '📈', 'Statistik'],
       ['server', '🖥️', 'Server'],
     ]],
     ['Verbindung', [
@@ -1379,7 +889,6 @@ app.get('/healthz', (_req, res) => {
     ok: true,
     powered: botState.powered,
     connected: botState.connected,
-    gamesReady: botState.gamesReady,
     uptime: Math.round((Date.now() - botState.startedAt) / 1000),
   });
 });
@@ -1669,9 +1178,6 @@ app.get('/group', async (req, res) => {
   const gc = effectiveGroupConfig(id);
   const saved = req.query.saved ? '<p class="muted">✅ Gespeichert.</p>' : '';
   const chk = (b) => (b ? 'checked' : '');
-  const gameOn = !!(config.gameGroups && config.gameGroups[id]);
-  let gamesReady = false;
-  try { gamesReady = gameLayer.isReady(); } catch (_) { gamesReady = false; }
 
   function cmdSelect(key) {
     const val = gc.commands[key];
@@ -1734,13 +1240,6 @@ app.get('/group', async (req, res) => {
         <textarea class="input" name="welcome_message" placeholder="Willkommen @{user} in der Gruppe! 🎉">${escapeHtml(gc.welcome.message || '')}</textarea>
       </div>
       <div class="card">
-        <h2>🎮 Spiele & Wirtschaft</h2>
-        <p class="muted">Schaltet das komplette Spiel-/RPG- und Wirtschaftssystem (Arena, Farm, Casino, Berufe, Quests …) <b>nur für diese Gruppe</b> frei. Entspricht dem Befehl <b>${COMMAND_PREFIX}spielgruppe an</b>.</p>
-        ${gamesReady ? '' : '<p class="muted">⚠️ Die Spiele-Datenbank ist serverseitig nicht aktiv. Der Schalter wird gespeichert, wirkt aber erst, sobald die Spiele-Datenbank (Turso) verbunden ist.</p>'}
-        <label class="opt"><span>🎮 Spiele in dieser Gruppe <b>freigeschaltet</b></span>
-          <input type="checkbox" name="gameGroup" ${chk(gameOn)}></label>
-      </div>
-      <div class="card">
         <h2>📋 Gruppenregeln</h2>
         <p class="muted">Diese Regeln werden mit !regeln angezeigt. Leer lassen = Standardregeln.</p>
         <textarea class="input" name="rules" placeholder="1. Sei respektvoll…" style="min-height:100px">${escapeHtml(gc.rules || '')}</textarea>
@@ -1766,7 +1265,7 @@ app.post('/group/save', async (req, res) => {
   const welcomeMsg = String(req.body.welcome_message || '').trim() || null;
   const rulesText = String(req.body.rules || '').trim() || null;
 
-  // Bestehende Felder bewahren (marriages, moderation._state)
+  // Bestehende Felder bewahren (moderation._state)
   const existing = config.groups[id] || {};
   config.groups[id] = {
     ...existing,
@@ -1786,12 +1285,8 @@ app.post('/group/save', async (req, res) => {
     },
     rules: rulesText,
   };
-  // Spielmodus pro Gruppe (separat in config.gameGroups gespeichert)
-  if (!config.gameGroups) config.gameGroups = {};
-  if (req.body.gameGroup !== undefined) config.gameGroups[id] = true;
-  else delete config.gameGroups[id];
   await persist();
-  logger.info({ group: id, active: config.groups[id].active, games: !!config.gameGroups[id] }, 'Gruppen-Konfiguration gespeichert');
+  logger.info({ group: id, active: config.groups[id].active }, 'Gruppen-Konfiguration gespeichert');
   res.redirect(`/group?id=${encodeURIComponent(id)}&saved=1`);
 });
 
@@ -1984,11 +1479,8 @@ app.get('/community/settings', async (req, res) => {
   // Aktuellen Stand aus den Gruppen ableiten (Vorbelegung des Formulars)
   const cfgs = grps.map((g) => effectiveGroupConfig(g.id));
   const everyActive = grps.length > 0 && cfgs.every((c) => c.active);
-  const everyGame = grps.length > 0 && grps.every((g) => !!(config.gameGroups && config.gameGroups[g.id]));
   const ref = cfgs[0] || effectiveGroupConfig('__none__');
   const mod = ref.moderation || {};
-  let gamesReady = false;
-  try { gamesReady = gameLayer.isReady(); } catch (_) { gamesReady = false; }
 
   res.send(page(`Einstellungen – ${community.name}`, `
     ${navBar('community')}
@@ -2004,13 +1496,6 @@ app.get('/community/settings', async (req, res) => {
         <h2>Status</h2>
         <label class="opt"><span>Bot in allen Gruppen <b>aktiv</b></span>
           <input type="checkbox" name="active" ${chk(everyActive)}></label>
-      </div>
-      <div class="card">
-        <h2>🎮 Spiele & Wirtschaft</h2>
-        <p class="muted">Schaltet das komplette Spiel-/RPG- und Wirtschaftssystem in allen Gruppen dieser Community frei.</p>
-        ${gamesReady ? '' : '<p class="muted">⚠️ Die Spiele-Datenbank ist serverseitig nicht aktiv. Der Schalter wird gespeichert, wirkt aber erst, sobald die Spiele-Datenbank (Turso) verbunden ist.</p>'}
-        <label class="opt"><span>🎮 Spiele in allen Gruppen <b>freigeschaltet</b></span>
-          <input type="checkbox" name="gameGroup" ${chk(everyGame)}></label>
       </div>
       <div class="card">
         <h2>Moderation</h2>
@@ -2058,7 +1543,6 @@ app.post('/community/settings/save', async (req, res) => {
 
   const b = req.body;
   const active = b.active !== undefined;
-  const gameOn = b.gameGroup !== undefined;
   const extra = String(b.extraBadwords || '').split(',').map((s) => s.trim()).filter(Boolean);
   const warnLimit = Math.min(10, Math.max(1, Number(b.warnLimit) || 3));
   const slowmode = Math.min(3600, Math.max(0, Number(b.slowmode) || 0));
@@ -2066,7 +1550,6 @@ app.post('/community/settings/save', async (req, res) => {
   const welcomeMsg = String(b.welcome_message || '').trim() || null;
   const rulesText = String(b.rules || '').trim() || null;
 
-  if (!config.gameGroups) config.gameGroups = {};
   for (const g of community.groups) {
     const existing = config.groups[g.id] || defaultGroupConfig();
     config.groups[g.id] = {
@@ -2081,11 +1564,9 @@ app.post('/community/settings/save', async (req, res) => {
       welcome: { enabled: welcomeEnabled, message: welcomeMsg },
       rules: rulesText,
     };
-    if (gameOn) config.gameGroups[g.id] = true;
-    else delete config.gameGroups[g.id];
   }
   await persist();
-  logger.info({ parent, groups: community.groups.length, active, games: gameOn }, 'Community-Einstellungen auf alle Gruppen angewendet');
+  logger.info({ parent, groups: community.groups.length, active }, 'Community-Einstellungen auf alle Gruppen angewendet');
 
   // Optionale Ankündigung an aktive Gruppen dieser Community
   const announcement = String(b.announcement || '').trim();
@@ -2141,10 +1622,6 @@ app.get('/community/global', async (req, res) => {
         <label style="margin-top:10px;display:block">Slowmode (Sekunden, 0=aus)<br><input type="number" name="slowmode" min="0" max="300" value="${mod.slowmode || 0}" style="width:80px;margin-top:4px"></label>
       </div>
       <div class="card">
-        <h2>🎮 Spielmodus</h2>
-        ${toggleRow('gameEnabled', 'Spiele in allen Gruppen', gs.gameEnabled, 'Aktiviert/deaktiviert das Spielmodul global')}
-      </div>
-      <div class="card">
         <h2>📢 Globale Ankündigung</h2>
         <p class="muted">Diese Nachricht wird <b>einmalig</b> beim Speichern an alle aktiven Gruppen gesendet. Leer lassen, um nichts zu senden.</p>
         <textarea name="announcement" rows="3" style="width:100%" placeholder="Nachricht an alle Gruppen …"></textarea>
@@ -2174,7 +1651,6 @@ app.post('/community/global/save', async (req, res) => {
       warnLimit: Math.min(10, Math.max(1, Number(b.warnLimit) || 3)),
       slowmode: Math.min(300, Math.max(0, Number(b.slowmode) || 0)),
     },
-    gameEnabled: b.gameEnabled === '1',
     announcement: String(b.announcement || '').slice(0, 1000),
   };
   config.globalSettings = gs;
@@ -2191,12 +1667,6 @@ app.post('/community/global/save', async (req, res) => {
       grp.moderation.links = gs.moderation.links;
       grp.moderation.warnLimit = gs.moderation.warnLimit;
       grp.moderation.slowmode = gs.moderation.slowmode;
-      if (gs.gameEnabled && gameLayer.isReady()) {
-        if (!config.gameGroups) config.gameGroups = {};
-        config.gameGroups[gid] = true;
-      } else if (!gs.gameEnabled) {
-        if (config.gameGroups) delete config.gameGroups[gid];
-      }
       synced++;
     }
     logger.info({ synced }, 'Global-Sync: alle Gruppen synchronisiert');
@@ -2277,7 +1747,6 @@ app.get('/lookup', async (req, res) => {
     const stats = getMemberStats(g.id, num);
     const warn = moderation.getWarnings(g.id, targetJid);
     const muteLeft = moderation.getMuteTimeLeft(g.id, targetJid);
-    const marriage = findMarriage(g.id, targetJid);
     const gc = effectiveGroupConfig(g.id);
     totalMsg += stats.messages || 0;
     totalCmd += stats.commands || 0;
@@ -2286,9 +1755,6 @@ app.get('/lookup', async (req, res) => {
     const roleTag = member.admin === 'superadmin' ? '<span class="tag tag-creator">👑 Ersteller</span>'
       : member.admin ? '<span class="tag tag-admin">🛡️ Admin</span>' : '';
     const statusTag = muteLeft > 0 ? `<span class="chip off">🔇 ${formatDuration(muteLeft)}</span>` : '<span class="chip on">● aktiv</span>';
-    const marriageLine = marriage
-      ? `<p class="muted">💍 verheiratet mit ${escapeHtml((marriage.p1 === targetJid ? marriage.p2 : marriage.p1).split('@')[0])} · ${happinessStatus(marriage.since)}</p>`
-      : '';
 
     groupCards.push(`
       <div class="card">
@@ -2302,7 +1768,6 @@ app.get('/lookup', async (req, res) => {
           <div class="stat"><div class="k">Befehle</div><div class="v">${stats.commands || 0}</div></div>
           <div class="stat"><div class="k">Verwarnungen</div><div class="v">${warn.count || 0}</div></div>
         </div>
-        ${marriageLine}
         <div class="row" style="margin-top:10px;gap:6px;justify-content:flex-start">
           <a href="/member?jid=${encodeURIComponent(targetJid)}&group=${encodeURIComponent(g.id)}" class="action-btn btn-blue">📋 Profil</a>
           <form method="POST" action="/member/action" style="display:inline" onsubmit="return confirm('Wirklich muten?')">
@@ -2352,16 +1817,7 @@ app.get('/member', async (req, res) => {
   const warnings = moderation.getWarnings(groupJid, targetJid);
   const muted = moderation.isMutedUser(groupJid, targetJid);
   const muteLeft = moderation.getMuteTimeLeft(groupJid, targetJid);
-  const marriage = findMarriage(groupJid, targetJid);
   const banLog = (gc.banLog || []).filter((b) => b.num === num).slice(-5).reverse();
-
-  const partnerHtml = marriage
-    ? (() => {
-        const partnerJid = marriage.p1 === targetJid ? marriage.p2 : marriage.p1;
-        const days = Math.floor((Date.now() - marriage.since) / 86400000);
-        return `<p>💍 Verheiratet mit <b>${escapeHtml(partnerJid.split('@')[0])}</b> seit ${days} Tag(en) · ${happinessStatus(marriage.since)}</p>`;
-      })()
-    : '<p class="muted">Nicht verheiratet</p>';
 
   const banRows = banLog.map((b) =>
     `<tr><td>${new Date(b.at).toLocaleString('de-DE')}</td><td>${escapeHtml(b.bannedBy || '–')}</td><td>${escapeHtml(b.reason || '–')}</td></tr>`
@@ -2411,10 +1867,6 @@ app.get('/member', async (req, res) => {
       <h2>⚠️ Verwarnungen (${warnings.count || 0})</h2>
       ${warnReasons}
       <div class="row" style="margin-top:12px;gap:6px;justify-content:flex-start;flex-wrap:wrap">${warnActions}</div>
-    </div>
-    <div class="card">
-      <h2>💍 Ehe</h2>
-      ${partnerHtml}
     </div>
     <div class="card">
       <h2>🚫 Ban-Verlauf</h2>
@@ -2750,10 +2202,7 @@ app.get('/befehle', (req, res) => {
 
   // Kategorien in Anzeige-Reihenfolge mit Icons
   const CATEGORY_ICONS = {
-    'Allgemein': '📋', 'Moderation': '🛡️', 'Spaß': '🎮', 'Sozial': '💞',
-    'Wirtschaft': '💰', 'Bank': '🏦', 'Casino': '🎰', 'Shop': '🛒',
-    'Quests': '📜', 'Gilde': '⚔️', 'Welt': '🌍', 'Berufe': '🔧',
-    'Arena': '🏟️', 'Profil': '👤', 'Farm': '🌾', 'Admin': '🔑',
+    'Allgemein': '📋', 'Moderation': '🛡️',
   };
   const CATEGORY_ORDER = Object.keys(CATEGORY_ICONS);
   const sortedCats = [...new Set(COMMAND_CATALOG.map((c) => c.category))]
@@ -2792,17 +2241,12 @@ app.get('/befehle', (req, res) => {
     </details>`;
   };
 
-  const gameNote = '<div class="muted" style="font-size:.82rem;margin-bottom:8px">🎮 Spiel-Befehle nur in Gruppen mit aktiviertem Spielmodus (<code>!spielgruppe an</code>).</div>';
-  const GAME_CATS = new Set(['Wirtschaft','Casino','Shop','Quests','Gilde','Welt','Berufe','Arena','Profil','Farm']);
-
   const sections = sortedCats.map((cat) => {
     const entries = COMMAND_CATALOG.filter((c) => c.category === cat);
     if (!entries.length) return '';
     const icon = CATEGORY_ICONS[cat] || '•';
-    const note = GAME_CATS.has(cat) ? gameNote : '';
     return `<div class="card cmd-section" data-cat-section="${escapeHtml(cat)}">
       <h2>${icon} ${escapeHtml(cat)} <span class="muted" style="font-size:.82rem">(${entries.length})</span></h2>
-      ${note}
       ${entries.map(renderCmdCard).join('')}
     </div>`;
   }).join('');
@@ -2868,7 +2312,7 @@ app.get('/api/stats', (req, res) => {
     disk = { free: st.bfree * st.bsize, total: st.blocks * st.bsize };
   } catch (_) {}
   res.json({
-    connected: botState.connected, powered: botState.powered, gamesReady: botState.gamesReady,
+    connected: botState.connected, powered: botState.powered,
     upS, nummer: botState.me ? botState.me.id.split(':')[0] : null,
     commandCount: botState.commandCount, modTotal: botState.moderation.actionsTotal,
     activeGroups: activeGroupCount(), totalGroups: getGroupsCached().length,
@@ -2902,7 +2346,6 @@ app.get('/dashboard', (req, res) => {
     <div class="card">
       <div class="row"><h1>📊 Dashboard</h1><span class="status" id="connStatus">…</span></div>
       <p class="muted">Live-Daten · aktualisiert alle 5 s &ensp;<span id="lastUpdate" class="muted"></span></p>
-      <p class="muted" style="margin-top:4px">🎮 Wirtschaft/Spiele: ${botState.gamesReady ? '<b style="color:var(--good)">aktiv</b> (Turso)' : 'inaktiv (keine Turso-DB)'}</p>
     </div>
     <div class="card">
       <div class="stats" id="statsGrid">
@@ -2933,7 +2376,6 @@ app.get('/dashboard', (req, res) => {
       <a href="/anliegen">📨 Anliegen</a>
       <a href="/banlog">🚫 Ban-Log</a>
       <a href="/activity">📡 Aktivität</a>
-      <a href="/statistik">📈 Statistik</a>
       <a href="/server">🖥️ Server</a>
     </div>`,
     { script: `<script>
@@ -2970,73 +2412,6 @@ app.get('/dashboard', (req, res) => {
       update(); setInterval(update,5000);
     </script>` }
   ));
-});
-
-// ── Statistik-Seite (Leaderboards) ──────────────────────────────────
-app.get('/statistik', async (req, res) => {
-  res.set('Cache-Control', 'no-store');
-  if (!requireAuth(req, res)) return;
-
-  let lbHtml = '';
-  if (!botState.gamesReady) {
-    lbHtml = '<div class="card"><p class="muted">🎮 Spiele sind nicht aktiv (keine Turso-DB konfiguriert). Leaderboards nicht verfügbar.</p></div>';
-  } else {
-    const mgrs = gameLayer.mgrs;
-    const safe = async (label, fn) => {
-      try { return await fn(); } catch (_) { return null; }
-    };
-    const fmtRow = (i, userId, a, b, c) => {
-      const medals = ['🥇','🥈','🥉'];
-      const rank = i < 3 ? medals[i] : `#${i+1}`;
-      const num = String(userId || '').replace(/@.*/,'');
-      return `<tr><td>${rank}</td><td><code style="font-size:.82rem">${escapeHtml(num)}</code></td><td>${escapeHtml(String(a||0))}</td><td>${escapeHtml(String(b||0))}</td><td>${escapeHtml(String(c||''))}</td></tr>`;
-    };
-
-    const sections = [];
-
-    const wealth = await safe('wealth', () => mgrs.economy && mgrs.economy.getLeaderboard ? mgrs.economy.getLeaderboard('wealth') : null);
-    if (wealth && wealth.length) {
-      sections.push(`<div class="card"><h2>💰 Reichste Spieler</h2><table><thead><tr><th>#</th><th>Nummer</th><th>Coins</th><th>Level</th><th>Prestige</th></tr></thead><tbody>
-        ${wealth.map((r,i) => fmtRow(i, r.userId||r.user_id, r.balance||r.wealth||0, r.level||0, r.prestige||0)).join('')}
-      </tbody></table></div>`);
-    }
-
-    const arena = await safe('arena', () => mgrs.arena && mgrs.arena.getLeaderboard ? mgrs.arena.getLeaderboard() : null);
-    if (arena && arena.length) {
-      sections.push(`<div class="card"><h2>🏟️ Arena-Rangliste</h2><table><thead><tr><th>#</th><th>Nummer</th><th>Siege</th><th>Niederlagen</th><th>Titel</th></tr></thead><tbody>
-        ${arena.map((r,i) => fmtRow(i, r.userId||r.user_id, r.wins||0, r.losses||0, (r.emoji||'')+(r.title||''))).join('')}
-      </tbody></table></div>`);
-    }
-
-    const rep = await safe('rep', () => mgrs.social && mgrs.social.getTopRep ? mgrs.social.getTopRep() : null);
-    if (rep && rep.length) {
-      sections.push(`<div class="card"><h2>⭐ Ruf-Rangliste</h2><table><thead><tr><th>#</th><th>Nummer</th><th>Ruf</th><th>Titel</th><th></th></tr></thead><tbody>
-        ${rep.map((r,i) => fmtRow(i, r.userId||r.user_id, r.rep||r.reputation||0, (r.emoji||'')+(r.title||''), '')).join('')}
-      </tbody></table></div>`);
-    }
-
-    const world = await safe('world', () => mgrs.world && mgrs.world.getWorldLeaderboard ? mgrs.world.getWorldLeaderboard() : null);
-    if (world && world.length) {
-      sections.push(`<div class="card"><h2>🌍 Weltrangliste</h2><table><thead><tr><th>#</th><th>Nummer</th><th>Kills</th><th>Region</th><th></th></tr></thead><tbody>
-        ${world.map((r,i) => fmtRow(i, r.userId||r.user_id, r.kills||r.totalKills||0, r.region||'–', '')).join('')}
-      </tbody></table></div>`);
-    }
-
-    if (!sections.length) {
-      lbHtml = '<div class="card"><p class="muted">Noch keine Spielerdaten vorhanden. Sobald Spieler aktiv sind, erscheinen hier die Ranglisten.</p></div>';
-    } else {
-      lbHtml = sections.join('');
-    }
-  }
-
-  res.send(page('Statistik', `
-    ${navBar('statistik')}
-    <div class="card">
-      <h1>📈 Spieler-Statistiken</h1>
-      <p class="muted">Leaderboards aus dem Spielsystem — aktueller Stand${botState.gamesReady ? '' : ' (Spiele inaktiv)'}.</p>
-    </div>
-    ${lbHtml}
-  `));
 });
 
 // ── Server-Metriken ──────────────────────────────────────────────────
@@ -3098,7 +2473,6 @@ app.get('/server', (req, res) => {
     </div>
     <div class="card row" style="gap:10px;flex-wrap:wrap">
       <a href="/dashboard">📊 Dashboard</a>
-      <a href="/statistik">📈 Spieler-Statistiken</a>
     </div>
   `));
 });
@@ -3127,10 +2501,6 @@ if (SELF_URL) {
   logger.warn('SELF_URL nicht gesetzt – Bot kann auf Render einschlafen! Setze SELF_URL oder nutze einen externen Monitor auf /healthz.');
 }
 
-// ---------- Turso-Heartbeat: hält die DB-Verbindung warm ----------
-setInterval(() => {
-  if (botState.gamesReady) gameLayer.heartbeat().catch(() => {});
-}, 5 * 60 * 1000).unref?.();
 
 // ---------- Gruppen & Metadaten ----------
 async function refreshGroups(force = false) {
@@ -3406,29 +2776,6 @@ async function startBot() {
           }
         }
 
-        // 2a) Heiratsbestätigung prüfen (vor Befehl-Check)
-        if (text.trim().toLowerCase() === 'ja') {
-          const proposalKey = `${jid}:${senderJid}`;
-          const proposal = proposals.get(proposalKey);
-          if (proposal && Date.now() < proposal.expiresAt) {
-            proposals.delete(proposalKey);
-            if (findMarriage(jid, senderJid) || findMarriage(jid, proposal.proposerJid)) {
-              await sock.sendMessage(jid, { text: 'Eine der Personen ist bereits verheiratet! \u{1F494}' });
-            } else {
-              const key = marriageKey(senderJid, proposal.proposerJid);
-              if (!config.groups[jid]) config.groups[jid] = defaultGroupConfig();
-              if (!config.groups[jid].marriages) config.groups[jid].marriages = {};
-              config.groups[jid].marriages[key] = { p1: senderJid, p2: proposal.proposerJid, since: Date.now() };
-              await persist();
-              const n1 = senderJid.split('@')[0], n2 = proposal.proposerJid.split('@')[0];
-              await sock.sendMessage(jid, {
-                text: `\u{1F48D} @${n2} und @${n1} sind jetzt verheiratet! Herzlichen Glückwunsch! \u{1F38A}`,
-                mentions: [senderJid, proposal.proposerJid],
-              });
-            }
-            continue;
-          }
-        }
 
         // 2b) Befehle
         if (!text.startsWith(COMMAND_PREFIX)) continue;
@@ -3447,27 +2794,6 @@ async function startBot() {
 
         const reply = (t) => sock.sendMessage(jid, { text: t }, { quoted: msg });
         let handled = true;
-
-        // Spiel-/Wirtschaftsbefehle (eigenständiges Modul, hinter Inhaber-Schalter).
-        // Fehler werden im Modul gefangen – ein Spielbefehl kann den Bot nie crashen.
-        // Kollidierende Befehle (z. B. das Russisch-Roulette-Spaßspiel) übernimmt das
-        // Spielmodul NUR in freigeschalteten Spielgruppen; sonst bleibt der alte Befehl.
-        if (gameLayer.owns(cmd) && (!gameLayer.collides(cmd) || gameLayer.isGameGroup(config, jid))) {
-          const did = await gameLayer.handle({
-            cmd, args, sock, jid, msg, senderJid, senderNum, reply,
-            config, persist, isCommunityOwner, getTargetJid, COMMAND_PREFIX,
-          });
-          if (did) {
-            botState.commandCount++;
-            botState.lastCommand = { cmd: COMMAND_PREFIX + cmd, at: Date.now() };
-            continue;
-          }
-        }
-        if (cmd === 'hilfespiel' || cmd === 'spielhilfe') {
-          await reply(gameLayer.gameHelp(COMMAND_PREFIX));
-          botState.commandCount++;
-          continue;
-        }
 
         switch (cmd) {
           case 'hilfe': {
@@ -3504,12 +2830,6 @@ async function startBot() {
           case 'sag':
             await reply(args.length ? args.join(' ') : `Nutzung: ${COMMAND_PREFIX}sag <Text>`);
             break;
-          case 'zeit':
-            await reply(`🕒 ${new Date().toLocaleString('de-DE', { timeZone: 'Europe/Berlin' })}`);
-            break;
-          case 'würfel':
-            await reply(`🎲 Du würfelst eine *${Math.floor(Math.random() * 6) + 1}*`);
-            break;
           case 'gruppe': {
             const meta = await getGroupMeta(jid);
             const botJid = jidNormalizedUser(botState.me?.id || '');
@@ -3526,75 +2846,6 @@ async function startBot() {
               text: '📢 *Sammelruf*\n' + mentions.map((m) => '@' + m.split('@')[0]).join(' '),
               mentions,
             });
-            break;
-          }
-          case 'marry': {
-            const target = getTargetJid(msg);
-            if (!target) {
-              const m = findMarriage(jid, senderJid);
-              if (!m) {
-                await reply(`Du bist nicht verheiratet. \u{1F48C} Schreib ${COMMAND_PREFIX}marry @person um einen Antrag zu machen.`);
-              } else {
-                const partner = m.p1 === senderJid ? m.p2 : m.p1;
-                const days = Math.floor((Date.now() - m.since) / 86400000);
-                const pNum = partner.split('@')[0];
-                await sock.sendMessage(jid, {
-                  text: `\u{1F48D} Du bist seit ${days} Tag(en) mit @${pNum} verheiratet.\nGlück: ${happinessStatus(m.since)}`,
-                  mentions: [partner],
-                }, { quoted: msg });
-              }
-              break;
-            }
-            if (target === senderJid) { await reply('Du kannst dich nicht selbst heiraten! 😅'); break; }
-            const botJidM = jidNormalizedUser(botState.me?.id || '');
-            if (jidNormalizedUser(target) === botJidM) { await reply('Danke für den Antrag, aber ich bin nur ein Bot! 🤖'); break; }
-            if (findMarriage(jid, senderJid)) { await reply('Du bist bereits verheiratet! \u{1F48D}'); break; }
-            if (findMarriage(jid, target)) {
-              await sock.sendMessage(jid, {
-                text: `@${target.split('@')[0]} ist bereits verheiratet! \u{1F494}`,
-                mentions: [target],
-              }, { quoted: msg });
-              break;
-            }
-            proposals.set(`${jid}:${target}`, { proposerJid: senderJid, targetJid: target, expiresAt: Date.now() + 5 * 60 * 1000 });
-            const sNum2 = senderJid.split('@')[0], tNum2 = target.split('@')[0];
-            await sock.sendMessage(jid, {
-              text: `\u{1F48C} @${sNum2} macht @${tNum2} einen Heiratsantrag! \u{1F48D}\n@${tNum2}, antworte mit *ja* um anzunehmen (5 Minuten Zeit).`,
-              mentions: [senderJid, target],
-            });
-            break;
-          }
-          case '8ball': {
-            const BALL_ANSWERS = [
-              'Ja, definitiv! ✅', 'Absolut! 🎯', 'Sehr wahrscheinlich 👍',
-              'Die Zeichen sagen ja ✨', 'Ohne Zweifel! 💯', 'Du kannst darauf zählen 🎱',
-              'Ungewiss – frag später nochmal 🤔', 'Besser nicht zu sagen 🌫️',
-              'Schwer zu sagen 😶', 'Eher nicht ❌', 'Sehr zweifelhaft 🙅',
-              'Auf keinen Fall! 🚫',
-            ];
-            const q = args.join(' ').trim();
-            if (!q) { await reply(`Stell eine Frage! z.B. ${COMMAND_PREFIX}8ball Wird es heute regnen?`); break; }
-            await reply(`🎱 *${BALL_ANSWERS[Math.floor(Math.random() * BALL_ANSWERS.length)]}*`);
-            break;
-          }
-          case 'münze':
-            await reply(Math.random() < 0.5 ? '🪙 *Kopf!*' : '🪙 *Zahl!*');
-            break;
-          case 'rps': {
-            const RPS_CHOICES = ['stein', 'schere', 'papier'];
-            const RPS_EMOJI = { stein: '🪨', schere: '✂️', papier: '📄' };
-            const RPS_BEATS = { stein: 'schere', schere: 'papier', papier: 'stein' };
-            const userPick = args[0]?.toLowerCase();
-            if (!RPS_CHOICES.includes(userPick)) {
-              await reply(`Wähle: stein, schere oder papier.\nBeispiel: ${COMMAND_PREFIX}rps stein`);
-              break;
-            }
-            const botPick = RPS_CHOICES[Math.floor(Math.random() * 3)];
-            let rpsResult;
-            if (userPick === botPick) rpsResult = 'Unentschieden! 🤝';
-            else if (RPS_BEATS[userPick] === botPick) rpsResult = 'Du gewinnst! 🎉';
-            else rpsResult = 'Ich gewinne! 🤖';
-            await reply(`${RPS_EMOJI[userPick]} vs ${RPS_EMOJI[botPick]} – *${rpsResult}*`);
             break;
           }
           case 'melden': {
@@ -4050,306 +3301,11 @@ async function startBot() {
             const targetNum2 = _statsTarget ? _statsTarget.split('@')[0] : senderNum;
             const s2 = getMemberStats(jid, targetNum2);
             const w2 = moderation.getWarnings(jid, `${targetNum2}@s.whatsapp.net`);
-            const mar2 = findMarriage(jid, `${targetNum2}@s.whatsapp.net`);
             const lastSeen2 = s2.lastSeen ? new Date(s2.lastSeen).toLocaleString('de-DE') : 'unbekannt';
-            await reply(`📊 *Statistiken für ${targetNum2}*\n\nNachrichten: ${s2.messages || 0}\nBefehle: ${s2.commands || 0}\nVerwarnungen: ${w2.count || 0}\nEhestatus: ${mar2 ? '💍 verheiratet' : '💔 ledig'}\nZuletzt aktiv: ${lastSeen2}`);
+            await reply(`📊 *Statistiken für ${targetNum2}*\n\nNachrichten: ${s2.messages || 0}\nBefehle: ${s2.commands || 0}\nVerwarnungen: ${w2.count || 0}\nZuletzt aktiv: ${lastSeen2}`);
             break;
           }
 
-          // ---- Ehe-Erweiterungen ----
-          case 'divorce': {
-            const m2 = findMarriage(jid, senderJid);
-            if (!m2) { await reply('Du bist nicht verheiratet. \u{1F494}'); break; }
-            delete config.groups[jid].marriages[m2.key];
-            await persist();
-            const partnerNum2 = (m2.p1 === senderJid ? m2.p2 : m2.p1).split('@')[0];
-            await sock.sendMessage(jid, {
-              text: `💔 @${senderNum} und @${partnerNum2} haben sich scheiden lassen.`,
-              mentions: [senderJid, m2.p1 === senderJid ? m2.p2 : m2.p1],
-            });
-            break;
-          }
-          case 'profil': {
-            const targetPJ = getTargetJid(msg) || senderJid;
-            const targetPN = targetPJ.split('@')[0];
-            const ps = getMemberStats(jid, targetPN);
-            const pw = moderation.getWarnings(jid, targetPJ);
-            const pm = findMarriage(jid, targetPJ);
-            const pmTxt = pm
-              ? (() => {
-                  const pJid2 = pm.p1 === targetPJ ? pm.p2 : pm.p1;
-                  const days2 = Math.floor((Date.now() - pm.since) / 86400000);
-                  return `💍 mit ${pJid2.split('@')[0]} (${days2}d) · ${happinessStatus(pm.since)}`;
-                })()
-              : '💔 ledig';
-            const mLeft2 = moderation.getMuteTimeLeft(jid, targetPJ);
-            const statusTxt2 = mLeft2 > 0 ? `🔇 stumm (${formatDuration(mLeft2)})` : '✅ aktiv';
-            await sock.sendMessage(jid, {
-              text: `🪪 *Profil – @${targetPN}*\n\n📊 Nachrichten: ${ps.messages || 0}\n🤖 Befehle: ${ps.commands || 0}\n⚠️ Verwarnungen: ${pw.count || 0}\n💑 Ehe: ${pmTxt}\n📡 Status: ${statusTxt2}`,
-              mentions: [targetPJ],
-            }, { quoted: msg });
-            break;
-          }
-
-          // ---- Spiele-Befehle ----
-          case 'joke':
-            await reply('😄 ' + JOKES[Math.floor(Math.random() * JOKES.length)]);
-            break;
-          case 'fakt':
-            await reply('💡 ' + FACTS[Math.floor(Math.random() * FACTS.length)]);
-            break;
-          case 'quote':
-            await reply('✨ ' + QUOTES[Math.floor(Math.random() * QUOTES.length)]);
-            break;
-          case 'truth':
-            await reply(`🎯 *Wahrheitsfrage:*\n\n${TRUTHS[Math.floor(Math.random() * TRUTHS.length)]}`);
-            break;
-          case 'dare':
-            await reply(`🔥 *Herausforderung:*\n\n${DARES[Math.floor(Math.random() * DARES.length)]}`);
-            break;
-          case 'riddle': {
-            const riddleKey2 = `${jid}:${senderJid}`;
-            if (activeRiddles.has(riddleKey2)) {
-              const ar = activeRiddles.get(riddleKey2);
-              await reply(`🧩 Dein aktuelles Rätsel:\n${ar.riddle.q}\n\nSchreib deine Antwort mit: ${COMMAND_PREFIX}antwort <text>`);
-              break;
-            }
-            const r2 = RIDDLES[Math.floor(Math.random() * RIDDLES.length)];
-            activeRiddles.set(riddleKey2, { riddle: r2, expiresAt: Date.now() + 5 * 60 * 1000 });
-            setTimeout(() => activeRiddles.delete(riddleKey2), 5 * 60 * 1000);
-            await reply(`🧩 *Rätsel:*\n\n${r2.q}\n\nDu hast 5 Minuten! Antworte mit: ${COMMAND_PREFIX}antwort <text>`);
-            break;
-          }
-          case 'antwort': {
-            const riddleKey3 = `${jid}:${senderJid}`;
-            const ar2 = activeRiddles.get(riddleKey3);
-            if (!ar2) { await reply('Du hast kein aktives Rätsel. Starte eines mit !riddle'); break; }
-            if (Date.now() > ar2.expiresAt) { activeRiddles.delete(riddleKey3); await reply('⏰ Zeit abgelaufen! Versuche ein neues Rätsel.'); break; }
-            const guess2 = args.join(' ').trim().toLowerCase();
-            if (guess2 === ar2.riddle.a) {
-              activeRiddles.delete(riddleKey3);
-              await reply(`🎉 Richtig! Die Antwort war: *${ar2.riddle.a}* Gut gemacht!`);
-            } else {
-              await reply(`❌ Leider falsch. Versuch es nochmal! (Tipp: ${ar2.riddle.a.slice(0, 2)}…)`);
-            }
-            break;
-          }
-          case 'roulette': {
-            const chamber = Math.floor(Math.random() * 6);
-            if (chamber === 0) {
-              moderation.muteUser(jid, senderJid, 2);
-              await reply(`🔫 *BANG!* Du wurdest für 2 Minuten stummgeschaltet! 💀 Pech gehabt, ${senderNum}!`);
-            } else {
-              await reply(`🔫 *Click!* Glück gehabt, ${senderNum}! Du lebst noch. (${chamber}/6) 😅`);
-            }
-            break;
-          }
-          case 'ship': {
-            const mentions3 = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
-            const replyPerson = msg.message?.extendedTextMessage?.contextInfo?.participant;
-            const shipTargets = replyPerson && mentions3.length === 1
-              ? [replyPerson, mentions3[0]]
-              : mentions3;
-            if (shipTargets.length < 2) { await reply(`Nutzung: ${COMMAND_PREFIX}ship @person1 @person2`); break; }
-            const [p1, p2] = shipTargets;
-            const seed2 = (Number(p1.replace(/\D/g, '').slice(-4)) + Number(p2.replace(/\D/g, '').slice(-4))) % 100;
-            const compat = Math.abs((seed2 * 37 + 23) % 101);
-            const heart = compat >= 80 ? '💕' : compat >= 60 ? '💛' : compat >= 40 ? '💙' : compat >= 20 ? '🫤' : '💔';
-            const bar = '█'.repeat(Math.floor(compat / 10)) + '░'.repeat(10 - Math.floor(compat / 10));
-            await sock.sendMessage(jid, {
-              text: `${heart} *Ship-O-Meter*\n@${p1.split('@')[0]} + @${p2.split('@')[0]}\n\n[${bar}] ${compat}%`,
-              mentions: mentions3,
-            }, { quoted: msg });
-            break;
-          }
-          case 'rate': {
-            const thing2 = args.join(' ').trim();
-            if (!thing2) { await reply(`Nutzung: ${COMMAND_PREFIX}rate <etwas>`); break; }
-            const seed3 = thing2.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
-            const score2 = seed3 % 11;
-            const stars2 = '⭐'.repeat(score2) + '☆'.repeat(10 - score2);
-            const verdicts = ['Katastrophal 💀', 'Sehr schlecht 😤', 'Schlecht 😞', 'Mäßig 😕', 'Okay 😐', 'Ganz gut 🙂', 'Gut 😊', 'Sehr gut 😁', 'Super! 🤩', 'Fantastisch! 🌟', 'Absolut perfekt! 💯'];
-            await reply(`📊 Bewertung für „${thing2}"\n\n${stars2}\n${score2}/10 – ${verdicts[score2]}`);
-            break;
-          }
-          case 'choose': {
-            const optStr = args.join(' ');
-            const opts2 = optStr.split('|').map((o) => o.trim()).filter(Boolean);
-            if (opts2.length < 2) { await reply(`Nutzung: ${COMMAND_PREFIX}choose option1|option2|option3`); break; }
-            const chosen = opts2[Math.floor(Math.random() * opts2.length)];
-            await reply(`🎲 Meine Wahl: *${chosen}*`);
-            break;
-          }
-          case 'number': {
-            const min2 = Number(args[0]) || 1;
-            const max2 = Number(args[1]) || 100;
-            if (min2 >= max2) { await reply(`Nutzung: ${COMMAND_PREFIX}number [min] [max]`); break; }
-            const rand2 = Math.floor(Math.random() * (max2 - min2 + 1)) + min2;
-            await reply(`🎲 Zufallszahl zwischen ${min2} und ${max2}: *${rand2}*`);
-            break;
-          }
-          case 'calc': {
-            const expr2 = args.join(' ').trim();
-            if (!expr2) { await reply(`Nutzung: ${COMMAND_PREFIX}calc 2+2`); break; }
-            const result2 = safeCalc(expr2);
-            if (result2 === null) { await reply('❌ Ungültiger Ausdruck. Nur Zahlen und +−*/^() erlaubt.'); break; }
-            await reply(`🧮 ${expr2} = *${result2}*`);
-            break;
-          }
-          case 'reverse': {
-            const rText = args.join(' ').trim();
-            if (!rText) { await reply(`Nutzung: ${COMMAND_PREFIX}reverse <Text>`); break; }
-            await reply(`🔄 ${rText.split('').reverse().join('')}`);
-            break;
-          }
-          case 'timer': {
-            const mins3 = Math.min(60, Math.max(1, Number(args[0]) || 0));
-            if (!mins3) { await reply(`Nutzung: ${COMMAND_PREFIX}timer <Minuten> (1–60)`); break; }
-            await reply(`⏱️ Timer gestartet! Ich melde mich in ${mins3} Minute(n).`);
-            const timerId = `${jid}:${senderJid}:${Date.now()}`;
-            const t = setTimeout(async () => {
-              activeTimers.delete(timerId);
-              try {
-                await sock.sendMessage(jid, {
-                  text: `⏰ @${senderNum} Dein Timer (${mins3} Min.) ist abgelaufen!`,
-                  mentions: [senderJid],
-                });
-              } catch (e) { logger.warn({ e }, 'Timer-Nachricht fehlgeschlagen'); }
-            }, mins3 * 60 * 1000);
-            if (t.unref) t.unref();
-            activeTimers.set(timerId, { groupJid: jid, senderJid, label: `${mins3}m Timer` });
-            break;
-          }
-          case 'poll': {
-            const pollStr = args.join(' ');
-            const pollParts = pollStr.split('|').map((p) => p.trim()).filter(Boolean);
-            if (pollParts.length < 3) { await reply(`Nutzung: ${COMMAND_PREFIX}poll Frage|Option1|Option2[|Option3|Option4]`); break; }
-            const [pollQ, ...pollOpts] = pollParts;
-            const emojis2 = ['1️⃣', '2️⃣', '3️⃣', '4️⃣'];
-            const optLines2 = pollOpts.slice(0, 4).map((o, i) => `${emojis2[i]} ${o}`).join('\n');
-            await reply(`📊 *Abstimmung:*\n\n❓ ${pollQ}\n\n${optLines2}\n\nReagiere mit dem Emoji deiner Wahl!`);
-            break;
-          }
-          case 'quiz': {
-            const rk = `${jid}:${senderJid}`;
-            if (activeRiddles.has(rk)) {
-              const ar = activeRiddles.get(rk);
-              await reply(`❓ Du hast schon eine offene Frage:\n${ar.riddle.q}\n\nAntworte mit ${COMMAND_PREFIX}antwort <text>`);
-              break;
-            }
-            const qz = QUIZ[Math.floor(Math.random() * QUIZ.length)];
-            activeRiddles.set(rk, { riddle: qz, expiresAt: Date.now() + 5 * 60 * 1000 });
-            setTimeout(() => activeRiddles.delete(rk), 5 * 60 * 1000);
-            await reply(`🧠 *Quiz:*\n\n${qz.q}\n\nDu hast 5 Minuten! Antworte mit: ${COMMAND_PREFIX}antwort <text>`);
-            break;
-          }
-          case 'would':
-            await reply(`🤔 *Würdest du eher…*\n\n${WOULD[Math.floor(Math.random() * WOULD.length)]}`);
-            break;
-          case 'nhie':
-            await reply(`🙊 *Ich hab noch nie…*\n\n${NHIE[Math.floor(Math.random() * NHIE.length)]}`);
-            break;
-          case 'mostlikely': {
-            const thingM = args.join(' ').trim();
-            if (!thingM) { await reply(`Nutzung: ${COMMAND_PREFIX}mostlikely <etwas>\nz. B. ${COMMAND_PREFIX}mostlikely verschläft morgen`); break; }
-            const metaM = await getGroupMeta(jid);
-            if (!metaM || !metaM.participants.length) { await reply('Konnte die Gruppe nicht laden.'); break; }
-            const pick = metaM.participants[Math.floor(Math.random() * metaM.participants.length)].id;
-            await sock.sendMessage(jid, {
-              text: `🎯 Wer am ehesten *${thingM}*?\n\n→ @${pick.split('@')[0]} 😏`,
-              mentions: [pick],
-            }, { quoted: msg });
-            break;
-          }
-          case 'iq':
-          case 'simp':
-          case 'vibe': {
-            const targetG = getTargetJid(msg) || senderJid;
-            const tnumG = targetG.split('@')[0];
-            const seedG = tnumG.split('').reduce((a, c) => a + c.charCodeAt(0), 0) + new Date().getDate();
-            if (cmd === 'iq') {
-              const iq = 50 + (seedG * 7) % 151; // 50–200
-              await sock.sendMessage(jid, { text: `🧠 @${tnumG} hat einen IQ von *${iq}*\n${IQ_VERDICTS[Math.min(IQ_VERDICTS.length - 1, Math.floor((200 - iq) / 26))]}`, mentions: [targetG] }, { quoted: msg });
-            } else if (cmd === 'simp') {
-              const pct = (seedG * 13) % 101;
-              const bar = '█'.repeat(Math.floor(pct / 10)) + '░'.repeat(10 - Math.floor(pct / 10));
-              await sock.sendMessage(jid, { text: `😍 *Simp-Meter*\n@${tnumG}: [${bar}] ${pct}% Simp`, mentions: [targetG] }, { quoted: msg });
-            } else {
-              const pct = (seedG * 17) % 101;
-              const emo = pct >= 80 ? '🤩 immaculate vibes' : pct >= 60 ? '✨ gute Vibes' : pct >= 40 ? '🙂 solide Vibes' : pct >= 20 ? '😐 meh' : '💀 negative Vibes';
-              await sock.sendMessage(jid, { text: `🔮 *Vibe-Check*\n@${tnumG}: ${pct}% – ${emo}`, mentions: [targetG] }, { quoted: msg });
-            }
-            break;
-          }
-          case 'mock': {
-            const mockText = args.join(' ').trim();
-            if (!mockText) { await reply(`Nutzung: ${COMMAND_PREFIX}mock <Text>`); break; }
-            const mocked = mockText.split('').map((c, i) => i % 2 ? c.toUpperCase() : c.toLowerCase()).join('');
-            await reply(`🧽 ${mocked}`);
-            break;
-          }
-          case 'emojify': {
-            const eText = args.join(' ').trim().toLowerCase();
-            if (!eText) { await reply(`Nutzung: ${COMMAND_PREFIX}emojify <Text>`); break; }
-            const out = eText.split('').map((c) => {
-              if (c >= 'a' && c <= 'z') return String.fromCodePoint(0x1F1E6 + (c.charCodeAt(0) - 97)) + ' ';
-              if (c >= '0' && c <= '9') return ['0️⃣','1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣'][c.charCodeAt(0) - 48] + ' ';
-              if (c === ' ') return '   ';
-              return c;
-            }).join('');
-            await reply(out.slice(0, 600) || '🤷');
-            break;
-          }
-          case 'roll': {
-            const spec = (args[0] || '1d6').toLowerCase();
-            const m = spec.match(/^(\d{1,2})d(\d{1,4})$/);
-            if (!m) { await reply(`Nutzung: ${COMMAND_PREFIX}roll <Anzahl>d<Seiten>, z. B. ${COMMAND_PREFIX}roll 2d6`); break; }
-            const n = Math.min(20, Math.max(1, Number(m[1])));
-            const sides = Math.min(1000, Math.max(2, Number(m[2])));
-            const rolls = Array.from({ length: n }, () => Math.floor(Math.random() * sides) + 1);
-            const sum = rolls.reduce((a, b) => a + b, 0);
-            await reply(`🎲 ${n}d${sides}: ${rolls.join(' + ')}${n > 1 ? ` = *${sum}*` : ` = *${sum}*`}`);
-            break;
-          }
-          case 'horoskop': {
-            const sign = args.join(' ').trim() || 'dein Zeichen';
-            const seedH = (sign.toLowerCase().split('').reduce((a, c) => a + c.charCodeAt(0), 0) + new Date().getDate() * 31 + new Date().getMonth());
-            const pick = (arr) => arr[seedH % arr.length];
-            const luckLabel = pick(HOROSKOP.luck);
-            const luckVal = luckLabel.includes('zahl') ? String((seedH % 49) + 1)
-              : luckLabel.includes('farbe') ? pick(['Rot', 'Blau', 'Grün', 'Gelb', 'Lila', 'Türkis', 'Orange'])
-              : pick(['🍀', '⭐', '🌙', '🔥', '💎', '🦋']);
-            await reply(`♈ *Tageshoroskop – ${sign}*\n\n${pick(HOROSKOP.mood)}\n💕 ${pick(HOROSKOP.love)}\n💼 ${pick(HOROSKOP.work)}\n\n🎁 ${luckLabel}${luckVal}`);
-            break;
-          }
-
-          // ---- Soziale Aktionen ----
-          case 'kiss':
-          case 'hug':
-          case 'slap':
-          case 'poke': {
-            const target4 = getTargetJid(msg);
-            if (!target4) { await reply(`Nutzung: ${COMMAND_PREFIX}${cmd} @person`); break; }
-            const actionArr = ACTIONS[cmd];
-            const actionTxt = actionArr[Math.floor(Math.random() * actionArr.length)]
-              .replace('{a}', `@${senderNum}`)
-              .replace('{b}', `@${target4.split('@')[0]}`);
-            await sock.sendMessage(jid, { text: actionTxt, mentions: [senderJid, target4] }, { quoted: msg });
-            break;
-          }
-          case 'compliment': {
-            const target5 = getTargetJid(msg);
-            const comp = COMPLIMENTS[Math.floor(Math.random() * COMPLIMENTS.length)];
-            if (target5) {
-              await sock.sendMessage(jid, {
-                text: `🌟 @${target5.split('@')[0]} – ${comp}`,
-                mentions: [target5],
-              }, { quoted: msg });
-            } else {
-              await reply(`🌟 ${comp}`);
-            }
-            break;
-          }
 
           default:
             handled = false;
@@ -4385,16 +3341,11 @@ store.loadConfig(logger)
     config.settings = { dmAssistant: false, ...(config.settings || {}) };
     if (!Array.isArray(config.anliegen)) config.anliegen = [];
     if (!config.communityBans || typeof config.communityBans !== 'object') config.communityBans = {};
-    if (!config.gameGroups || typeof config.gameGroups !== 'object') config.gameGroups = {};
     if (!config.mods || typeof config.mods !== 'object') config.mods = {};
     // Bot-Hauptschalter aus der Cloud wiederherstellen (Standard: an)
     botState.powered = config.botPowered !== false;
     const speicherTyp = store.usingTurso() ? 'Turso (Cloud)' : store.usingMongo() ? 'MongoDB' : 'lokale Datei (flüchtig)';
     logger.info({ speicher: speicherTyp, selfPing: SELF_URL || 'AUS', powered: botState.powered }, 'Konfiguration geladen');
-    // Wirtschafts-/Spielmodule aktivieren (nur bei vorhandenen Turso-Zugangsdaten)
-    gameLayer.initModules({ logger })
-      .then((r) => { botState.gamesReady = Boolean(r && r.ok); })
-      .catch((e) => logger.error({ e }, 'Spielmodule konnten nicht initialisiert werden'));
     if (!botState.powered) {
       logger.warn('Bot ist per Website ausgeschaltet (botPowered=false) – warte auf Einschalten.');
       botState.paused = true;
