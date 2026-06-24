@@ -2767,7 +2767,7 @@ app.get('/befehle', (req, res) => {
     'Allgemein': '📋', 'Moderation': '🛡️', 'Spaß': '🎮', 'Sozial': '💞',
     'Wirtschaft': '💰', 'Bank': '🏦', 'Casino': '🎰', 'Shop': '🛒',
     'Quests': '📜', 'Gilde': '⚔️', 'Welt': '🌍', 'Berufe': '🔧',
-    'Arena': '🏟️', 'Profil': '👤', 'Farm': '🌾', 'Admin': '🔑',
+    'Arena': '🏟️', 'Profil': '👤', 'Farm': '🌾', 'Inhaber': '👑',
   };
   const CATEGORY_ORDER = Object.keys(CATEGORY_ICONS);
   const sortedCats = [...new Set(COMMAND_CATALOG.map((c) => c.category))]

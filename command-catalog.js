@@ -94,21 +94,6 @@ const COMMAND_CATALOG = [
     desc: 'Kickt das Mitglied und trägt es ins Ban-Log der Gruppe ein. Der Grund wird gespeichert und ist für Admins einsehbar. Das Ban-Log hilft bei der Nachverfolgung von Moderationsmaßnahmen.',
   },
   {
-    cmd: 'communitykick', aliases: ['ckick', 'comban', 'communityban', 'nuke'], category: 'Moderation', access: 'inhaber',
-    usage: `${PREFIX}communitykick @Nutzer [Grund]`, example: `${PREFIX}communitykick @Troll Dauerbeleidigung`,
-    desc: '⚠️ Sperrt eine Person dauerhaft aus ALLEN Gruppen der Community. Diese Maßnahme ist nicht umkehrbar ohne !communityunban. Nur für den Community-Inhaber verfügbar — mit Bedacht einsetzen.',
-  },
-  {
-    cmd: 'communityunban', aliases: ['cunban'], category: 'Moderation', access: 'inhaber',
-    usage: `${PREFIX}communityunban @Nutzer`, example: `${PREFIX}communityunban @Max`,
-    desc: 'Hebt einen Community-weiten Bann auf, sodass die Person wieder Gruppen beitreten kann. Der Eintrag wird aus dem Community-Ban-Log entfernt. Nur für den Inhaber verfügbar.',
-  },
-  {
-    cmd: 'communitybanlist', aliases: ['cbanlist'], category: 'Moderation', access: 'inhaber',
-    usage: `${PREFIX}communitybanlist`, example: `${PREFIX}communitybanlist`,
-    desc: 'Listet alle aktuell dauerhaft gebannten Personen der Community mit Grund und Datum. Nur für den Community-Inhaber einsehbar.',
-  },
-  {
     cmd: 'mute', aliases: [], category: 'Moderation', access: 'admin',
     usage: `${PREFIX}mute @Nutzer [Dauer]`, example: `${PREFIX}mute @Max 30m`,
     desc: 'Schaltet ein Mitglied für den angegebenen Zeitraum stumm — der Nutzer kann keine Nachrichten mehr senden. Nach Ablauf der Dauer wird der Mute automatisch aufgehoben. Ohne Zeitangabe gilt der Mute unbegrenzt.',
@@ -1252,11 +1237,6 @@ const COMMAND_CATALOG = [
   // HILFE-BEFEHLE (Spiel)
   // ══════════════════════════════════════════════════════════════════
   {
-    cmd: 'spielgruppe', aliases: [], category: 'Admin', access: 'inhaber',
-    usage: `${PREFIX}spielgruppe an|aus`, example: `${PREFIX}spielgruppe an`,
-    desc: 'Aktiviert oder deaktiviert alle Spiel- und Wirtschaftsbefehle für die aktuelle Gruppe. Nur der Community-Inhaber kann diesen Schalter betätigen. Ohne Aktivierung sind keine Spielbefehle verfügbar.',
-  },
-  {
     cmd: 'hilfewelt', aliases: [], category: 'Allgemein', access: 'alle',
     usage: `${PREFIX}hilfewelt`, example: `${PREFIX}hilfewelt`,
     desc: 'Zeigt die Hilfe-Übersicht für alle Welt- und Abenteuerbefehle: Reisen, Kämpfen, Sammeln, Erkunden. Der schnelle Einstieg in das Welten-System.',
@@ -1285,6 +1265,65 @@ const COMMAND_CATALOG = [
     cmd: 'hilfefarm', aliases: [], category: 'Allgemein', access: 'alle',
     usage: `${PREFIX}hilfefarm`, example: `${PREFIX}hilfefarm`,
     desc: 'Zeigt alle Farm-Befehle: Säen, Gießen, Ernten, Felder kaufen. Erklärt Pflanzentypen, Wachstumszeiten und wie man die Farm am profitabelsten betreibt.',
+  },
+
+  // ══════════════════════════════════════════════════════════════════
+  // 👑 INHABER — nur für den Community-Inhaber (das bist du)
+  // ══════════════════════════════════════════════════════════════════
+  {
+    cmd: 'spielgruppe', aliases: [], category: 'Inhaber', access: 'inhaber',
+    usage: `${PREFIX}spielgruppe an|aus`, example: `${PREFIX}spielgruppe an`,
+    desc: 'Aktiviert oder deaktiviert alle Spiel- und Wirtschaftsbefehle für die aktuelle Gruppe. Nur der Community-Inhaber kann diesen Schalter betätigen. Ohne Aktivierung sind keine Spielbefehle verfügbar.',
+  },
+  {
+    cmd: 'communityinfo', aliases: ['cinfo'], category: 'Inhaber', access: 'inhaber',
+    usage: `${PREFIX}communityinfo`, example: `${PREFIX}communityinfo`,
+    desc: 'Zeigt eine vollständige Übersicht der Community: alle zugehörigen Gruppen, die Mitgliederzahl pro Gruppe, die Gesamtzahl der Mitglieder und die Anzahl gebannter Personen. Dein zentraler Statusbericht über die gesamte Community auf einen Blick.',
+  },
+  {
+    cmd: 'communityankündigung', aliases: ['communitybroadcast', 'cankündigung'], category: 'Inhaber', access: 'inhaber',
+    usage: `${PREFIX}communityankündigung <Nachricht>`, example: `${PREFIX}communityankündigung Wartungsarbeiten ab 20 Uhr`,
+    desc: 'Sendet eine Ankündigung an ALLE Gruppen der Community gleichzeitig. Jede Gruppe erhält die Nachricht mit einer „Community-Ankündigung“-Kennzeichnung. Ideal für wichtige Mitteilungen, die jeden in der Community erreichen sollen. Nur für den Inhaber verfügbar.',
+  },
+  {
+    cmd: 'communitymute', aliases: ['cmute'], category: 'Inhaber', access: 'inhaber',
+    usage: `${PREFIX}communitymute @Nutzer [Minuten]`, example: `${PREFIX}communitymute @Max 30`,
+    desc: 'Schaltet eine Person in ALLEN Gruppen der Community gleichzeitig stumm. Standarddauer 10 Minuten, anpassbar bis 1440 Minuten (24 Stunden). Praktisch, um einen Störer community-weit zu beruhigen, ohne jede Gruppe einzeln zu betreten. Nur für den Inhaber verfügbar.',
+  },
+  {
+    cmd: 'communityunmute', aliases: ['cunmute'], category: 'Inhaber', access: 'inhaber',
+    usage: `${PREFIX}communityunmute @Nutzer`, example: `${PREFIX}communityunmute @Max`,
+    desc: 'Hebt die Stummschaltung einer Person in ALLEN Gruppen der Community wieder auf. Das Gegenstück zu !communitymute. Nur für den Inhaber verfügbar.',
+  },
+  {
+    cmd: 'communitywarn', aliases: ['cwarn'], category: 'Inhaber', access: 'inhaber',
+    usage: `${PREFIX}communitywarn @Nutzer [Grund]`, example: `${PREFIX}communitywarn @Max Spam`,
+    desc: 'Verwarnt eine Person in ALLEN Gruppen der Community gleichzeitig. Die Verwarnung wird pro Gruppe gezählt und kann bei Überschreitung des Limits automatische Maßnahmen auslösen. Nur für den Inhaber verfügbar.',
+  },
+  {
+    cmd: 'communitypromo', aliases: ['cpromo'], category: 'Inhaber', access: 'inhaber',
+    usage: `${PREFIX}communitypromo @Nutzer`, example: `${PREFIX}communitypromo @Max`,
+    desc: 'Befördert eine Person in ALLEN Gruppen der Community zum Admin. Praktisch, um einem vertrauenswürdigen Helfer in der gesamten Community Admin-Rechte zu geben, ohne jede Gruppe einzeln zu öffnen. Nur für den Inhaber verfügbar.',
+  },
+  {
+    cmd: 'communitydemote', aliases: ['cdemote'], category: 'Inhaber', access: 'inhaber',
+    usage: `${PREFIX}communitydemote @Nutzer`, example: `${PREFIX}communitydemote @Max`,
+    desc: 'Entzieht einer Person in ALLEN Gruppen der Community den Admin-Status. Das Gegenstück zu !communitypromo. Nur für den Inhaber verfügbar.',
+  },
+  {
+    cmd: 'communitykick', aliases: ['ckick', 'comban', 'communityban', 'nuke'], category: 'Inhaber', access: 'inhaber',
+    usage: `${PREFIX}communitykick @Nutzer [Grund]`, example: `${PREFIX}communitykick @Troll Dauerbeleidigung`,
+    desc: '⚠️ Sperrt eine Person dauerhaft aus ALLEN Gruppen der Community. Diese Maßnahme ist nicht umkehrbar ohne !communityunban. Nur für den Community-Inhaber verfügbar — mit Bedacht einsetzen.',
+  },
+  {
+    cmd: 'communityunban', aliases: ['cunban'], category: 'Inhaber', access: 'inhaber',
+    usage: `${PREFIX}communityunban @Nutzer`, example: `${PREFIX}communityunban @Max`,
+    desc: 'Hebt einen Community-weiten Bann auf, sodass die Person wieder Gruppen beitreten kann. Der Eintrag wird aus dem Community-Ban-Log entfernt. Nur für den Inhaber verfügbar.',
+  },
+  {
+    cmd: 'communitybanlist', aliases: ['cbanlist'], category: 'Inhaber', access: 'inhaber',
+    usage: `${PREFIX}communitybanlist`, example: `${PREFIX}communitybanlist`,
+    desc: 'Listet alle aktuell dauerhaft gebannten Personen der Community mit Grund und Datum. Nur für den Community-Inhaber einsehbar.',
   },
 ];
 
