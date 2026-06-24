@@ -48,6 +48,22 @@ const OWNER_OVERRIDE = (process.env.OWNER_JIDS || '')
 
 const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
 
+// Fehlerlog-Capture: warn/error werden zusätzlich in botState.errorLog gepuffert
+// (botState ist erst später definiert, aber der Wrapper wird nur zur Laufzeit aufgerufen)
+['warn', 'error'].forEach((lvl) => {
+  const orig = logger[lvl].bind(logger);
+  logger[lvl] = (...args) => {
+    orig(...args);
+    try {
+      const [data, msg] = typeof args[0] === 'object' && args[0] !== null
+        ? [args[0], args[1]]
+        : [{}, args[0]];
+      if (botState.errorLog.length >= 200) botState.errorLog.shift();
+      botState.errorLog.push({ at: Date.now(), level: lvl, msg: String(msg || ''), detail: data });
+    } catch (_) {}
+  };
+});
+
 // ---------- Absturzschutz ----------
 // Render Free startet einen abgestürzten Prozess nicht von selbst neu. Damit der Bot
 // NIEMALS wegen eines unerwarteten Fehlers stirbt, fangen wir alles global ab und laufen weiter.
@@ -579,6 +595,7 @@ const botState = {
   lastCommand: null,
   moderation: { actionsTotal: 0, lastAction: null, lastActionAt: null },
   activityLog: [], // letzte 100 Bot-Aktionen
+  errorLog: [],    // letzte 200 Laufzeit-Warnings/Errors (nur RAM, reset bei Neustart)
   reconnecting: false, // verhindert mehrere parallele Reconnects
   lastConnectedAt: 0,  // Zeitpunkt der letzten erfolgreichen Verbindung
   powered: true,       // Bot-Hauptschalter (per Website steuerbar). false = pausiert.
@@ -622,7 +639,7 @@ function defaultGroupConfig() {
     rules: null,
     welcome: { enabled: false, message: null },
     memberStats: {},   // { [senderNum]: { messages, commands, warnings, lastSeen } }
-    banLog: [],        // [{ num, bannedBy, reason, at }] max 100
+    banLog: [],        // [{ num, bannedBy, reason, at }] max 500
     marriages: {},
   };
 }
@@ -747,7 +764,7 @@ function addBanLog(groupJid, entry) {
   if (!config.groups[groupJid]) config.groups[groupJid] = defaultGroupConfig();
   const log = config.groups[groupJid].banLog || [];
   log.push({ ...entry, at: Date.now() });
-  if (log.length > 100) log.shift();
+  if (log.length > 500) log.shift();
   config.groups[groupJid].banLog = log;
 }
 
@@ -1207,6 +1224,7 @@ function navBar(keyParam, active = '') {
     ['Sicherheit', [
       ['reports', '📋', 'Meldungen'],
       ['banlog', '🚫', 'Ban-Log'],
+      ['fehlerlog', '⚠️', 'Fehlerlog'],
     ]],
     ['Werkzeuge', [
       ['lookup', '🔎', 'Nummer'],
@@ -1531,7 +1549,7 @@ app.get('/group', async (req, res) => {
   const id = String(req.query.id || '');
   const keyVal = encodeURIComponent(req.query.key);
   const keyParam = keyOf(req);
-  const group = botState.groups.find((g) => g.id === id);
+  const group = getGroupsCached().find((g) => g.id === id);
   if (!id || !group) {
     return res.status(404).send(page('Nicht gefunden',
       `<div class="card"><h1>Gruppe nicht gefunden</h1><a href="/settings${keyParam}"><button>Zurück</button></a></div>`));
@@ -1673,7 +1691,7 @@ app.get('/group/members', async (req, res) => {
   if (!requireAuth(req, res)) return;
   const id = String(req.query.id || '');
   const keyParam = keyOf(req);
-  const group = botState.groups.find((g) => g.id === id);
+  const group = getGroupsCached().find((g) => g.id === id);
   if (!id || !group) {
     return res.status(404).send(page('Nicht gefunden',
       `<div class="card"><h1>Gruppe nicht gefunden</h1><a href="/settings${keyParam}"><button>Zurück</button></a></div>`));
@@ -2234,7 +2252,7 @@ app.get('/member', async (req, res) => {
     return res.status(400).send(page('Fehler', `<div class="card"><h1>Fehlende Parameter</h1><a href="/settings${keyParam}"><button>Zurück</button></a></div>`));
   }
   const num = targetJid.split('@')[0];
-  const group = botState.groups.find((g) => g.id === groupJid);
+  const group = getGroupsCached().find((g) => g.id === groupJid);
   const gc = effectiveGroupConfig(groupJid);
   const stats = getMemberStats(groupJid, num);
   const warnings = moderation.getWarnings(groupJid, targetJid);
@@ -2374,7 +2392,7 @@ app.get('/banlog', (req, res) => {
 
   const entries = [];
   for (const [gid, gc] of Object.entries(config.groups)) {
-    const group = botState.groups.find((g) => g.id === gid);
+    const group = getGroupsCached().find((g) => g.id === gid);
     for (const b of (gc.banLog || [])) {
       entries.push({ ...b, groupName: group?.subject || gid });
     }
@@ -2403,6 +2421,40 @@ app.get('/banlog', (req, res) => {
     </div>`));
 });
 
+// Fehler-Logbuch (RAM-Puffer der letzten 200 warn/error)
+app.get('/fehlerlog', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!requireAuth(req, res)) return;
+  const keyParam = keyOf(req);
+  const log = [...botState.errorLog].reverse();
+
+  const rows = log.map((e) => {
+    const lvlBadge = e.level === 'error'
+      ? '<span style="background:rgba(220,53,69,.25);color:#ff6b6b;padding:2px 8px;border-radius:20px;font-size:.78rem;font-weight:700">ERROR</span>'
+      : '<span style="background:rgba(255,152,0,.2);color:#ffa726;padding:2px 8px;border-radius:20px;font-size:.78rem;font-weight:700">WARN</span>';
+    const time = new Date(e.at).toLocaleString('de-DE');
+    const hasDetail = e.detail && Object.keys(e.detail).length > 0;
+    const detail = hasDetail
+      ? `<pre style="margin:6px 0 0;font-size:.75rem;overflow-x:auto;background:rgba(0,0,0,.25);padding:8px;border-radius:8px">${escapeHtml(JSON.stringify(e.detail, null, 2))}</pre>`
+      : '';
+    return `<div class="log-entry" style="border-left:3px solid ${e.level === 'error' ? '#ff6b6b' : '#ffa726'};padding:8px 12px;margin:4px 0;border-radius:0 8px 8px 0;background:rgba(255,255,255,.04)">
+      <div class="row" style="gap:8px;flex-wrap:wrap">${lvlBadge}<b style="font-size:.85rem">${escapeHtml(e.msg)}</b><span class="muted" style="font-size:.78rem;margin-left:auto">${escapeHtml(time)}</span></div>
+      ${detail}
+    </div>`;
+  }).join('') || '<p class="muted">Keine Fehler aufgezeichnet — alles läuft problemlos. 🎉</p>';
+
+  res.send(page('Fehlerlog', `
+    ${navBar(keyParam, 'fehlerlog')}
+    <div class="card">
+      <div class="row"><h1>⚠️ Fehlerlog</h1></div>
+      <p class="muted">${log.length} / 200 Einträge &ensp;·&ensp; <b>Nur RAM</b> – wird bei Server-Neustart zurückgesetzt.</p>
+      <input type="search" id="errSearch" class="search-bar" placeholder="🔍 Meldung suchen…"
+        oninput="(function(q){document.querySelectorAll('.log-entry').forEach(function(el){el.style.display=el.textContent.toLowerCase().includes(q.toLowerCase())?'':'none'})})(this.value)"
+        style="margin-top:8px">
+    </div>
+    <div class="card">${rows}</div>`));
+});
+
 // Aktivitäts-Log
 app.get('/activity', (req, res) => {
   res.set('Cache-Control', 'no-store');
@@ -2413,7 +2465,7 @@ app.get('/activity', (req, res) => {
   const rows = log.map((e) => {
     const cls = `log-${e.type}`;
     const time = new Date(e.at).toLocaleTimeString('de-DE');
-    const group = botState.groups.find((g) => g.id === e.groupJid);
+    const group = getGroupsCached().find((g) => g.id === e.groupJid);
     const grpName = group?.subject || (e.groupJid || '').split('@')[0] || '–';
     let detail = '';
     if (e.senderNum) detail += ` · von ${escapeHtml(e.senderNum)}`;
@@ -2507,7 +2559,7 @@ app.get('/group/stats', async (req, res) => {
   if (!requireAuth(req, res)) return;
   const keyParam = keyOf(req);
   const id = String(req.query.id || '');
-  const group = botState.groups.find((g) => g.id === id);
+  const group = getGroupsCached().find((g) => g.id === id);
   if (!id || !group) {
     return res.status(404).send(page('Nicht gefunden',
       `<div class="card"><h1>Gruppe nicht gefunden</h1><a href="/settings${keyParam}"><button>Zurück</button></a></div>`));
