@@ -1346,9 +1346,7 @@ app.get('/', (_req, res) => {
     <div class="card hero">
       <div class="logo">🤖</div>
       <h1 class="gradient-text" style="font-size:clamp(1.6rem,6vw,2.1rem)">WhatsApp-Bot</h1>
-      <p class="muted" style="max-width:380px;margin:8px auto 14px">${botState.connected
-        ? 'Verbunden. Melde dich an, um Gruppen, Moderation & Communities zu verwalten.'
-        : 'Melde dich an, um den QR-Code zu scannen und loszulegen.'}</p>
+      <p class="muted" style="max-width:380px;margin:8px auto 14px">Melde dich an, um Gruppen, Moderation & Communities zu verwalten.</p>
       <div>${statusBadge}</div>
     </div>
     <form class="card" method="get" action="/go">
@@ -1379,7 +1377,7 @@ app.get('/go', (req, res) => {
       '<div class="card"><h1>🔒 Falsches Passwort</h1><a href="/"><button>Erneut versuchen</button></a></div>'));
   }
   const keyParam = keyOf(req);
-  res.redirect(botState.connected ? `/settings${keyParam}` : `/qr${keyParam}`);
+  res.redirect(`/dashboard${keyParam}`);
 });
 
 // QR-Code-Seite
