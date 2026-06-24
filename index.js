@@ -723,7 +723,7 @@ function getCommunities() {
 // Setzt active für alle Gruppen einer Community.
 async function setCommunityActive(parentJid, enable) {
   let n = 0;
-  for (const g of botState.groups) {
+  for (const g of getGroupsCached()) {
     if (parentJidOf(g) !== parentJid) continue;
     if (!config.groups[g.id]) config.groups[g.id] = defaultGroupConfig();
     config.groups[g.id].active = enable;
@@ -900,11 +900,11 @@ function getTargetJid(msg) {
 
 // ---------- Mini-Helfer für Community-Moderation ----------
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const subjectOf = (gid) => botState.groups.find((g) => g.id === gid)?.subject || gid.split('@')[0];
+const subjectOf = (gid) => getGroupsCached().find((g) => g.id === gid)?.subject || gid.split('@')[0];
 // Erlaubt auch reine Nummern als Ziel, z. B. "!communitykick 4915123456789".
 function numArgToJid(a) {
   const d = (a || '').replace(/\D/g, '');
-  return d.length >= 7 ? `${d}@s.whatsapp.net` : null;
+  return d.length >= 7 && d.length <= 20 ? `${d}@s.whatsapp.net` : null;
 }
 
 // ---------- Hilfsfunktionen ----------
@@ -1498,6 +1498,7 @@ app.post('/login', (req, res) => {
   }
   noteLoginOk(ip);
   const token = crypto.randomBytes(32).toString('hex');
+  if (activeSessions.size >= 50) activeSessions.clear(); // Verhindert unbegrenzte Session-Akkumulation
   activeSessions.add(token);
   const secure = process.env.NODE_ENV !== 'development';
   res.setHeader('Set-Cookie', `sess=${token}; HttpOnly; ${secure ? 'Secure; ' : ''}SameSite=Strict; Max-Age=86400; Path=/`);
@@ -1539,6 +1540,7 @@ app.get('/qr', async (req, res) => {
         <p class="muted">WhatsApp → Einstellungen → <b>Verknüpfte Geräte</b> → <b>Gerät hinzufügen</b></p>
         <div class="qr"><img src="${qrImage}" alt="QR Code"></div>
         <p class="muted">Der Code aktualisiert sich automatisch.</p>
+        <a href="/dashboard" style="display:inline-block;margin-top:14px"><button style="background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);border-radius:12px;padding:10px 22px;cursor:pointer;color:#e9ecf3;font-weight:600">← Zurück zum Dashboard</button></a>
       </div>`, { refresh: 25, refreshUrl: `/qr` }));
   } catch (err) {
     logger.error({ err }, 'Fehler beim Erzeugen des QR-Codes');
@@ -2422,17 +2424,24 @@ app.get('/member', async (req, res) => {
 });
 
 // Mitglieder-Aktionen vom Web (kick/mute/warn)
+const ALLOWED_MEMBER_ACTIONS = new Set(['kick', 'mute', 'warn', 'unwarn', 'clearwarn']);
+const JID_USER_RE = /^\d{5,20}@s\.whatsapp\.net$/;
+const JID_GROUP_RE = /^\d{5,20}-\d+@g\.us$|^\d{5,20}@g\.us$/;
+
 app.post('/member/action', async (req, res) => {
   if (!requireAuth(req, res)) return;
   const { action, targetJid, groupJid } = req.body;
   if (!action || !targetJid || !groupJid) return res.status(400).send('Fehlende Parameter');
+  if (!ALLOWED_MEMBER_ACTIONS.has(action)) return res.status(400).send('Ungültige Aktion');
+  if (!JID_USER_RE.test(targetJid)) return res.status(400).send('Ungültige Ziel-JID');
+  if (!JID_GROUP_RE.test(groupJid)) return res.status(400).send('Ungültige Gruppen-JID');
 
   const sock = botState.sock;
   if (!sock || !botState.connected) {
     return res.status(503).send(page('Fehler', `<div class="card"><h1>Bot nicht verbunden</h1><a href="/settings"><button>Zurück</button></a></div>`));
   }
 
-  const reason = String(req.body.reason || '').trim();
+  const reason = String(req.body.reason || '').trim().slice(0, 200);
   const tnum = targetJid.split('@')[0];
   try {
     if (action === 'kick') {
