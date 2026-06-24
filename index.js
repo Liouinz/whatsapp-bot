@@ -24,6 +24,7 @@ const {
   fetchLatestBaileysVersion,
   DisconnectReason,
   jidNormalizedUser,
+  Browsers,
 } = require('@whiskeysockets/baileys');
 
 const store = require('./store');
@@ -509,6 +510,13 @@ const COMMANDS = [
   { key: 'communitykick', desc: '⚠️ Person dauerhaft aus ALLEN Community-Gruppen bannen', ownerOnly: true },
   { key: 'communityunban', desc: 'Community-Bann einer Person aufheben', ownerOnly: true },
   { key: 'communitybanlist', desc: 'alle dauerhaft gebannten Personen auflisten', ownerOnly: true },
+  { key: 'communityankündigung', desc: 'Nachricht an ALLE Community-Gruppen senden', ownerOnly: true },
+  { key: 'communitymute', desc: 'Person in ALLEN Community-Gruppen stummschalten', ownerOnly: true },
+  { key: 'communityunmute', desc: 'Stummschaltung einer Person in ALLEN Community-Gruppen aufheben', ownerOnly: true },
+  { key: 'communitywarn', desc: 'Person in ALLEN Community-Gruppen verwarnen', ownerOnly: true },
+  { key: 'communityinfo', desc: 'Community-Übersicht: alle Gruppen, Mitglieder & Statistiken', ownerOnly: true },
+  { key: 'communitypromo', desc: 'Person in ALLEN Community-Gruppen zum Admin machen', ownerOnly: true },
+  { key: 'communitydemote', desc: 'Admin-Status einer Person in ALLEN Community-Gruppen entziehen', ownerOnly: true },
   { key: 'mute',       desc: 'Mitglied stummschalten', adminDefault: true },
   { key: 'unmute',     desc: 'Stummschaltung aufheben', adminDefault: true },
   { key: 'warn',       desc: 'Mitglied manuell verwarnen', adminDefault: true },
@@ -600,6 +608,12 @@ const ALIAS = {
   würfeln: 'roll',
   ckick: 'communitykick', comban: 'communitykick', communityban: 'communitykick', nuke: 'communitykick',
   cunban: 'communityunban', cbanlist: 'communitybanlist',
+  communitybroadcast: 'communityankündigung', cankündigung: 'communityankündigung', 'community-ankündigung': 'communityankündigung',
+  cmute: 'communitymute', cunmute: 'communityunmute',
+  cwarn: 'communitywarn',
+  cinfo: 'communityinfo',
+  cpromo: 'communitypromo', communitypromotе: 'communitypromo',
+  cdemote: 'communitydemote',
 };
 
 // Gemeinsamer Zustand
@@ -3268,7 +3282,19 @@ async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState('auth_info');
   const { version } = await fetchLatestBaileysVersion();
 
-  const sock = makeWASocket({ version, auth: state, printQRInTerminal: false, logger });
+  const sock = makeWASocket({
+    version,
+    auth: state,
+    printQRInTerminal: false,
+    logger,
+    browser: Browsers.ubuntu('Chrome'),
+    connectTimeoutMs: 60_000,
+    keepAliveIntervalMs: 10_000,
+    syncFullHistory: false,
+    generateHighQualityLinkPreview: false,
+    retryRequestDelayMs: 250,
+    markOnlineOnConnect: false,
+  });
   botState.sock = sock;
   sock.ev.on('creds.update', saveCreds);
 
@@ -3715,6 +3741,141 @@ async function startBot() {
                 return `${i + 1}. +${num} – ${info.reason || 'kein Grund'} (${d})`;
               });
             await reply(`🚷 *Gebannte Personen – ${communityName(parent)}* (${entries.length})\n\n${lines.join('\n')}`);
+            break;
+          }
+          case 'communityankündigung': {
+            if (!(await isCommunityOwner(senderJid, jid))) { await reply('⛔ Nur der Community-Inhaber darf das.'); break; }
+            const parent = communityParentOf(jid);
+            if (!parent) { await reply('❌ Diese Gruppe gehört zu keiner Community.'); break; }
+            const text = args.join(' ').trim();
+            if (!text) { await reply(`Nutzung: ${COMMAND_PREFIX}communityankündigung <Nachricht>`); break; }
+            const communityGroups = getGroupsCached().filter((g) => !g.isCommunity && g.parentJid === parent);
+            if (!communityGroups.length) { await reply('❌ Keine Gruppen in dieser Community gefunden.'); break; }
+            let sent = 0;
+            for (const g of communityGroups) {
+              try {
+                await sock.sendMessage(g.id, { text: `📢 *Community-Ankündigung*\n\n${text}` });
+                sent++;
+              } catch (_) { /* Gruppe evtl. verlassen */ }
+            }
+            await reply(`✅ Ankündigung an ${sent}/${communityGroups.length} Gruppen gesendet.`);
+            break;
+          }
+          case 'communitymute': {
+            if (!(await isCommunityOwner(senderJid, jid))) { await reply('⛔ Nur der Community-Inhaber darf das.'); break; }
+            const parent = communityParentOf(jid);
+            if (!parent) { await reply('❌ Diese Gruppe gehört zu keiner Community.'); break; }
+            const _mentionedCMute = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+            const target = _mentionedCMute[0] || getTargetJid(msg);
+            const minutes = Math.min(1440, Math.max(1, Number(_mentionedCMute[0] ? args[1] : args[0]) || 10));
+            if (!target) { await reply(`Nutzung: ${COMMAND_PREFIX}communitymute @person [Minuten]`); break; }
+            const communityGroupsMute = getGroupsCached().filter((g) => !g.isCommunity && g.parentJid === parent);
+            let mutedIn = 0;
+            for (const g of communityGroupsMute) {
+              try { moderation.muteUser(g.id, target, minutes); mutedIn++; } catch (_) { }
+            }
+            await sock.sendMessage(jid, {
+              text: `🔇 @${target.split('@')[0]} wurde in ${mutedIn} Community-Gruppen für ${minutes} Min. stummgeschaltet.`,
+              mentions: [target],
+            });
+            break;
+          }
+          case 'communityunmute': {
+            if (!(await isCommunityOwner(senderJid, jid))) { await reply('⛔ Nur der Community-Inhaber darf das.'); break; }
+            const parent = communityParentOf(jid);
+            if (!parent) { await reply('❌ Diese Gruppe gehört zu keiner Community.'); break; }
+            const target = getTargetJid(msg);
+            if (!target) { await reply(`Nutzung: ${COMMAND_PREFIX}communityunmute @person`); break; }
+            const communityGroupsUnmute = getGroupsCached().filter((g) => !g.isCommunity && g.parentJid === parent);
+            let unmutedIn = 0;
+            for (const g of communityGroupsUnmute) {
+              try { moderation.unmuteUser(g.id, target); unmutedIn++; } catch (_) { }
+            }
+            await sock.sendMessage(jid, {
+              text: `🔊 @${target.split('@')[0]} wurde in ${unmutedIn} Community-Gruppen freigeschaltet.`,
+              mentions: [target],
+            });
+            break;
+          }
+          case 'communitywarn': {
+            if (!(await isCommunityOwner(senderJid, jid))) { await reply('⛔ Nur der Community-Inhaber darf das.'); break; }
+            const parent = communityParentOf(jid);
+            if (!parent) { await reply('❌ Diese Gruppe gehört zu keiner Community.'); break; }
+            const _mentionedCWarn = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+            const target = _mentionedCWarn[0] || getTargetJid(msg);
+            const reason = (_mentionedCWarn[0] ? args.slice(1) : args).join(' ').trim() || 'kein Grund angegeben';
+            if (!target) { await reply(`Nutzung: ${COMMAND_PREFIX}communitywarn @person [Grund]`); break; }
+            const communityGroupsWarn = getGroupsCached().filter((g) => !g.isCommunity && g.parentJid === parent);
+            let warnedIn = 0;
+            for (const g of communityGroupsWarn) {
+              try { moderation.addWarning(g.id, target, reason); warnedIn++; } catch (_) { }
+            }
+            await sock.sendMessage(jid, {
+              text: `⚠️ @${target.split('@')[0]} wurde in ${warnedIn} Community-Gruppen verwarnt.\nGrund: ${reason}`,
+              mentions: [target],
+            });
+            break;
+          }
+          case 'communityinfo': {
+            if (!(await isCommunityOwner(senderJid, jid))) { await reply('⛔ Nur der Community-Inhaber darf das.'); break; }
+            const parent = communityParentOf(jid);
+            if (!parent) { await reply('❌ Diese Gruppe gehört zu keiner Community.'); break; }
+            const communityGroupsInfo = getGroupsCached().filter((g) => !g.isCommunity && g.parentJid === parent);
+            const bans = Object.keys(config.communityBans?.[parent] || {}).length;
+            let totalMembers = 0;
+            const groupLines = communityGroupsInfo.map((g) => {
+              const memberCount = g.size || 0;
+              totalMembers += memberCount;
+              return `• ${g.subject || g.id.split('@')[0]} (${memberCount} Mitglieder)`;
+            });
+            const communityGroupsInfoName = communityName(parent);
+            await reply(
+              `🏘️ *Community: ${communityGroupsInfoName}*\n\n` +
+              `📊 Gruppen: ${communityGroupsInfo.length}\n` +
+              `👥 Mitglieder gesamt: ${totalMembers}\n` +
+              `🚷 Gebannte Personen: ${bans}\n\n` +
+              (groupLines.length ? groupLines.join('\n') : '_(keine Gruppen gefunden)_')
+            );
+            break;
+          }
+          case 'communitypromo': {
+            if (!(await isCommunityOwner(senderJid, jid))) { await reply('⛔ Nur der Community-Inhaber darf das.'); break; }
+            const parent = communityParentOf(jid);
+            if (!parent) { await reply('❌ Diese Gruppe gehört zu keiner Community.'); break; }
+            const target = getTargetJid(msg);
+            if (!target) { await reply(`Nutzung: ${COMMAND_PREFIX}communitypromo @person`); break; }
+            const communityGroupsPromo = getGroupsCached().filter((g) => !g.isCommunity && g.parentJid === parent);
+            let promoIn = 0;
+            for (const g of communityGroupsPromo) {
+              try {
+                await sock.groupParticipantsUpdate(g.id, [target], 'promote');
+                promoIn++;
+              } catch (_) { }
+            }
+            await sock.sendMessage(jid, {
+              text: `⬆️ @${target.split('@')[0]} wurde in ${promoIn} Community-Gruppen zum Admin befördert.`,
+              mentions: [target],
+            });
+            break;
+          }
+          case 'communitydemote': {
+            if (!(await isCommunityOwner(senderJid, jid))) { await reply('⛔ Nur der Community-Inhaber darf das.'); break; }
+            const parent = communityParentOf(jid);
+            if (!parent) { await reply('❌ Diese Gruppe gehört zu keiner Community.'); break; }
+            const target = getTargetJid(msg);
+            if (!target) { await reply(`Nutzung: ${COMMAND_PREFIX}communitydemote @person`); break; }
+            const communityGroupsDemote = getGroupsCached().filter((g) => !g.isCommunity && g.parentJid === parent);
+            let demoteIn = 0;
+            for (const g of communityGroupsDemote) {
+              try {
+                await sock.groupParticipantsUpdate(g.id, [target], 'demote');
+                demoteIn++;
+              } catch (_) { }
+            }
+            await sock.sendMessage(jid, {
+              text: `⬇️ @${target.split('@')[0]} wurde in ${demoteIn} Community-Gruppen der Admin-Status entzogen.`,
+              mentions: [target],
+            });
             break;
           }
           case 'mute': {
