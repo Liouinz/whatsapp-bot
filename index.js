@@ -924,6 +924,28 @@ function keyOf(req) {
   return `?key=${encodeURIComponent(req.query.key)}`;
 }
 
+// ---------- Login-Bruteforce-Schutz (In-Memory) ----------
+// Max. 8 Fehlversuche pro IP in 10 Minuten, danach kurz gesperrt.
+const LOGIN_WINDOW = 10 * 60 * 1000;
+const LOGIN_MAX = 8;
+const loginAttempts = new Map(); // ip -> { count, first }
+function loginBlocked(ip) {
+  const rec = loginAttempts.get(ip);
+  if (!rec) return false;
+  if (Date.now() - rec.first > LOGIN_WINDOW) { loginAttempts.delete(ip); return false; }
+  return rec.count >= LOGIN_MAX;
+}
+function noteLoginFail(ip) {
+  const now = Date.now();
+  const rec = loginAttempts.get(ip);
+  if (!rec || now - rec.first > LOGIN_WINDOW) loginAttempts.set(ip, { count: 1, first: now });
+  else rec.count += 1;
+  if (loginAttempts.size > 1000) { // Map beschränken: abgelaufene Einträge aufräumen
+    for (const [k, v] of loginAttempts) if (now - v.first > LOGIN_WINDOW) loginAttempts.delete(k);
+  }
+}
+function noteLoginOk(ip) { loginAttempts.delete(ip); }
+
 const STYLE = `
   :root{
     --bg:#0a0b10; --panel:rgba(255,255,255,.045); --panel-2:rgba(255,255,255,.06);
@@ -1193,7 +1215,7 @@ function page(title, body, opts = {}) {
   const contentClass = hasShell ? 'content has-shell' : 'content bare';
   return `<!doctype html><html lang="de"><head>
     <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-    ${refresh}<title>${title}</title><style>${STYLE}</style></head>
+    ${refresh}<title>${escapeHtml(title)}</title><style>${STYLE}</style></head>
     <body${bodyClass}>${LEAVES}<div class="${contentClass}">${banner}${noConnBanner}${body}${opts.script || ''}</div></body></html>`;
 }
 
@@ -1294,7 +1316,44 @@ function requireAuth(req, res) {
 
 // ---------- Webserver ----------
 const app = express();
-app.use(express.urlencoded({ extended: true }));
+// Hinter Render/Proxy: echte Client-IP aus X-Forwarded-For lesen (für Ratelimit).
+app.set('trust proxy', 1);
+app.disable('x-powered-by'); // Express-Fingerprint nicht verraten
+// Body-Größe begrenzen (Schutz vor Speicher-DoS durch riesige POST-Bodies).
+app.use(express.urlencoded({ extended: true, limit: '100kb' }));
+
+// Sicherheits-Header auf allen Antworten. Wichtig u. a.:
+//  - Referrer-Policy:no-referrer → das ?key=-Passwort leakt nicht via Referer.
+//  - CSP → erlaubt nur eigene/inline Ressourcen (kein externes Script), blockt
+//    Framing/Objekte → reduziert XSS/Clickjacking & Safe-Browsing-Flags.
+//  - X-Robots-Tag:noindex → das Dashboard taucht nicht in Suchmaschinen auf.
+const CSP = [
+  "default-src 'self'",
+  "base-uri 'none'",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  "img-src 'self' data: https:",
+  "style-src 'self' 'unsafe-inline'",
+  "script-src 'self' 'unsafe-inline'",
+  "connect-src 'self'",
+  "form-action 'self'",
+].join('; ');
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), interest-cohort=()');
+  res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('Content-Security-Policy', CSP);
+  next();
+});
+
+// Suchmaschinen aussperren (Dashboard ist privat).
+app.get('/robots.txt', (_req, res) => {
+  res.type('text/plain').send('User-agent: *\nDisallow: /\n');
+});
 
 app.get('/ping', (_req, res) => res.status(200).send('ok'));
 // Health-Endpoint für Uptime-Monitore (UptimeRobot etc.) – immer 200, mit Status-JSON.
@@ -1400,7 +1459,9 @@ app.get('/', (_req, res) => {
     <p class="muted" style="text-align:center;font-size:.78rem;opacity:.6;margin-top:4px">🔒 Sichere, passwortgeschützte Verwaltung</p>`, { script }));
 });
 
-app.get('/status', (_req, res) => {
+app.get('/status', (req, res) => {
+  // Enthält die Bot-Nummer → nur mit gültigem Passwort. Monitore nutzen /healthz.
+  if (!passwordOk(req.query.key)) return res.status(401).json({ error: 'unauthorized' });
   res.json({
     status: botState.connected ? 'verbunden' : 'getrennt',
     nummer: botState.me ? botState.me.id.split(':')[0] : null,
@@ -1412,10 +1473,17 @@ app.get('/status', (_req, res) => {
 });
 
 app.get('/go', (req, res) => {
+  const ip = req.ip || 'unknown';
+  if (loginBlocked(ip)) {
+    return res.status(429).send(page('Zu viele Versuche',
+      '<div class="card"><h1>⏳ Zu viele Fehlversuche</h1><p class="muted">Bitte warte ein paar Minuten und versuche es dann erneut.</p><a href="/"><button>Zurück</button></a></div>'));
+  }
   if (!passwordOk(req.query.key)) {
+    noteLoginFail(ip);
     return res.status(401).send(page('Falsches Passwort',
       '<div class="card"><h1>🔒 Falsches Passwort</h1><a href="/"><button>Erneut versuchen</button></a></div>'));
   }
+  noteLoginOk(ip);
   const keyParam = keyOf(req);
   res.redirect(`/dashboard${keyParam}`);
 });
