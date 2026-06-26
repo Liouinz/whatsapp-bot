@@ -41,6 +41,9 @@ async function main() {
 
   // WhatsApp-Verbindung aufbauen (lädt Session aus der DB → kein neuer QR nötig)
   await startSocket();
+
+  // Wöchentlicher Report an Admins (optionale Auto-Funktion, pro Gruppe schaltbar)
+  require('./bot/report').startScheduler();
 }
 
 function startKeepAlive() {

@@ -76,6 +76,7 @@ const DEFAULT_GROUP_CONFIG = {
     verify: false,
     verifyTimeoutMin: 5,
   },
+  weeklyReport: false, // privater Wochenreport an Admins (Auto-Funktion)
 };
 
 // ---------------------------------------------------------------------------
@@ -367,6 +368,31 @@ async function getMemberStat(groupJid, num) {
   };
 }
 
+async function getGroupActivity(groupJid) {
+  await flushStats();
+  const r = await db().execute({
+    sql: 'SELECT COALESCE(SUM(messages),0) m, COALESCE(SUM(commands),0) c FROM member_stats WHERE group_jid = ?',
+    args: [groupJid],
+  });
+  return { messages: Number(r.rows[0].m), commands: Number(r.rows[0].c) };
+}
+
+async function countBansSince(groupJid, since) {
+  const r = await db().execute({
+    sql: 'SELECT COUNT(*) n FROM ban_log WHERE group_jid = ? AND at >= ?',
+    args: [groupJid, since],
+  });
+  return Number(r.rows[0].n);
+}
+
+async function countReportsSince(groupJid, since) {
+  const r = await db().execute({
+    sql: 'SELECT COUNT(*) n FROM reports WHERE group_jid = ? AND at >= ?',
+    args: [groupJid, since],
+  });
+  return Number(r.rows[0].n);
+}
+
 async function getTopMembers(groupJid, limit = 10) {
   await flushStats();
   const r = await db().execute({
@@ -574,6 +600,9 @@ module.exports = {
   bumpStat,
   getMemberStat,
   getTopMembers,
+  getGroupActivity,
+  countBansSince,
+  countReportsSince,
   // ban log
   addBanLog,
   getBanLog,

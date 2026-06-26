@@ -139,6 +139,8 @@ router.get('/group', wrap(async (req, res) => {
 
     <div class="card"><h2>📜 Regeln</h2><textarea name="rules">${esc(c.rules || '')}</textarea></div>
 
+    <div class="card"><h2>📊 Report</h2>${rowSw('Wöchentlicher Report privat an Admins', 'report_weekly', c.weeklyReport)}</div>
+
     <div class="card"><h2>⚙️ Rechte je Befehl</h2>
       <p class="muted">„Standard" = die im Befehl hinterlegte Stufe.</p>${cmdRows}</div>
 
@@ -186,6 +188,7 @@ router.post('/group/save', checkCsrf, wrap(async (req, res) => {
       verifyTimeoutMin: Math.min(60, Math.max(1, parseInt(b.welcome_timeout, 10) || 5)),
     },
     rules: String(b.rules || '').trim() || null,
+    weeklyReport: has('report_weekly'),
   };
   await storage.setGroupConfig(jid, cfg);
   await storage.setGroupActive(jid, has('active'));
