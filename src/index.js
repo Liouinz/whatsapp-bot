@@ -11,6 +11,7 @@ const { getDb } = require('./core/db');
 const { initStorage, flushStats } = require('./core/storage');
 const { startSocket } = require('./core/connection');
 const { startWeb } = require('./web/server');
+const registry = require('./bot/registry');
 
 async function main() {
   logger.info('🚀 CommunityBot v2 startet …');
@@ -20,6 +21,9 @@ async function main() {
 
   // Daten-Schema anlegen + Debounced-Flush-Loop starten (Phase 2)
   await initStorage();
+
+  // Befehle laden (Phase 3)
+  registry.loadCommands();
 
   // Web zuerst, damit /qr und /ping sofort erreichbar sind
   startWeb();

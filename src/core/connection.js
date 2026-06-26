@@ -25,6 +25,7 @@ const state = {
   lastConnectedAt: null,
   me: null,
   startedAt: Date.now(),
+  commandsProcessed: 0,
 };
 
 let retries = 0;
@@ -57,6 +58,25 @@ async function startSocket() {
   state.sendQueue.setSock(sock);
 
   sock.ev.on('creds.update', saveCreds);
+
+  // Eingehende Nachrichten → Router (Befehle). Auto-Moderation/Welcome folgen in
+  // Phase 4 (events.js). Lazy require vermeidet einen Modul-Zyklus.
+  sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    if (type !== 'notify') return;
+    const { handleMessage } = require('../bot/router');
+    for (const m of messages) {
+      handleMessage(sock, m).catch((err) => logger.error({ err }, 'handleMessage Fehler'));
+    }
+  });
+
+  // Metadaten-Cache invalidieren, wenn sich die Teilnehmer ändern
+  sock.ev.on('group-participants.update', (u) => {
+    try {
+      require('../bot/permissions').invalidateGroupMetadata(u.id);
+    } catch (_) {
+      /* ignore */
+    }
+  });
 
   sock.ev.on('connection.update', async (u) => {
     const { connection, lastDisconnect, qr } = u;
