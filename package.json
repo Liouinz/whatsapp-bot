@@ -1,14 +1,22 @@
 {
-  "name": "blueprint-download",
-  "version": "1.0.0",
+  "name": "community-bot",
+  "version": "2.0.0",
   "private": true,
-  "description": "Minimale Platzhalter-Seite, die nur die Blueprint-Datei zum Download anbietet. Ersetzt den alten WhatsApp-Bot.",
-  "main": "index.js",
+  "description": "WhatsApp Community Bot v2 — modular, anti-ban, session-persistent (Turso).",
+  "main": "src/index.js",
   "type": "commonjs",
   "scripts": {
-    "start": "node index.js"
+    "start": "node src/index.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.14.0",
+    "@whiskeysockets/baileys": "^6.7.0",
+    "express": "^4.19.2",
+    "mongodb": "^6.5.0",
+    "pino": "^9.0.0",
+    "qrcode": "^1.5.3"
   }
 }
