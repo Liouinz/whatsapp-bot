@@ -85,6 +85,15 @@ async function handleMessage(sock, msg) {
     const sender = isGroup ? msg.key.participant || msg.participant : chatJid;
     const target = extractTarget(msg);
 
+    const ci =
+      msg.message?.extendedTextMessage?.contextInfo ||
+      msg.message?.imageMessage?.contextInfo ||
+      msg.message?.videoMessage?.contextInfo;
+    const quotedKey = ci?.stanzaId
+      ? { remoteJid: chatJid, fromMe: false, id: ci.stanzaId, participant: ci.participant }
+      : null;
+    const quotedMessage = ci?.quotedMessage || null;
+
     const ctx = {
       sock,
       msg,
@@ -99,6 +108,8 @@ async function handleMessage(sock, msg) {
       body,
       target,
       targetNum: target ? permissions.numFromJid(target) : null,
+      quotedKey,
+      quotedMessage,
       me: state.me,
       botJid: permissions.getBotJid(sock),
       registry,

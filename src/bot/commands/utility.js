@@ -1,6 +1,7 @@
 'use strict';
 
 const { state } = require('../../core/connection');
+const { mentionTag, fmtDate } = require('../util');
 const pkg = require('../../../package.json');
 
 /** Formatiert eine Dauer in ms als "Xd Yh Zm". */
@@ -135,4 +136,125 @@ const hilfe = {
   },
 };
 
-module.exports = [ping, info, id, hilfe];
+const regeln = {
+  name: 'regeln',
+  aliases: ['rules'],
+  category: 'utility',
+  description:
+    'Zeigt die vom Admin festgelegten Gruppenregeln an. Wurden noch keine Regeln gesetzt, erscheint ein entsprechender Hinweis. Admins können Regeln mit !setregeln festlegen.',
+  usage: '!regeln',
+  keywords: ['regeln', 'rules', 'gruppenregeln', 'verhalten'],
+  access: 'all',
+  scope: 'group',
+  cooldownMs: 5000,
+  async run(ctx) {
+    const rules = ctx.groupConfig?.rules;
+    if (!rules) return ctx.reply(`📜 Für diese Gruppe wurden noch keine Regeln festgelegt.\n_Admins: ${ctx.prefix}setregeln <Text>_`);
+    await ctx.reply(`📜 *Gruppenregeln*\n\n${rules}`);
+  },
+};
+
+const gruppe = {
+  name: 'gruppe',
+  aliases: ['group'],
+  category: 'utility',
+  description:
+    'Zeigt Informationen zur aktuellen Gruppe: Name, Beschreibung, Mitgliederzahl, Admins und weitere Metadaten. Praktisch für einen schnellen Überblick über die Gruppe.',
+  usage: '!gruppe',
+  keywords: ['gruppe', 'group', 'info', 'mitglieder', 'beschreibung'],
+  access: 'all',
+  scope: 'group',
+  cooldownMs: 5000,
+  async run(ctx) {
+    const meta = await ctx.permissions.getGroupMetadata(ctx.sock, ctx.groupJid);
+    const admins = meta.participants.filter((p) => p.admin === 'admin' || p.admin === 'superadmin');
+    const lines = [
+      `👥 *${meta.subject || 'Gruppe'}*`,
+      meta.desc ? `\n_${String(meta.desc).slice(0, 200)}_` : '',
+      `\n• Mitglieder: ${meta.participants.length}`,
+      `• Admins: ${admins.length}`,
+      meta.creation ? `• Erstellt: ${fmtDate(meta.creation * 1000)}` : '',
+    ].filter(Boolean);
+    await ctx.reply(lines.join('\n'));
+  },
+};
+
+const top = {
+  name: 'top',
+  aliases: [],
+  category: 'utility',
+  description:
+    'Zeigt die aktivsten Mitglieder der Gruppe anhand ihrer Nachrichtenanzahl. Die Top 10 werden in einer Rangliste dargestellt. Aktivität wird über die Zeit seit dem letzten Reset gemessen.',
+  usage: '!top',
+  keywords: ['top', 'rangliste', 'aktivste', 'leaderboard', 'beste'],
+  access: 'all',
+  scope: 'group',
+  cooldownMs: 10000,
+  async run(ctx) {
+    const list = await ctx.storage.getTopMembers(ctx.groupJid, 10);
+    if (!list.length) return ctx.reply('Noch keine Aktivität erfasst. 📊');
+    const medals = ['🥇', '🥈', '🥉'];
+    const mentions = list.map((m) => `${m.num}@s.whatsapp.net`);
+    let out = '🏆 *Aktivste Mitglieder*\n';
+    list.forEach((m, i) => {
+      out += `\n${medals[i] || `${i + 1}.`} ${mentionTag(m.num)} — ${m.messages} Nachrichten`;
+    });
+    await ctx.replyWithMentions(out, mentions);
+  },
+};
+
+const stats = {
+  name: 'stats',
+  aliases: ['profil'],
+  category: 'utility',
+  description:
+    'Zeigt Aktivitäts-Statistiken eines Mitglieds — Nachrichten, Warnungen, Mutes. Ohne Angabe werden deine eigenen Stats angezeigt. Durch Taggen eines anderen Nutzers siehst du dessen Profil.',
+  usage: '!stats [@user]',
+  keywords: ['stats', 'statistik', 'profil', 'aktivität', 'nachrichten'],
+  access: 'all',
+  scope: 'group',
+  cooldownMs: 5000,
+  async run(ctx) {
+    const targetJid = ctx.target || ctx.sender;
+    const num = ctx.permissions.numFromJid(targetJid);
+    const st = await ctx.storage.getMemberStat(ctx.groupJid, num);
+    const w = await ctx.storage.getWarnings(ctx.groupJid, targetJid);
+    const muted = await ctx.storage.isMuted(ctx.groupJid, targetJid);
+    const out = [
+      `📊 *Statistik* für ${mentionTag(num)}`,
+      `• Nachrichten: ${st.messages}`,
+      `• Befehle: ${st.commands}`,
+      `• Verwarnungen: ${w.count}`,
+      `• Stumm: ${muted ? 'ja 🔇' : 'nein'}`,
+      `• Zuletzt aktiv: ${fmtDate(st.lastSeen)}`,
+    ].join('\n');
+    await ctx.replyWithMentions(out, [targetJid]);
+  },
+};
+
+const melden = {
+  name: 'melden',
+  aliases: ['report'],
+  category: 'utility',
+  description:
+    'Sendet eine anonyme Meldung an die Admins der Gruppe. Nützlich für Regelbrüche oder Probleme, die diskret gemeldet werden sollen. Die Admins erhalten die Nachricht mit einem Zeitstempel.',
+  usage: '!melden [Text]',
+  keywords: ['melden', 'report', 'beschweren', 'anzeigen', 'problem'],
+  access: 'all',
+  scope: 'group',
+  cooldownMs: 30000,
+  async run(ctx) {
+    if (!ctx.argText) return ctx.reply(`⚠️ Bitte beschreibe dein Anliegen.\n_${ctx.command.usage}_`);
+    let groupName = ctx.groupJid;
+    try {
+      const meta = await ctx.permissions.getGroupMetadata(ctx.sock, ctx.groupJid);
+      groupName = meta.subject || ctx.groupJid;
+    } catch (_) {
+      /* ignore */
+    }
+    await ctx.storage.addReport(ctx.groupJid, groupName, ctx.senderNum, ctx.argText);
+    await ctx.reply('✅ Deine Meldung wurde anonym an die Admins weitergeleitet. Danke!');
+  },
+};
+
+module.exports = [ping, info, id, hilfe, regeln, gruppe, top, stats, melden];
