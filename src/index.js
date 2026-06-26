@@ -8,6 +8,7 @@ process.on('unhandledRejection', (err) => logger.error({ err }, 'unhandledReject
 
 const config = require('./core/config');
 const { getDb } = require('./core/db');
+const { initStorage, flushStats } = require('./core/storage');
 const { startSocket } = require('./core/connection');
 const { startWeb } = require('./web/server');
 
@@ -16,6 +17,9 @@ async function main() {
 
   // DB-Client initialisieren (legt bei Bedarf lokale Datei an / verbindet Turso)
   getDb();
+
+  // Daten-Schema anlegen + Debounced-Flush-Loop starten (Phase 2)
+  await initStorage();
 
   // Web zuerst, damit /qr und /ping sofort erreichbar sind
   startWeb();
@@ -35,5 +39,22 @@ function startKeepAlive() {
   }, 5 * 60 * 1000);
   logger.info(`Keep-Alive aktiv → ${url} (alle 5 Min). Hinweis: externen Pinger (UptimeRobot/cron-job.org) zusätzlich einrichten.`);
 }
+
+// Graceful Shutdown: ausstehende Stat-Deltas vor dem Beenden persistieren
+// (Render schickt SIGTERM beim Neustart/Deploy)
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.info(`${signal} empfangen — flushe ausstehende Daten …`);
+  try {
+    await flushStats();
+  } catch (err) {
+    logger.error({ err }, 'Flush beim Shutdown fehlgeschlagen');
+  }
+  process.exit(0);
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 main().catch((err) => logger.error({ err }, 'Fataler Start-Fehler'));
