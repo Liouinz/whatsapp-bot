@@ -8,8 +8,9 @@ process.on('unhandledRejection', (err) => logger.error({ err }, 'unhandledReject
 
 const config = require('./core/config');
 const { getDb } = require('./core/db');
-const { initStorage, flushStats } = require('./core/storage');
-const { startSocket } = require('./core/connection');
+const storage = require('./core/storage');
+const { initStorage, flushStats } = storage;
+const { startSocket, state } = require('./core/connection');
 const { startWeb } = require('./web/server');
 const registry = require('./bot/registry');
 
@@ -24,6 +25,13 @@ async function main() {
 
   // Befehle laden (Phase 3)
   registry.loadCommands();
+
+  // Power-Zustand aus den Settings wiederherstellen (Web-UI An/Aus)
+  try {
+    state.powered = await storage.getSetting('powered', true);
+  } catch (_) {
+    /* default true */
+  }
 
   // Web zuerst, damit /qr und /ping sofort erreichbar sind
   startWeb();

@@ -171,6 +171,15 @@ async function updateGroupConfig(jid, patch) {
   return merged;
 }
 
+/** Ersetzt die komplette Gruppen-Config (für die Web-UI, erlaubt auch Entfernen). */
+async function setGroupConfig(jid, fullConfig) {
+  await ensureGroup(jid);
+  await db().execute({
+    sql: 'UPDATE groups SET config = ? WHERE jid = ?',
+    args: [JSON.stringify(fullConfig), jid],
+  });
+}
+
 async function setGroupActive(jid, active) {
   await ensureGroup(jid);
   await db().execute({ sql: 'UPDATE groups SET active = ? WHERE jid = ?', args: [active ? 1 : 0, jid] });
@@ -391,6 +400,20 @@ async function getBanLog(groupJid, limit = 50) {
   }));
 }
 
+async function getRecentBans(limit = 100) {
+  const r = await db().execute({
+    sql: 'SELECT group_jid, num, banned_by, reason, at FROM ban_log ORDER BY at DESC LIMIT ?',
+    args: [limit],
+  });
+  return r.rows.map((row) => ({
+    groupJid: row.group_jid,
+    num: row.num,
+    bannedBy: row.banned_by,
+    reason: row.reason,
+    at: Number(row.at),
+  }));
+}
+
 // ---------------------------------------------------------------------------
 // COMMUNITY BANS
 // ---------------------------------------------------------------------------
@@ -503,6 +526,24 @@ async function setSetting(key, value) {
 }
 
 // ---------------------------------------------------------------------------
+// BACKUP-EXPORT (für die Web-UI). Auth-Tabelle wird NIE exportiert (Secrets!).
+// ---------------------------------------------------------------------------
+
+async function exportAll() {
+  await flushStats();
+  const tables = [
+    'groups', 'warnings', 'mutes', 'member_stats', 'ban_log',
+    'community_bans', 'reports', 'anliegen', 'settings',
+  ];
+  const out = { exportedAt: Date.now(), tables: {} };
+  for (const t of tables) {
+    const r = await db().execute(`SELECT * FROM ${t}`);
+    out.tables[t] = r.rows;
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 
 module.exports = {
   DEFAULT_GROUP_CONFIG,
@@ -513,6 +554,7 @@ module.exports = {
   getGroup,
   getGroupConfig,
   updateGroupConfig,
+  setGroupConfig,
   setGroupActive,
   getAllGroups,
   // warnings
@@ -535,6 +577,7 @@ module.exports = {
   // ban log
   addBanLog,
   getBanLog,
+  getRecentBans,
   // community bans
   addCommunityBan,
   removeCommunityBan,
@@ -550,4 +593,6 @@ module.exports = {
   // settings
   getSetting,
   setSetting,
+  // backup
+  exportAll,
 };

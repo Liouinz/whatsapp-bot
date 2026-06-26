@@ -51,6 +51,7 @@ async function handleUpsert(sock, { messages, type }) {
 }
 
 async function handleMessage(sock, msg) {
+  if (state.powered === false) return; // Bot über Web-UI ausgeschaltet
   if (!msg.message || msg.key.fromMe) return;
   const chatJid = msg.key.remoteJid;
   if (!chatJid || chatJid === 'status@broadcast') return;

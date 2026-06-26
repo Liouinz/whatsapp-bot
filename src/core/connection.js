@@ -26,6 +26,7 @@ const state = {
   me: null,
   startedAt: Date.now(),
   commandsProcessed: 0,
+  powered: true, // Web-UI kann den Bot "ausschalten" (ignoriert dann Nachrichten)
 };
 
 let retries = 0;
