@@ -11,6 +11,7 @@
 const { logger } = require('./core/logger');
 const db = require('./core/db');
 const connection = require('./core/connection');
+const keepalive = require('./core/keepalive');
 
 let shuttingDown = false;
 
@@ -19,6 +20,7 @@ async function gracefulShutdown(signal) {
   shuttingDown = true;
   logger.warn(`${signal} empfangen — fahre sauber herunter.`);
   try {
+    keepalive.stop();
     await connection.shutdown();
   } catch (e) {
     logger.warn(`Shutdown-Fehler: ${e.message}`);
@@ -44,8 +46,9 @@ function installGlobalHandlers() {
 async function main() {
   installGlobalHandlers();
   await db.init();
+  keepalive.start({ getStatus: () => ({ connected: connection.isConnected() }) });
   await connection.start();
-  logger.warn('Phase 2 bereit — Verbindung gestartet, Watchdog aktiv.');
+  logger.warn('Phase 3 bereit — Health/Keepalive aktiv, Verbindung gestartet, Watchdog aktiv.');
 }
 
 main().catch((e) => {
