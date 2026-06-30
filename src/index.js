@@ -3,40 +3,52 @@
 /**
  * index.js — Einstiegspunkt.
  *
- * Phase 1 (Gerüst): globale Fehler-Handler (nie crashen) + DB-Init (Schema).
- * Verbindung, Watchdog, Keepalive, Router etc. folgen in späteren Phasen.
+ * Phase 1 (Gerüst): globale Fehler-Handler + DB-Init (Schema).
+ * Phase 2 (Verbindung): Socket starten, Watchdog, Graceful Shutdown.
+ * Router/Keepalive/Web folgen in späteren Phasen.
  */
 
 const { logger } = require('./core/logger');
 const db = require('./core/db');
+const connection = require('./core/connection');
+
+let shuttingDown = false;
+
+async function gracefulShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.warn(`${signal} empfangen — fahre sauber herunter.`);
+  try {
+    await connection.shutdown();
+  } catch (e) {
+    logger.warn(`Shutdown-Fehler: ${e.message}`);
+  }
+  process.exit(0);
+}
 
 /** Globale Handler: alles loggen, niemals den Prozess hart killen. */
 function installGlobalHandlers() {
   process.on('unhandledRejection', (reason) => {
-    logger.error({ reason: String(reason && reason.message ? reason.message : reason) }, 'unhandledRejection');
+    logger.error(
+      { reason: String(reason && reason.message ? reason.message : reason) },
+      'unhandledRejection'
+    );
   });
   process.on('uncaughtException', (err) => {
     logger.error({ err: err.message }, 'uncaughtException');
   });
-  // Graceful Shutdown wird in Phase 2 mit der Verbindung verdrahtet.
-  process.on('SIGTERM', () => {
-    logger.warn('SIGTERM empfangen — Phase-1-Gerüst beendet sich sauber.');
-    process.exit(0);
-  });
-  process.on('SIGINT', () => {
-    logger.warn('SIGINT empfangen — beende.');
-    process.exit(0);
-  });
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 }
 
 async function main() {
   installGlobalHandlers();
   await db.init();
-  logger.warn('Phase 1 Gerüst bereit — DB initialisiert, alle Tabellen vorhanden.');
-  // Hinweis: Ohne Verbindung (Phase 2) gibt es noch nichts wachzuhalten.
+  await connection.start();
+  logger.warn('Phase 2 bereit — Verbindung gestartet, Watchdog aktiv.');
 }
 
 main().catch((e) => {
-  logger.error({ err: e.message }, 'Fataler Startfehler beim Gerüst-Bootstrap.');
+  logger.error({ err: e.message }, 'Fataler Startfehler.');
   process.exit(1);
 });
