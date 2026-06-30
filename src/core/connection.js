@@ -55,6 +55,12 @@ function setAlarmHandler(fn) {
   if (typeof fn === 'function') onAlarm = fn;
 }
 
+// Optionaler Hook bei erfolgreichem "open" (z. B. Sende-Queue fortsetzen).
+let onOpen = () => {};
+function setOpenHandler(fn) {
+  if (typeof fn === 'function') onOpen = fn;
+}
+
 function getSock() {
   return sock;
 }
@@ -140,6 +146,11 @@ async function onConnectionUpdate(update, clearSession) {
     lastQR = null;
     logger.warn('Verbindung offen — angemeldet.');
     watchdog.feed();
+    try {
+      onOpen();
+    } catch {
+      /* ignore */
+    }
   }
 
   if (connection === 'close') {
@@ -269,6 +280,7 @@ module.exports = {
   forceReconnect,
   setMessageHandler,
   setAlarmHandler,
+  setOpenHandler,
   decideReconnect,
   _onMessagesUpsert, // exportiert für Tests (Dedupe)
 };

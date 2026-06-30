@@ -12,6 +12,7 @@ const { logger } = require('./core/logger');
 const db = require('./core/db');
 const connection = require('./core/connection');
 const keepalive = require('./core/keepalive');
+const sendQueue = require('./core/send-queue');
 
 let shuttingDown = false;
 
@@ -47,8 +48,11 @@ async function main() {
   installGlobalHandlers();
   await db.init();
   keepalive.start({ getStatus: () => ({ connected: connection.isConnected() }) });
+  // Anti-Ban: bei 403 die Sende-Queue pausieren, bei erfolgreichem Reconnect fortsetzen.
+  connection.setAlarmHandler(() => sendQueue.pause('403 forbidden'));
+  connection.setOpenHandler(() => sendQueue.resume());
   await connection.start();
-  logger.warn('Phase 3 bereit — Health/Keepalive aktiv, Verbindung gestartet, Watchdog aktiv.');
+  logger.warn('Phase 4 bereit — Sende-Queue/Anti-Ban aktiv, Verbindung gestartet, Watchdog aktiv.');
 }
 
 main().catch((e) => {
