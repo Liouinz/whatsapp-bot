@@ -1,8 +1,8 @@
 {
   "name": "community-bot",
-  "version": "2.0.0",
+  "version": "7.2.0",
   "private": true,
-  "description": "WhatsApp Community Bot v2 — modular, anti-ban, session-persistent (Turso).",
+  "description": "WhatsApp Community Bot v7.2 — stabil, sicher, intelligent. Session in Turso, KI nur als Fallback.",
   "main": "src/index.js",
   "type": "commonjs",
   "scripts": {
@@ -12,10 +12,14 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@hapi/boom": "^10.0.1",
     "@libsql/client": "^0.14.0",
     "@whiskeysockets/baileys": "^6.7.0",
     "express": "^4.19.2",
-    "mongodb": "^6.5.0",
+    "express-rate-limit": "^7.4.0",
+    "helmet": "^7.1.0",
+    "joi": "^17.13.0",
+    "node-cache": "^5.1.2",
     "pino": "^9.0.0",
     "qrcode": "^1.5.3"
   }

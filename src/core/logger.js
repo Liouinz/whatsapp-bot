@@ -1,52 +1,60 @@
 'use strict';
 
-const pino = require('pino');
-const config = require('./config');
-
 /**
- * pino-Logger (auch von Baileys genutzt) + In-Memory-Ring-Buffer der letzten
- * Fehler/Warnungen für die Fehlerlog-Seite der Web-UI.
+ * logger.js — pino auf Level "warn" (gegen Decrypt-Spam) + Nummern-Maskierung.
+ *
+ * Stolperstein-Bezug (Plan): Logger niemals auf "info" → sonst Decrypt-Spam.
+ * Sicherheit (Plan): Telefonnummern in Log & Panel maskiert.
+ *
+ * Wir maskieren defensiv: ein pino-logMethod-Hook ersetzt in allen String-
+ * Argumenten lange Ziffernfolgen (Nummern / JID-Localparts) durch eine
+ * maskierte Form. So landet keine Klar-Nummer im Log, auch wenn ein Aufruf
+ * das Maskieren vergisst.
  */
+
+const pino = require('pino');
+
+/** Maskiert eine reine Ziffernfolge: erste 2 + letzte 2 sichtbar, Rest "*". */
+function maskNumber(input) {
+  if (input === undefined || input === null) return input;
+  const s = String(input);
+  if (s.length <= 4) return '*'.repeat(s.length);
+  return s.slice(0, 2) + '*'.repeat(Math.max(3, s.length - 4)) + s.slice(-2);
+}
+
+/** Maskiert eine JID (PN oder LID), Server-Teil bleibt erhalten. */
+function maskJid(jid) {
+  if (!jid) return jid;
+  try {
+    const [user, server] = String(jid).split('@');
+    const local = (user || '').split(':')[0]; // device-suffix abschneiden
+    return maskNumber(local) + (server ? '@' + server : '');
+  } catch {
+    return '***';
+  }
+}
+
+/** Maskiert alle langen Ziffernfolgen (>=7) in einem freien Text. */
+function maskText(value) {
+  if (typeof value !== 'string') return value;
+  return value.replace(/\d{7,16}/g, (m) => maskNumber(m));
+}
+
+const level = process.env.LOG_LEVEL || 'warn';
+
 const logger = pino({
-  level: config.logLevel,
-  timestamp: pino.stdTimeFunctions.isoTime,
+  level,
+  // Jede String-Botschaft durch die Maskierung schicken.
+  hooks: {
+    logMethod(args, method) {
+      try {
+        const masked = args.map((a) => (typeof a === 'string' ? maskText(a) : a));
+        return method.apply(this, masked);
+      } catch {
+        return method.apply(this, args);
+      }
+    },
+  },
 });
 
-const RING_MAX = 200;
-const ring = [];
-
-function record(level, args) {
-  let msg = '';
-  let err;
-  for (const a of args) {
-    if (typeof a === 'string') msg = msg ? `${msg} ${a}` : a;
-    else if (a && typeof a === 'object') {
-      if (a.err instanceof Error) err = a.err;
-      else if (a instanceof Error) err = a;
-    }
-  }
-  ring.push({
-    at: Date.now(),
-    level,
-    msg: msg || (err ? err.message : ''),
-    stack: err ? String(err.stack || err.message).split('\n').slice(0, 3).join('\n') : undefined,
-  });
-  if (ring.length > RING_MAX) ring.shift();
-}
-
-// error/warn zusätzlich in den Ring-Buffer schreiben (Instanz-Methoden überschreiben)
-for (const lvl of ['error', 'warn']) {
-  const orig = logger[lvl].bind(logger);
-  logger[lvl] = (...args) => {
-    try {
-      record(lvl, args);
-    } catch (_) {
-      /* never throw from logging */
-    }
-    return orig(...args);
-  };
-}
-
-logger.recentErrors = () => ring.slice().reverse();
-
-module.exports = logger;
+module.exports = { logger, maskNumber, maskJid, maskText };

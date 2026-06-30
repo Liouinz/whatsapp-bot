@@ -1,75 +1,42 @@
 'use strict';
 
-const logger = require('./core/logger');
+/**
+ * index.js — Einstiegspunkt.
+ *
+ * Phase 1 (Gerüst): globale Fehler-Handler (nie crashen) + DB-Init (Schema).
+ * Verbindung, Watchdog, Keepalive, Router etc. folgen in späteren Phasen.
+ */
 
-// Crash-Schutz: ein Fehler darf den Bot nie killen (Anti-Ban + Stabilität)
-process.on('uncaughtException', (err) => logger.error({ err }, 'uncaughtException'));
-process.on('unhandledRejection', (err) => logger.error({ err }, 'unhandledRejection'));
+const { logger } = require('./core/logger');
+const db = require('./core/db');
 
-const config = require('./core/config');
-const { getDb } = require('./core/db');
-const storage = require('./core/storage');
-const { initStorage, flushStats } = storage;
-const { startSocket, state } = require('./core/connection');
-const { startWeb } = require('./web/server');
-const registry = require('./bot/registry');
+/** Globale Handler: alles loggen, niemals den Prozess hart killen. */
+function installGlobalHandlers() {
+  process.on('unhandledRejection', (reason) => {
+    logger.error({ reason: String(reason && reason.message ? reason.message : reason) }, 'unhandledRejection');
+  });
+  process.on('uncaughtException', (err) => {
+    logger.error({ err: err.message }, 'uncaughtException');
+  });
+  // Graceful Shutdown wird in Phase 2 mit der Verbindung verdrahtet.
+  process.on('SIGTERM', () => {
+    logger.warn('SIGTERM empfangen — Phase-1-Gerüst beendet sich sauber.');
+    process.exit(0);
+  });
+  process.on('SIGINT', () => {
+    logger.warn('SIGINT empfangen — beende.');
+    process.exit(0);
+  });
+}
 
 async function main() {
-  logger.info('🚀 CommunityBot v2 startet …');
-
-  // DB-Client initialisieren (legt bei Bedarf lokale Datei an / verbindet Turso)
-  getDb();
-
-  // Daten-Schema anlegen + Debounced-Flush-Loop starten (Phase 2)
-  await initStorage();
-
-  // Befehle laden (Phase 3)
-  registry.loadCommands();
-
-  // Power-Zustand aus den Settings wiederherstellen (Web-UI An/Aus)
-  try {
-    state.powered = await storage.getSetting('powered', true);
-  } catch (_) {
-    /* default true */
-  }
-
-  // Web zuerst, damit /qr und /ping sofort erreichbar sind
-  startWeb();
-
-  // Keep-Alive: interner Selbst-Ping (zusätzlich zum empfohlenen EXTERNEN Pinger)
-  if (config.selfUrl) startKeepAlive();
-
-  // WhatsApp-Verbindung aufbauen (lädt Session aus der DB → kein neuer QR nötig)
-  await startSocket();
-
-  // Wöchentlicher Report an Admins (optionale Auto-Funktion, pro Gruppe schaltbar)
-  require('./bot/report').startScheduler();
+  installGlobalHandlers();
+  await db.init();
+  logger.warn('Phase 1 Gerüst bereit — DB initialisiert, alle Tabellen vorhanden.');
+  // Hinweis: Ohne Verbindung (Phase 2) gibt es noch nichts wachzuhalten.
 }
 
-function startKeepAlive() {
-  const url = config.selfUrl.replace(/\/$/, '') + '/ping';
-  setInterval(() => {
-    // Node ≥ 20 hat globales fetch
-    fetch(url).catch(() => {});
-  }, 5 * 60 * 1000);
-  logger.info(`Keep-Alive aktiv → ${url} (alle 5 Min). Hinweis: externen Pinger (UptimeRobot/cron-job.org) zusätzlich einrichten.`);
-}
-
-// Graceful Shutdown: ausstehende Stat-Deltas vor dem Beenden persistieren
-// (Render schickt SIGTERM beim Neustart/Deploy)
-let shuttingDown = false;
-async function shutdown(signal) {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  logger.info(`${signal} empfangen — flushe ausstehende Daten …`);
-  try {
-    await flushStats();
-  } catch (err) {
-    logger.error({ err }, 'Flush beim Shutdown fehlgeschlagen');
-  }
-  process.exit(0);
-}
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('SIGINT', () => shutdown('SIGINT'));
-
-main().catch((err) => logger.error({ err }, 'Fataler Start-Fehler'));
+main().catch((e) => {
+  logger.error({ err: e.message }, 'Fataler Startfehler beim Gerüst-Bootstrap.');
+  process.exit(1);
+});
