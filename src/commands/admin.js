@@ -8,7 +8,8 @@ import {
   addWarning, activeWarnings, clearWarnings, muteUser, unmuteUser,
   kickUser, banUser, unbanUser, invalidateSettings, audit,
 } from '../moderation.js';
-import { botIsAdmin, adminDebugInfo, resolveLid, isProtectedTarget } from '../permissions.js';
+import { botIsAdmin, adminDebugInfo, resolveLid, isProtectedTarget, getGroupMeta } from '../permissions.js';
+import { buildWeeklyReport } from '../scheduler.js';
 
 let lastRestartAt = 0;
 
@@ -370,6 +371,89 @@ export const adminCommands = [
       const rows = await dbRows('SELECT word FROM blocked_words WHERE group_jid = ? ORDER BY word', [ctx.chatJid]);
       if (!rows.length) return ctx.reply('ℹ️ Die Blacklist dieser Gruppe ist leer. (`!addword <wort>`)');
       return ctx.reply(`🛡️ *Blacklist* (${rows.length}):\n${rows.map((r) => `• ${r.word}`).join('\n')}`);
+    },
+  },
+  {
+    name: 'alle',
+    aliases: ['tagall', 'everyone'],
+    group: 'admin',
+    desc: 'Erwähnt alle Mitglieder (sparsam einsetzen!)',
+    usage: '!alle [nachricht]',
+    adminOnly: true,
+    groupOnly: true,
+    async run(ctx) {
+      const meta = await getGroupMeta(ctx.chatJid, true);
+      if (!meta?.participants?.length) return ctx.reply('⚠️ Konnte die Mitgliederliste gerade nicht laden.');
+      const jids = meta.participants.map((p) => p.id);
+      const note = ctx.argText.trim() || 'Bitte einmal alle herschauen!';
+      const tags = jids.map((j) => `@${String(j).split('@')[0]}`).join(' ');
+      return ctx.reply(`📢 *Durchsage von ${ctx.senderName}:*\n${note}\n\n${tags}`, jids);
+    },
+  },
+  {
+    name: 'slowmode',
+    group: 'admin',
+    desc: 'Mindestabstand zwischen Nachrichten pro Person',
+    usage: '!slowmode <sekunden> | aus',
+    adminOnly: true,
+    groupOnly: true,
+    async run(ctx) {
+      if (/^(aus|off|0)$/i.test(ctx.args[0] || '')) {
+        await setGroupFlag(ctx, 'slowmode_secs', 0);
+        return ctx.reply('✅ Slowmode ist jetzt *aus* — freie Fahrt.');
+      }
+      const secs = parseInt(ctx.args[0] || '', 10);
+      if (!secs || secs < 1 || secs > config.slowmode.maxSeconds) {
+        return ctx.reply(`ℹ️ Nutzung: \`!slowmode <1-${config.slowmode.maxSeconds}>\` (Sekunden) oder \`!slowmode aus\``);
+      }
+      await dbRun('INSERT OR IGNORE INTO group_settings (jid) VALUES (?)', [ctx.chatJid]);
+      await dbRun('UPDATE group_settings SET slowmode_secs = ? WHERE jid = ?', [secs, ctx.chatJid]);
+      invalidateSettings(ctx.chatJid);
+      return ctx.reply(
+        `🐢 *Slowmode aktiv:* höchstens eine Nachricht alle *${secs} Sekunden* pro Person.\n_Admins sind ausgenommen. Zu schnelle Nachrichten werden gelöscht._`
+      );
+    },
+  },
+  {
+    name: 'setwelcome',
+    group: 'admin',
+    desc: 'Eigener Begrüßungstext ({name} wird ersetzt)',
+    usage: '!setwelcome Willkommen {name}! | standard',
+    adminOnly: true,
+    groupOnly: true,
+    async run(ctx) {
+      if (/^(standard|reset)$/i.test(ctx.args[0] || '')) {
+        await dbRun('UPDATE group_settings SET welcome_text = ? WHERE jid = ?', ['', ctx.chatJid]);
+        invalidateSettings(ctx.chatJid);
+        return ctx.reply('✅ Begrüßung zurückgesetzt — ich nutze wieder den Standardtext.');
+      }
+      const text = ctx.argText.trim();
+      if (!text) {
+        return ctx.reply('ℹ️ Nutzung: `!setwelcome <text>` — `{name}` wird durch die Person ersetzt.\nZurücksetzen: `!setwelcome standard`');
+      }
+      await dbRun('INSERT OR IGNORE INTO group_settings (jid) VALUES (?)', [ctx.chatJid]);
+      await dbRun('UPDATE group_settings SET welcome_text = ?, welcome = 1 WHERE jid = ?', [text.slice(0, 500), ctx.chatJid]);
+      invalidateSettings(ctx.chatJid);
+      return ctx.reply(`✅ Begrüßung gespeichert (und Begrüßung aktiviert):\n_${text.slice(0, 200).replace('{name}', '@beispiel')}_`);
+    },
+  },
+  {
+    name: 'wochenreport',
+    group: 'admin',
+    desc: 'Wochen-Zusammenfassung (jetzt oder automatisch So 18:00)',
+    usage: '!wochenreport jetzt | an | aus',
+    adminOnly: true,
+    groupOnly: true,
+    async run(ctx) {
+      const arg = (ctx.args[0] || '').toLowerCase();
+      if (arg === 'jetzt' || arg === 'now') {
+        const report = await buildWeeklyReport(ctx.chatJid);
+        return ctx.reply(report);
+      }
+      const on = parseOnOff(arg);
+      if (on === null) return ctx.reply('ℹ️ Nutzung: `!wochenreport jetzt` (sofort) · `!wochenreport an|aus` (automatisch So 18:00)');
+      await setGroupFlag(ctx, 'weekly_report', on);
+      return ctx.reply(on ? '✅ Wochenreport kommt ab jetzt automatisch *sonntags um 18:00*.' : '✅ Automatischer Wochenreport ist *aus*.');
     },
   },
   {

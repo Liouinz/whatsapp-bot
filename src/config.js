@@ -110,6 +110,49 @@ export const config = {
     quizTimeoutMs: 60_000, // Quizfrage verfällt nach 60 s
     xpRewardQuiz: 25,
     xpRewardRaten: 20,
+    xpRewardGalgen: 30,
+    xpRewardTtt: 20,
+    galgenMaxFails: 6, // Galgenmännchen: erlaubte Fehlversuche
+    tttTimeoutMs: 5 * 60_000, // TicTacToe-Partie verfällt nach 5 Min Inaktivität
+    coinsRewardQuiz: 40, // Coins zusätzlich zu XP
+    coinsRewardRaten: 30,
+    coinsRewardGalgen: 50,
+    coinsRewardTtt: 40,
+  },
+
+  // ── Economy (Coins) ────────────────────────────────────────────
+  economy: {
+    dailyMin: 150, // !daily: Basis-Bereich …
+    dailyMax: 250,
+    streakBonus: 25, // + Bonus pro Streak-Tag …
+    streakBonusMax: 250, // … gedeckelt
+    giveMin: 10, // !geben: Mindestbetrag
+    betMin: 20, // !wette / !slots: Mindesteinsatz
+    betMax: 2000, // Maximaleinsatz (Schutz vor Alles-oder-nichts-Frust)
+    startBalance: 100, // Startguthaben beim ersten Kontakt
+  },
+
+  // ── Umfragen ───────────────────────────────────────────────────
+  polls: {
+    maxOptions: 6,
+    autoCloseHours: 24, // offene Umfragen automatisch schließen
+  },
+
+  // ── Slowmode ───────────────────────────────────────────────────
+  slowmode: {
+    maxSeconds: 600, // Obergrenze für !slowmode
+  },
+
+  // ── Wochenreport ───────────────────────────────────────────────
+  weeklyReport: {
+    weekday: 0, // Sonntag
+    hour: 18, // 18:00 Uhr lokale Zeit
+  },
+
+  // ── Geburtstage ────────────────────────────────────────────────
+  birthdays: {
+    hour: 9, // Gratulation täglich um 9:00 lokale Zeit
+    coinsGift: 200, // Geburtstags-Geschenk
   },
 };
 

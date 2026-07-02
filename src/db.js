@@ -147,13 +147,72 @@ const TABLES = [
   `CREATE TABLE IF NOT EXISTS daily_stats (
      day TEXT PRIMARY KEY, messages INTEGER DEFAULT 0, commands INTEGER DEFAULT 0, ai_calls INTEGER DEFAULT 0
    )`,
+
+  // Economy (Coins sind global pro Nutzer, nicht pro Gruppe)
+  `CREATE TABLE IF NOT EXISTS coins (
+     user_jid TEXT PRIMARY KEY, balance INTEGER DEFAULT 0, name TEXT,
+     last_daily TEXT DEFAULT '', streak INTEGER DEFAULT 0,
+     total_earned INTEGER DEFAULT 0, total_gambled INTEGER DEFAULT 0
+   )`,
+  `CREATE TABLE IF NOT EXISTS purchases (
+     user_jid TEXT, item_id TEXT, created_at INTEGER,
+     PRIMARY KEY (user_jid, item_id)
+   )`,
+  `CREATE TABLE IF NOT EXISTS user_titles (
+     user_jid TEXT PRIMARY KEY, title TEXT
+   )`,
+
+  // Umfragen
+  `CREATE TABLE IF NOT EXISTS polls (
+     id INTEGER PRIMARY KEY AUTOINCREMENT, group_jid TEXT, question TEXT,
+     options TEXT, created_by TEXT, created_at INTEGER, open INTEGER DEFAULT 1
+   )`,
+  `CREATE TABLE IF NOT EXISTS poll_votes (
+     poll_id INTEGER, user_jid TEXT, option_idx INTEGER,
+     PRIMARY KEY (poll_id, user_jid)
+   )`,
+
+  // Geburtstage (pro Nutzer, angekündigt in der Gruppe, in der sie gesetzt wurden)
+  `CREATE TABLE IF NOT EXISTS birthdays (
+     user_jid TEXT PRIMARY KEY, day INTEGER, month INTEGER, name TEXT,
+     group_jid TEXT, last_congratulated TEXT DEFAULT ''
+   )`,
+
+  // Nachrichten pro Gruppe und Tag (für Wochenreport & Panel-Statistik)
+  `CREATE TABLE IF NOT EXISTS group_daily (
+     group_jid TEXT, day TEXT, messages INTEGER DEFAULT 0,
+     PRIMARY KEY (group_jid, day)
+   )`,
 ];
+
+// Spalten, die nach dem ersten Deploy dazukamen — werden per ALTER TABLE nachgezogen,
+// weil CREATE TABLE IF NOT EXISTS bestehende Tabellen nicht erweitert.
+const MIGRATIONS = [
+  ['group_settings', 'slowmode_secs', 'INTEGER DEFAULT 0'],
+  ['group_settings', 'welcome_text', "TEXT DEFAULT ''"],
+  ['group_settings', 'weekly_report', 'INTEGER DEFAULT 0'],
+];
+
+async function migrate(db) {
+  const columnCache = new Map(); // table → Set(Spaltennamen)
+  for (const [table, column, type] of MIGRATIONS) {
+    if (!columnCache.has(table)) {
+      const info = await db.execute(`PRAGMA table_info(${table})`);
+      columnCache.set(table, new Set(info.rows.map((r) => String(r.name))));
+    }
+    if (!columnCache.get(table).has(column)) {
+      await db.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+      console.log(`🔧 Migration: ${table}.${column} ergänzt.`);
+    }
+  }
+}
 
 export async function initDb() {
   const db = getDb();
   for (const sql of TABLES) {
     await db.execute(sql);
   }
+  await migrate(db);
   console.log(`✅ DB initialisiert (${TABLES.length} Tabellen).`);
 }
 
@@ -161,6 +220,7 @@ export async function initDb() {
 
 const xpBuffer = new Map(); // key "group|user" → { xp, messages, name }
 const statBuffer = { messages: 0, commands: 0, ai_calls: 0 };
+const groupDayBuffer = new Map(); // "group|day" → Nachrichten-Zähler
 let flushTimer = null;
 let flushFailStreak = 0;
 
@@ -181,6 +241,12 @@ export function bufferStat(field, amount = 1) {
   if (field in statBuffer) statBuffer[field] += amount;
 }
 
+/** Nachrichten-Zähler pro Gruppe/Tag (für Wochenreport & Panel-Charts). */
+export function bufferGroupMessage(groupJid) {
+  const key = `${groupJid}|${todayKey()}`;
+  groupDayBuffer.set(key, (groupDayBuffer.get(key) || 0) + 1);
+}
+
 /** Gepufferte Werte gebündelt schreiben. Bei DB-Ausfall: Puffer behalten, später nachschreiben. */
 export async function flushBuffers() {
   const db = getDb();
@@ -194,6 +260,15 @@ export async function flushBuffers() {
               xp = xp + excluded.xp, messages = messages + excluded.messages,
               name = CASE WHEN excluded.name != '' THEN excluded.name ELSE xp.name END`,
       args: [groupJid, userJid, val.xp, val.messages, val.name || ''],
+    });
+  }
+
+  for (const [key, count] of groupDayBuffer) {
+    const [groupJid, day] = key.split('|');
+    stmts.push({
+      sql: `INSERT INTO group_daily (group_jid, day, messages) VALUES (?, ?, ?)
+            ON CONFLICT(group_jid, day) DO UPDATE SET messages = group_daily.messages + excluded.messages`,
+      args: [groupJid, day, count],
     });
   }
 
@@ -214,6 +289,7 @@ export async function flushBuffers() {
   try {
     await db.batch(stmts, 'write');
     xpBuffer.clear();
+    groupDayBuffer.clear();
     statBuffer.messages = 0;
     statBuffer.commands = 0;
     statBuffer.ai_calls = 0;

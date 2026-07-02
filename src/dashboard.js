@@ -354,6 +354,94 @@ export function createDashboard() {
     res.json({ logs: getRing().slice(-config.log.ringSize) });
   });
 
+  // Statistik-Daten für den Statistik-Tab (Charts + Top-Listen)
+  api.get('/stats', async (req, res) => {
+    try {
+      const since14 = new Date(Date.now() - 13 * 86_400_000).toISOString().slice(0, 10);
+      const since7 = new Date(Date.now() - 6 * 86_400_000).toISOString().slice(0, 10);
+      const [daily, topGroups, richest, champions, counters] = await Promise.all([
+        dbRows('SELECT day, messages, commands, ai_calls FROM daily_stats WHERE day >= ? ORDER BY day', [since14]),
+        dbRows(
+          `SELECT gd.group_jid, COALESCE(g.name, gd.group_jid) AS name, SUM(gd.messages) AS msgs
+           FROM group_daily gd LEFT JOIN groups g ON g.jid = gd.group_jid
+           WHERE gd.day >= ? GROUP BY gd.group_jid ORDER BY msgs DESC LIMIT 8`,
+          [since7]
+        ),
+        dbRows('SELECT name, user_jid, balance FROM coins ORDER BY balance DESC LIMIT 8', []),
+        dbRows(
+          `SELECT name, user_jid, SUM(wins) AS wins FROM game_scores
+           GROUP BY user_jid ORDER BY wins DESC LIMIT 8`,
+          []
+        ),
+        Promise.all([
+          dbRows('SELECT COUNT(*) AS c FROM warnings WHERE expires_at > ?', [Date.now()]),
+          dbRows('SELECT COUNT(*) AS c FROM custom_commands', []),
+          dbRows('SELECT COUNT(*) AS c FROM birthdays', []),
+          dbRows('SELECT COUNT(*) AS c FROM polls WHERE open = 1', []),
+        ]),
+      ]);
+      res.json({
+        daily,
+        topGroups,
+        richest,
+        champions,
+        counts: {
+          warns: Number(counters[0][0]?.c || 0),
+          custom: Number(counters[1][0]?.c || 0),
+          birthdays: Number(counters[2][0]?.c || 0),
+          polls: Number(counters[3][0]?.c || 0),
+        },
+      });
+    } catch (err) {
+      logError(err, 'panel.stats');
+      res.status(500).json({ error: 'Statistik konnte nicht geladen werden.' });
+    }
+  });
+
+  // Planung: offene geplante Nachrichten, nächste Geburtstage, laufende Umfragen
+  api.get('/agenda', async (req, res) => {
+    try {
+      const [schedules, birthdays, polls] = await Promise.all([
+        dbRows(
+          `SELECT sm.id, sm.text, sm.send_at, COALESCE(g.name, sm.chat_jid) AS chat
+           FROM scheduled_messages sm LEFT JOIN groups g ON g.jid = sm.chat_jid
+           WHERE sm.done = 0 ORDER BY sm.send_at LIMIT 25`,
+          []
+        ),
+        dbRows('SELECT name, user_jid, day, month FROM birthdays', []),
+        dbRows(
+          `SELECT p.id, p.question, p.created_at, COALESCE(g.name, p.group_jid) AS chat,
+             (SELECT COUNT(*) FROM poll_votes v WHERE v.poll_id = p.id) AS votes
+           FROM polls p LEFT JOIN groups g ON g.jid = p.group_jid
+           WHERE p.open = 1 ORDER BY p.created_at DESC LIMIT 15`,
+          []
+        ),
+      ]);
+      // Geburtstage nach "Tagen bis" sortieren
+      const now = new Date();
+      const withDays = birthdays.map((b) => {
+        const t = new Date(now.getFullYear(), Number(b.month) - 1, Number(b.day));
+        t.setHours(0, 0, 0, 0);
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const days = t >= today
+          ? Math.round((t - today) / 86_400_000)
+          : Math.round((new Date(now.getFullYear() + 1, Number(b.month) - 1, Number(b.day)) - today) / 86_400_000);
+        return { ...b, days };
+      }).sort((a, b) => a.days - b.days).slice(0, 15);
+      res.json({ schedules, birthdays: withDays, polls });
+    } catch (err) {
+      logError(err, 'panel.agenda');
+      res.status(500).json({ error: 'Planung konnte nicht geladen werden.' });
+    }
+  });
+
+  api.delete('/agenda/schedule/:id', async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (!id) return res.status(400).json({ error: 'Ungültige Nummer.' });
+    await dbRun('DELETE FROM scheduled_messages WHERE id = ? AND done = 0', [id]);
+    res.json({ ok: true });
+  });
+
   api.post('/restart', async (req, res) => {
     const wait = config.web.restartCooldownMs - (Date.now() - lastPanelRestartAt);
     if (wait > 0) {

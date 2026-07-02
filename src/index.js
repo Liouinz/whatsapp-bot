@@ -211,8 +211,13 @@ async function handleParticipants({ id, participants, action }) {
   try {
     const settings = await getGroupSettings(id);
     if (Number(settings.welcome) && Number(settings.enabled)) {
-      const tags = participants.slice(0, 5).map((p) => `@${String(p).split('@')[0]}`).join(' ');
-      await sendText(id, `👋 Willkommen ${tags}! Schau dir mit \`!regeln\` die Gruppenregeln an — Befehle: \`!hilfe\``, participants.slice(0, 5));
+      const few = participants.slice(0, 5);
+      const tags = few.map((p) => `@${String(p).split('@')[0]}`).join(' ');
+      const custom = String(settings.welcome_text || '').trim();
+      const text = custom
+        ? custom.replaceAll('{name}', tags)
+        : `👋 Willkommen ${tags}! Schau dir mit \`!regeln\` die Gruppenregeln an — Befehle: \`!hilfe\``;
+      await sendText(id, text, few);
     }
   } catch (err) {
     logError(err, 'welcome');

@@ -1,13 +1,16 @@
 // Scheduler: geplante Nachrichten, Nachtmodus (auto schließen/öffnen),
-// Anti-Raid-Freigabe und stündliches Auto-Cleanup. Alles neustart-fest (DB).
+// Anti-Raid-Freigabe, Geburtstage, Umfragen-Auto-Schließung, Wochenreport
+// und stündliches Auto-Cleanup. Alles neustart-fest (DB).
 
-import { config } from './config.js';
+import { BOT_NAME, config } from './config.js';
 import { state } from './state.js';
-import { dbRun, dbRows } from './db.js';
+import { dbRun, dbRows, todayKey, flushBuffers } from './db.js';
 import { sendText } from './queue.js';
 import { logError, logInfo } from './logger.js';
 import { botIsAdmin } from './permissions.js';
 import { releaseExpiredRaidLocks } from './moderation.js';
+import { congratulateBirthdays } from './commands/birthdays.js';
+import { renderPollResult, closePoll } from './commands/polls.js';
 
 let tickTimer = null;
 let cleanupTimer = null;
@@ -80,6 +83,115 @@ async function processNightmode() {
   }
 }
 
+// ── Umfragen automatisch schließen ─────────────────────────────────
+
+async function autoClosePolls() {
+  const cutoff = Date.now() - config.polls.autoCloseHours * 60 * 60_000;
+  const rows = await dbRows('SELECT * FROM polls WHERE open = 1 AND created_at < ?', [cutoff]);
+  for (const row of rows) {
+    try {
+      let options;
+      try {
+        options = JSON.parse(row.options);
+      } catch {
+        options = [];
+      }
+      await closePoll(row.id);
+      if (options.length) {
+        const text = await renderPollResult({ ...row, options }, { final: true });
+        await sendText(row.group_jid, `⏰ Zeit abgelaufen (${config.polls.autoCloseHours} Std)!\n\n${text}`);
+      }
+    } catch (err) {
+      logError(err, 'scheduler.polls');
+    }
+  }
+}
+
+// ── Wochenreport ───────────────────────────────────────────────────
+
+const WEEKDAY_SHORT = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+
+function lastDays(n) {
+  const days = [];
+  for (let i = n - 1; i >= 0; i--) {
+    days.push(new Date(Date.now() - i * 86_400_000));
+  }
+  return days;
+}
+
+function miniBar(value, max, width = 6) {
+  const filled = max > 0 ? Math.round((value / max) * width) : 0;
+  return '▰'.repeat(filled) + '▱'.repeat(width - filled);
+}
+
+/** Wochenreport-Text für eine Gruppe bauen (auch von !wochenreport jetzt genutzt). */
+export async function buildWeeklyReport(groupJid) {
+  await flushBuffers(); // aktuelle Zähler mitnehmen
+  const days = lastDays(7);
+  const dayKeys = days.map((d) => d.toISOString().slice(0, 10));
+  const [daily, topRows, warnRows, gameRows] = await Promise.all([
+    dbRows(
+      `SELECT day, messages FROM group_daily WHERE group_jid = ? AND day >= ?`,
+      [groupJid, dayKeys[0]]
+    ),
+    dbRows('SELECT name, user_jid, messages FROM xp WHERE group_jid = ? ORDER BY messages DESC LIMIT 3', [groupJid]),
+    dbRows('SELECT COUNT(*) AS c FROM warnings WHERE group_jid = ? AND created_at >= ?', [groupJid, days[0].getTime()]),
+    dbRows(
+      'SELECT name, user_jid, SUM(wins) AS w FROM game_scores WHERE group_jid = ? GROUP BY user_jid ORDER BY w DESC LIMIT 1',
+      [groupJid]
+    ),
+  ]);
+
+  const perDay = new Map(daily.map((r) => [r.day, Number(r.messages)]));
+  const counts = dayKeys.map((k) => perDay.get(k) || 0);
+  const total = counts.reduce((a, b) => a + b, 0);
+  const max = Math.max(...counts, 1);
+  const busiestIdx = counts.indexOf(Math.max(...counts));
+
+  let text = `📈 *Wochenreport — ${BOT_NAME}*\n`;
+  text += `_${days[0].toLocaleDateString('de-DE')} – ${days[6].toLocaleDateString('de-DE')}_\n\n`;
+  text += `💬 *${total.toLocaleString('de-DE')}* Nachrichten diese Woche\n`;
+  days.forEach((d, i) => {
+    text += `${WEEKDAY_SHORT[d.getDay()]} ${miniBar(counts[i], max)} ${counts[i]}\n`;
+  });
+  if (total > 0) {
+    text += `\n🔥 Aktivster Tag: *${WEEKDAY_SHORT[days[busiestIdx].getDay()]}* (${counts[busiestIdx]} Nachrichten)\n`;
+  }
+  if (topRows.length) {
+    const tops = topRows
+      .map((r, i) => `${['🥇', '🥈', '🥉'][i]} ${r.name || '+' + String(r.user_jid).split('@')[0]}`)
+      .join(' · ');
+    text += `⭐ Fleißigste insgesamt: ${tops}\n`;
+  }
+  const warnsThisWeek = Number(warnRows[0]?.c || 0);
+  text += warnsThisWeek > 0 ? `⚠️ Verwarnungen diese Woche: ${warnsThisWeek}\n` : '✅ Keine Verwarnungen diese Woche — vorbildlich!\n';
+  if (gameRows.length && Number(gameRows[0].w) > 0) {
+    const champ = gameRows[0].name || '+' + String(gameRows[0].user_jid).split('@')[0];
+    text += `🎮 Spiele-Champion: *${champ}* (${gameRows[0].w} Siege)\n`;
+  }
+  text += `\n— _${BOT_NAME}_`;
+  return text;
+}
+
+let lastWeeklySent = ''; // "YYYY-MM-DD", damit der Report nur 1× pro Sonntag geht
+
+async function processWeeklyReports() {
+  const now = new Date();
+  if (now.getDay() !== config.weeklyReport.weekday || now.getHours() < config.weeklyReport.hour) return;
+  const today = todayKey();
+  if (lastWeeklySent === today) return;
+  lastWeeklySent = today;
+  const rows = await dbRows('SELECT jid FROM group_settings WHERE weekly_report = 1 AND enabled = 1', []);
+  for (const r of rows) {
+    try {
+      await sendText(r.jid, await buildWeeklyReport(r.jid));
+    } catch (err) {
+      logError(err, 'scheduler.weekly');
+    }
+  }
+  if (rows.length) logInfo(`📈 Wochenreport an ${rows.length} Gruppe(n) gesendet.`);
+}
+
 // ── Auto-Cleanup (Phase 21) ────────────────────────────────────────
 
 export async function runCleanup() {
@@ -96,6 +208,9 @@ export async function runCleanup() {
     ['DELETE FROM owner_alerts WHERE created_at < ?', [now - 30 * day]],
     ['DELETE FROM rate_limits WHERE window_start < ?', [now - day]],
     ['DELETE FROM error_counts WHERE last_at < ?', [now - 30 * day]],
+    ['DELETE FROM group_daily WHERE day < ?', [new Date(now - 60 * day).toISOString().slice(0, 10)]],
+    ['DELETE FROM polls WHERE open = 0 AND created_at < ?', [now - 30 * day]],
+    ['DELETE FROM poll_votes WHERE poll_id NOT IN (SELECT id FROM polls)', []],
   ];
   for (const [sql, args] of jobs) {
     try {
@@ -117,6 +232,9 @@ export function startScheduler() {
       await processDueMessages();
       await processNightmode();
       await releaseExpiredRaidLocks();
+      await congratulateBirthdays();
+      await autoClosePolls();
+      await processWeeklyReports();
     } catch (err) {
       logError(err, 'scheduler.tick');
     }

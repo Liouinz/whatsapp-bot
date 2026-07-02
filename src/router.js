@@ -4,7 +4,7 @@
 
 import { PREFIX, config } from './config.js';
 import { state, rolloverDay, bumpActivity } from './state.js';
-import { dbRows, dbRun, bufferXp, bufferStat, xpToLevel } from './db.js';
+import { dbRows, dbRun, bufferXp, bufferStat, bufferGroupMessage, xpToLevel } from './db.js';
 import { replyTo, sendText } from './queue.js';
 import { logError } from './logger.js';
 import {
@@ -24,17 +24,28 @@ import { customCommands } from './commands/custom.js';
 import { scheduleCommands } from './commands/schedule.js';
 import { toolCommands } from './commands/tools.js';
 import { gameCommands } from './commands/games.js';
+import { economyCommands } from './commands/economy.js';
+import { funCommands } from './commands/fun.js';
+import { pollCommands } from './commands/polls.js';
+import { birthdayCommands } from './commands/birthdays.js';
+import { profileCommands } from './commands/profile.js';
+import { activeTitle } from './commands/economy.js';
 
 // ── Registry + Live-Toggles ────────────────────────────────────────
 
 export const registry = [
   ...communityCommands,
+  ...profileCommands,
   ...levelCommands,
   ...afkCommands,
+  ...birthdayCommands,
+  ...pollCommands,
   ...customCommands,
+  ...economyCommands,
   ...scheduleCommands,
   ...toolCommands,
   ...gameCommands,
+  ...funCommands,
   ...adminCommands,
 ];
 
@@ -157,8 +168,39 @@ async function grantXp(chatJid, userJid, name, settings) {
        ON CONFLICT(group_jid, user_jid) DO UPDATE SET level = excluded.level`,
       [chatJid, user, newLevel]
     ).catch(() => {});
-    await sendText(chatJid, `🎉 *Level-Up!* ${name || 'Jemand'} ist jetzt *Level ${newLevel}* ⭐`);
+    const title = await activeTitle(user).catch(() => null);
+    const who = title ? `${name || 'Jemand'} ${title}` : name || 'Jemand';
+    await sendText(chatJid, `🎉 *Level-Up!* ${who} ist jetzt *Level ${newLevel}* ⭐`);
   }
+}
+
+// ── Slowmode (Mindestabstand zwischen Nachrichten pro Person) ──────
+
+const slowmodeLast = new Map(); // group|user → letzter Nachrichten-Zeitpunkt
+const slowmodeHinted = new Map(); // group|user → letzter Hinweis (nicht bei jeder Löschung nerven)
+
+async function checkSlowmode(msg, chatJid, senderIds, settings, senderName) {
+  const secs = Number(settings.slowmode_secs || 0);
+  if (!secs) return false;
+  if (await isUserAdmin(chatJid, senderIds)) return false;
+  const key = `${chatJid}|${resolveLid(senderIds[0])}`;
+  const now = Date.now();
+  const last = slowmodeLast.get(key) || 0;
+  if (now - last >= secs * 1000) {
+    slowmodeLast.set(key, now);
+    if (slowmodeLast.size > 3000) slowmodeLast.delete(slowmodeLast.keys().next().value);
+    return false;
+  }
+  // Zu schnell → Nachricht löschen (wenn möglich), sparsam hinweisen
+  try {
+    await state.sock.sendMessage(chatJid, { delete: msg.key });
+  } catch { /* ohne Admin-Rechte bleibt sie eben stehen */ }
+  if (now - (slowmodeHinted.get(key) || 0) > 60_000) {
+    slowmodeHinted.set(key, now);
+    const wait = Math.ceil((secs * 1000 - (now - last)) / 1000);
+    await sendText(chatJid, `🐢 *${senderName}*, hier ist Slowmode aktiv — bitte noch ${wait} s warten.`);
+  }
+  return true;
 }
 
 // ── AFK-Erwähnungen (mit Anti-Spam-Cooldown) ───────────────────────
@@ -226,12 +268,16 @@ async function handleMessage(msg) {
   rolloverDay();
   bumpActivity();
   bufferStat('messages');
+  if (isGroup) bufferGroupMessage(chatJid);
 
   // DMs: nur Owner (Panel/Owner-Steuerung) — alles andere still ignorieren
   if (!isGroup && !isOwner(senderIds)) return;
 
   const settings = isGroup ? await getGroupSettings(chatJid) : { enabled: 1, levelup_announce: 0 };
   if (isGroup && !Number(settings.enabled)) return; // Gruppe im Panel deaktiviert
+
+  // Slowmode greift vor allem anderen (Nachricht wird ggf. gelöscht)
+  if (isGroup && (await checkSlowmode(msg, chatJid, senderIds, settings, senderName))) return;
 
   // 1) AFK: eigener Beitrag hebt AFK auf
   const wasAfk = await clearAfk(senderIds);
@@ -348,6 +394,7 @@ function makeCtx(msg, chatJid, isGroup, senderIds, sender, senderName, text, arg
     isOwner: owner,
     reply: (t, mentions) => replyTo(msg, t, mentions),
     mentionTag: (jid) => `@${String(resolveLid(jid)).split('@')[0]}`,
+    mentions: () => contextInfo(msg)?.mentionedJid || [],
     targetUser: () => findTarget(msg, args),
     // Nur echte Mention-Tokens (@12345…) entfernen — "!warn @x Grund 2" behält die "2"
     argTextWithoutMentions: () =>

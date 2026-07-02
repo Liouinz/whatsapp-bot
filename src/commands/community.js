@@ -10,8 +10,9 @@ import { listCustom } from './custom.js';
 const GROUP_TITLES = {
   admin: '🛡️ *Admin & Moderation*',
   community: '👥 *Community*',
+  economy: '💰 *Coins & Shop*',
   tools: '🧰 *Tools*',
-  games: '🎮 *Spiele*',
+  games: '🎮 *Spiele & Spaß*',
 };
 
 function fmtUptime(ms) {
@@ -44,7 +45,7 @@ export const communityCommands = [
 
       // Volle, gruppierte Übersicht — die Visitenkarte des Bots
       const isAdmin = await ctx.isAdmin();
-      const groups = ['community', 'tools', 'games', ...(isAdmin ? ['admin'] : [])];
+      const groups = ['community', 'economy', 'tools', 'games', ...(isAdmin ? ['admin'] : [])];
       let text = `🤖 *${BOT_NAME} — Hilfe*\n_Präfix: ${PREFIX} · z. B. ${PREFIX}ping_\n`;
       for (const g of groups) {
         const cmds = ctx.registry.filter((c) => c.group === g && !c.hidden);
