@@ -21,9 +21,10 @@ import { handleUpsert, loadToggles } from './router.js';
 import { loadCustomCommands } from './commands/custom.js';
 import { loadAfk } from './commands/afk.js';
 import { loadMutes, handleJoin, getGroupSettings } from './moderation.js';
+import { invalidateGroupMeta } from './permissions.js';
 import { initAiUsage } from './ai.js';
 import { startScheduler, stopScheduler } from './scheduler.js';
-import { createDashboard } from './dashboard.js';
+import { createDashboard, refreshGroupCache } from './dashboard.js';
 
 const baileysLogger = pino({ level: 'silent' }); // Baileys-Rauschen komplett stumm
 
@@ -76,6 +77,9 @@ async function startSocket() {
   sock.ev.on('creds.update', () => saveCreds().catch((e) => logError(e, 'saveCreds')));
 
   sock.ev.on('connection.update', (update) => {
+    // Events verwaister Sockets ignorieren — sonst stößt ein alter Socket nach
+    // 515/411 einen zweiten Reconnect an (Doppel-Socket → 440-Schleife).
+    if (state.sock !== sock) return;
     handleConnectionUpdate(update).catch((e) => logError(e, 'connection.update'));
   });
 
@@ -111,6 +115,10 @@ async function handleConnectionUpdate({ connection, lastDisconnect, qr }) {
     state.botJidPn = state.sock?.user?.id ? jidNormalizedUser(state.sock.user.id) : null;
     state.botJidLid = state.sock?.user?.lid ? jidNormalizedUser(state.sock.user.lid) : null;
     logInfo(`✅ Verbunden als ${BOT_NAME} (PN: ${state.botJidPn || '—'} · LID: ${state.botJidLid || '—'})`);
+
+    // Gruppen-Cache im Hintergrund vorwärmen (Panel zeigt Gruppenzahl sofort,
+    // LID-Mappings werden gelernt) — Fehler dabei sind unkritisch.
+    setTimeout(() => refreshGroupCache().catch((e) => logError(e, 'groupCache')), 8000);
     return;
   }
 
@@ -125,15 +133,14 @@ async function handleConnectionUpdate({ connection, lastDisconnect, qr }) {
         logInfo('🔁 Restart nach Pairing (515) — verbinde sofort neu (kein Fehler).');
         return void startSocket().catch((e) => logError(e, 'startSocket'));
 
-      case DisconnectReason.loggedOut: // 401 — NICHT reconnecten
-        state.stopped = true;
-        state.stopReason = 'Ausgeloggt (401)';
+      case DisconnectReason.loggedOut: // 401 — alte Session NICHT reconnecten
+        logWarn('⛔ 401 loggedOut: Session wird gelöscht, frische Kopplung über /qr nötig.');
         await clearSessionFn?.().catch(() => {});
         await ownerAlert(
-          '⛔ *Bot wurde ausgeloggt (401).* Die Session wurde gelöscht — bitte im Panel unter /qr neu koppeln und den Dienst neu starten.'
+          '⛔ *Bot wurde ausgeloggt (401).* Die Session wurde zurückgesetzt — bitte im Panel unter /qr neu koppeln.'
         );
-        logWarn('⛔ 401 loggedOut: Session gelöscht, KEIN Reconnect. Neustart + QR-Scan nötig.');
-        return;
+        // Frischen (ungekoppelten) Socket starten, damit /qr sofort einen neuen Code zeigt.
+        return void startSocket().catch((e) => logError(e, 'startSocket'));
 
       case DisconnectReason.badSession: // 411 — Session kaputt → löschen, neuer QR
         logWarn('⚠️ Session beschädigt (411) — lösche Session, neuer QR nötig.');
@@ -196,6 +203,9 @@ function printQrAscii(qr) {
 // ── Gruppen-Events (Joins: Willkommen, Bans, Anti-Raid) ────────────
 
 async function handleParticipants({ id, participants, action }) {
+  // Bei JEDER Teilnehmer-Änderung den Metadata-Cache verwerfen —
+  // promote/demote ändert Admin-Rechte, die Checks müssen frisch sein.
+  invalidateGroupMeta(id);
   if (action !== 'add') return;
   await handleJoin(id, participants);
   try {

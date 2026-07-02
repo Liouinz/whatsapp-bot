@@ -544,6 +544,8 @@ function renderGroupDetail(gr){
   content.appendChild(toggleRow('Anti-Link', 'antilink', gr.antilink));
   content.appendChild(toggleRow('Anti-Spam', 'antispam', gr.antispam));
   content.appendChild(toggleRow('Anti-Raid', 'antiraid', gr.antiraid));
+  content.appendChild(toggleRow('Neue Mitglieder begrüßen', 'welcome', gr.welcome));
+  content.appendChild(toggleRow('Level-Up-Nachrichten', 'levelup_announce', gr.levelup_announce));
 
   var nmEnabled = h('input', { type:'checkbox' }); nmEnabled.checked = gr.nightmode.enabled;
   var nmStart = h('input', { type:'time', value:gr.nightmode.start });

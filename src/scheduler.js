@@ -35,11 +35,21 @@ function nowHHMM() {
   });
 }
 
-/** Liegt `now` im Fenster [start, end)? Fenster darf über Mitternacht gehen. */
+/** "HH:MM" oder "H:MM" → Minuten seit Mitternacht (NaN bei Unsinn). */
+function toMinutes(hhmm) {
+  const m = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(String(hhmm || '').trim());
+  return m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : NaN;
+}
+
+/**
+ * Liegt `now` im Fenster [start, end)? Fenster darf über Mitternacht gehen.
+ * Vergleicht numerisch (Minuten), damit auch "9:00" korrekt funktioniert.
+ */
 export function inNightWindow(now, start, end) {
-  if (start === end) return false;
-  if (start < end) return now >= start && now < end;
-  return now >= start || now < end; // z. B. 22:00 → 07:00
+  const n = toMinutes(now), s = toMinutes(start), e = toMinutes(end);
+  if ([n, s, e].some(Number.isNaN) || s === e) return false;
+  if (s < e) return n >= s && n < e;
+  return n >= s || n < e; // z. B. 22:00 → 07:00
 }
 
 async function processNightmode() {

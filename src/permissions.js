@@ -133,6 +133,30 @@ export async function botIsAdmin(groupJid) {
   return own.some((id) => admins.has(id));
 }
 
+/**
+ * Wie botIsAdmin, aber aus bereits vorhandener Metadata (z. B. groupFetchAllParticipating) —
+ * spart pro Gruppe einen zusätzlichen groupMetadata-Aufruf. Lernt nebenbei LID-Mappings.
+ */
+export function botIsAdminInMeta(meta) {
+  if (!meta?.participants) return false;
+  learnLidMappings(meta);
+  const own = [state.botJidPn, state.botJidLid].filter(Boolean);
+  for (const p of meta.participants) {
+    if (p.admin !== 'admin' && p.admin !== 'superadmin') continue;
+    if (participantIds(p).some((id) => own.includes(id))) return true;
+  }
+  return false;
+}
+
+/** Ist das Ziel geschützt (Owner, Gruppen-Admin oder der Bot selbst)? Für kick/ban/mute/warn. */
+export async function isProtectedTarget(groupJid, userJid) {
+  const ids = [normalizeId(userJid), resolveLid(userJid)].filter(Boolean);
+  if (!ids.length) return false;
+  const own = [state.botJidPn, state.botJidLid].filter(Boolean);
+  if (ids.some((id) => own.includes(id))) return true; // der Bot selbst
+  return isUserAdmin(groupJid, ids); // deckt Owner + Admins ab
+}
+
 /** Ist der Nutzer (beliebige ID-Form) Admin in der Gruppe? Owner zählen immer als Admin. */
 export async function isUserAdmin(groupJid, userIds) {
   const list = (Array.isArray(userIds) ? userIds : [userIds]).map(normalizeId).filter(Boolean);

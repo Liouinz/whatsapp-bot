@@ -14,7 +14,7 @@ import { getAiQuota } from './ai.js';
 import { registry, isCommandEnabled, setCommandEnabled } from './router.js';
 import { listCustom, loadCustomCommands } from './commands/custom.js';
 import { invalidateSettings, unmuteUser, unbanUser, clearWarnings, kickUser, banUser, audit } from './moderation.js';
-import { invalidateGroupMeta, botIsAdmin } from './permissions.js';
+import { botIsAdminInMeta } from './permissions.js';
 import { queueLength } from './queue.js';
 import { LOGIN_HTML, APP_HTML, APP_CSS, APP_JS } from './dashboard-ui.js';
 
@@ -40,7 +40,6 @@ function issueSession(res) {
   const token = crypto.randomBytes(32).toString('hex');
   sessions.set(token, Date.now() + config.web.sessionTtlMs);
   if (sessions.size > 200) sessions.delete(sessions.keys().next().value);
-  res.cookie?.('sid', token); // express ohne cookie-parser → selbst setzen:
   res.setHeader(
     'Set-Cookie',
     `sid=${token}; Max-Age=${Math.floor(config.web.sessionTtlMs / 1000)}; Path=/; HttpOnly; Secure; SameSite=Strict`
@@ -433,6 +432,12 @@ export function createDashboard() {
 
 let groupCache = { at: 0, list: [] };
 
+/** Gruppen-Cache aktiv neu laden (z. B. direkt nach connection: 'open'). */
+export async function refreshGroupCache() {
+  groupCache.at = 0;
+  return listGroups();
+}
+
 async function listGroups() {
   if (Date.now() - groupCache.at < 60_000) return groupCache.list;
   if (!state.sock || state.connection !== 'open') return groupCache.list;
@@ -449,11 +454,9 @@ async function listGroups() {
 
   const list = [];
   for (const meta of metas) {
-    invalidateGroupMeta(meta.id);
-    let admin = false;
-    try {
-      admin = await botIsAdmin(meta.id);
-    } catch { /* bleibt false */ }
+    // Admin-Status direkt aus der vorhandenen Metadata ableiten —
+    // spart einen groupMetadata-Aufruf pro Gruppe und lernt LID-Mappings.
+    const admin = botIsAdminInMeta(meta);
     const s = sMap.get(meta.id) || {};
     const n = nMap.get(meta.id) || {};
     const r = rMap.get(meta.id) || {};
@@ -465,6 +468,8 @@ async function listGroups() {
       enabled: s.enabled === undefined ? true : Number(s.enabled) === 1,
       antilink: Number(s.antilink) === 1,
       antispam: Number(s.antispam) === 1,
+      welcome: Number(s.welcome) === 1,
+      levelup_announce: s.levelup_announce === undefined ? true : Number(s.levelup_announce) === 1,
       antiraid: Number(r.enabled) === 1,
       nightmode: { enabled: Number(n.enabled) === 1, start: n.start_hhmm || '22:00', end: n.end_hhmm || '07:00' },
     });

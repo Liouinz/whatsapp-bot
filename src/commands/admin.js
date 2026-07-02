@@ -8,7 +8,7 @@ import {
   addWarning, activeWarnings, clearWarnings, muteUser, unmuteUser,
   kickUser, banUser, unbanUser, invalidateSettings, audit,
 } from '../moderation.js';
-import { botIsAdmin, adminDebugInfo, resolveLid } from '../permissions.js';
+import { botIsAdmin, adminDebugInfo, resolveLid, isProtectedTarget } from '../permissions.js';
 
 let lastRestartAt = 0;
 
@@ -19,6 +19,27 @@ async function requireBotAdmin(ctx) {
   if (await botIsAdmin(ctx.chatJid)) return true;
   await ctx.reply('⛔ Dafür muss *ich* Admin in dieser Gruppe sein. Bitte gib mir Admin-Rechte.');
   return false;
+}
+
+/** Admins, Owner und der Bot selbst sind vor Moderations-Aktionen geschützt. */
+async function requireUnprotectedTarget(ctx, target) {
+  if (!(await isProtectedTarget(ctx.chatJid, target))) return true;
+  await ctx.reply('⛔ Diese Person ist Admin (oder der Bot selbst) — Moderations-Aktionen gehen nur gegen normale Mitglieder.');
+  return false;
+}
+
+/** "an"/"aus" (bzw. on/off/1/0) parsen → true/false/null. */
+function parseOnOff(word) {
+  if (/^(an|on|1)$/i.test(word || '')) return true;
+  if (/^(aus|off|0)$/i.test(word || '')) return false;
+  return null;
+}
+
+/** Schalter in group_settings umlegen + Cache invalidieren. */
+async function setGroupFlag(ctx, field, value) {
+  await dbRun('INSERT OR IGNORE INTO group_settings (jid) VALUES (?)', [ctx.chatJid]);
+  await dbRun(`UPDATE group_settings SET ${field} = ? WHERE jid = ?`, [value ? 1 : 0, ctx.chatJid]);
+  invalidateSettings(ctx.chatJid);
 }
 
 export const adminCommands = [
@@ -33,6 +54,7 @@ export const adminCommands = [
       const target = ctx.targetUser();
       if (!target) return ctx.reply(NO_TARGET);
       if (!(await requireBotAdmin(ctx))) return;
+      if (!(await requireUnprotectedTarget(ctx, target))) return;
       const ok = await kickUser(ctx.chatJid, target, `durch ${ctx.senderName}`);
       await audit('kick', ctx.chatJid, target, ctx.sender, 'manuell');
       return ctx.reply(
@@ -54,6 +76,7 @@ export const adminCommands = [
       const target = ctx.targetUser();
       if (!target) return ctx.reply(NO_TARGET);
       if (!(await requireBotAdmin(ctx))) return;
+      if (!(await requireUnprotectedTarget(ctx, target))) return;
       const reason = ctx.argTextWithoutMentions() || 'kein Grund angegeben';
       await banUser(ctx.chatJid, target, reason, ctx.sender);
       return ctx.reply(
@@ -87,7 +110,10 @@ export const adminCommands = [
       const target = ctx.targetUser();
       if (!target) return ctx.reply(NO_TARGET);
       if (!(await requireBotAdmin(ctx))) return;
-      let minutes = parseInt(ctx.args.find((a) => /^\d+$/.test(a)) || '', 10);
+      if (!(await requireUnprotectedTarget(ctx, target))) return;
+      // Nur 1–4-stellige Zahlen zählen als Minuten (sonst würde eine als
+      // Argument getippte Telefonnummer als Dauer fehlinterpretiert).
+      let minutes = parseInt(ctx.args.find((a) => /^\d{1,4}$/.test(a)) || '', 10);
       if (!minutes || minutes < 1) minutes = config.moderation.muteMinutesDefault;
       minutes = Math.min(minutes, config.moderation.muteMinutesMax);
       const ok = await muteUser(ctx.chatJid, target, minutes, ctx.sender, 'manuell');
@@ -123,6 +149,7 @@ export const adminCommands = [
     async run(ctx) {
       const target = ctx.targetUser();
       if (!target) return ctx.reply(NO_TARGET);
+      if (!(await requireUnprotectedTarget(ctx, target))) return;
       const reason = ctx.argTextWithoutMentions() || 'kein Grund angegeben';
       const { count, action } = await addWarning(ctx.chatJid, target, reason, ctx.sender);
       let text =
@@ -209,11 +236,9 @@ export const adminCommands = [
     adminOnly: true,
     groupOnly: true,
     async run(ctx) {
-      const on = /^(an|on|1)$/i.test(ctx.args[0] || '');
-      const off = /^(aus|off|0)$/i.test(ctx.args[0] || '');
-      if (!on && !off) return ctx.reply('ℹ️ Nutzung: `!antilink an` oder `!antilink aus`');
-      await dbRun('UPDATE group_settings SET antilink = ? WHERE jid = ?', [on ? 1 : 0, ctx.chatJid]);
-      invalidateSettings(ctx.chatJid);
+      const on = parseOnOff(ctx.args[0]);
+      if (on === null) return ctx.reply('ℹ️ Nutzung: `!antilink an` oder `!antilink aus`');
+      await setGroupFlag(ctx, 'antilink', on);
       return ctx.reply(on ? '✅ Anti-Link ist jetzt *aktiv* — Links werden entfernt.' : '✅ Anti-Link ist jetzt *aus*.');
     },
   },
@@ -225,12 +250,38 @@ export const adminCommands = [
     adminOnly: true,
     groupOnly: true,
     async run(ctx) {
-      const on = /^(an|on|1)$/i.test(ctx.args[0] || '');
-      const off = /^(aus|off|0)$/i.test(ctx.args[0] || '');
-      if (!on && !off) return ctx.reply('ℹ️ Nutzung: `!antispam an` oder `!antispam aus`');
-      await dbRun('UPDATE group_settings SET antispam = ? WHERE jid = ?', [on ? 1 : 0, ctx.chatJid]);
-      invalidateSettings(ctx.chatJid);
+      const on = parseOnOff(ctx.args[0]);
+      if (on === null) return ctx.reply('ℹ️ Nutzung: `!antispam an` oder `!antispam aus`');
+      await setGroupFlag(ctx, 'antispam', on);
       return ctx.reply(on ? '✅ Anti-Spam ist jetzt *aktiv*.' : '✅ Anti-Spam ist jetzt *aus*.');
+    },
+  },
+  {
+    name: 'welcome',
+    group: 'admin',
+    desc: 'Begrüßung neuer Mitglieder an/aus',
+    usage: '!welcome an|aus',
+    adminOnly: true,
+    groupOnly: true,
+    async run(ctx) {
+      const on = parseOnOff(ctx.args[0]);
+      if (on === null) return ctx.reply('ℹ️ Nutzung: `!welcome an` oder `!welcome aus`');
+      await setGroupFlag(ctx, 'welcome', on);
+      return ctx.reply(on ? '✅ Neue Mitglieder werden jetzt begrüßt. 👋' : '✅ Begrüßung ist jetzt *aus*.');
+    },
+  },
+  {
+    name: 'levelup',
+    group: 'admin',
+    desc: 'Level-Up-Nachrichten an/aus',
+    usage: '!levelup an|aus',
+    adminOnly: true,
+    groupOnly: true,
+    async run(ctx) {
+      const on = parseOnOff(ctx.args[0]);
+      if (on === null) return ctx.reply('ℹ️ Nutzung: `!levelup an` oder `!levelup aus`');
+      await setGroupFlag(ctx, 'levelup_announce', on);
+      return ctx.reply(on ? '✅ Level-Ups werden jetzt gefeiert. 🎉' : '✅ Level-Up-Nachrichten sind jetzt *aus*.');
     },
   },
   {
@@ -241,9 +292,8 @@ export const adminCommands = [
     adminOnly: true,
     groupOnly: true,
     async run(ctx) {
-      const on = /^(an|on|1)$/i.test(ctx.args[0] || '');
-      const off = /^(aus|off|0)$/i.test(ctx.args[0] || '');
-      if (!on && !off) return ctx.reply('ℹ️ Nutzung: `!antiraid an` oder `!antiraid aus`');
+      const on = parseOnOff(ctx.args[0]);
+      if (on === null) return ctx.reply('ℹ️ Nutzung: `!antiraid an` oder `!antiraid aus`');
       await dbRun(
         `INSERT INTO antiraid (group_jid, enabled) VALUES (?, ?)
          ON CONFLICT(group_jid) DO UPDATE SET enabled = excluded.enabled`,

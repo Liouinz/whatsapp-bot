@@ -103,15 +103,20 @@ export function logError(err, context = '') {
 /** Wichtige Meldung an die Owner (Ban-Verdacht, Logout, …) — läuft über die Sende-Queue. */
 export async function ownerAlert(message) {
   logWarn('📣 Owner-Alarm: ' + message);
+  const insertedAt = Date.now();
   dbRun('INSERT INTO owner_alerts (message, created_at, delivered) VALUES (?, ?, 0)', [
     message,
-    Date.now(),
+    insertedAt,
   ]).catch(() => {});
   if (ownerNotifier) {
     try {
       await ownerNotifier(message);
+      dbRun('UPDATE owner_alerts SET delivered = 1 WHERE message = ? AND created_at = ?', [
+        message,
+        insertedAt,
+      ]).catch(() => {});
     } catch {
-      /* Zustellung scheitert leise, steht ja in owner_alerts */
+      /* Zustellung scheitert leise, steht ja unzugestellt in owner_alerts */
     }
   }
 }

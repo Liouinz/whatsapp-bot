@@ -5,6 +5,7 @@ import { dbRun, dbRows } from '../db.js';
 import { state } from '../state.js';
 import { getGroupSettings, invalidateSettings } from '../moderation.js';
 import { getAiQuota } from '../ai.js';
+import { listCustom } from './custom.js';
 
 const GROUP_TITLES = {
   admin: '🛡️ *Admin & Moderation*',
@@ -50,6 +51,10 @@ export const communityCommands = [
         if (!cmds.length) continue;
         text += `\n${GROUP_TITLES[g]}\n`;
         text += cmds.map((c) => `• \`${PREFIX}${c.name}\` — ${c.desc}`).join('\n') + '\n';
+      }
+      const { commands: customCmds, faqs } = listCustom();
+      if (customCmds.length + faqs.length > 0) {
+        text += `\n✨ *Eigene Befehle:* \`${PREFIX}cmds\` zeigt ${customCmds.length + faqs.length} weitere\n`;
       }
       text += `\nℹ️ Details: \`${PREFIX}hilfe <befehl>\``;
       if (!isAdmin) text += `\n_Admins sehen mit ${PREFIX}hilfe zusätzlich die Moderations-Befehle._`;

@@ -349,8 +349,9 @@ function makeCtx(msg, chatJid, isGroup, senderIds, sender, senderName, text, arg
     reply: (t, mentions) => replyTo(msg, t, mentions),
     mentionTag: (jid) => `@${String(resolveLid(jid)).split('@')[0]}`,
     targetUser: () => findTarget(msg, args),
+    // Nur echte Mention-Tokens (@12345…) entfernen — "!warn @x Grund 2" behält die "2"
     argTextWithoutMentions: () =>
-      args.filter((a) => !a.startsWith('@') && !/^\d+$/.test(a)).join(' ').trim(),
+      args.filter((a) => !/^@\d{5,}$/.test(a)).join(' ').trim(),
     isAdmin: async () => (owner ? true : isGroup ? isUserAdmin(chatJid, senderIds) : false),
     groupMeta: () => (isGroup ? getGroupMeta(chatJid) : null),
   };

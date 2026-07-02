@@ -1,5 +1,9 @@
 // Zentrale Konfiguration — ALLE Stellschrauben an einem Ort, keine Magic Numbers im Code.
 
+// Zeitzone festnageln, BEVOR irgendwo ein Date entsteht (Render läuft sonst auf UTC —
+// !schedule 18:30 käme dann eine/zwei Stunden zu spät). Über Env TZ übersteuerbar.
+if (!process.env.TZ) process.env.TZ = 'Europe/Berlin';
+
 /** Anzeige-Name des Bots. Änderbar über Env-Variable BOT_NAME, ohne Code anzufassen. */
 export const BOT_NAME = (process.env.BOT_NAME || 'CommunityBot').trim();
 

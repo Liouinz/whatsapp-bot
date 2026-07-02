@@ -8,11 +8,24 @@ import { logError } from './logger.js';
 const queue = [];
 let running = false;
 
+const WAIT_FOR_CONNECTION_MS = 45_000; // bei kurzem Reconnect nicht sofort verwerfen
+
 const jitter = () =>
   config.send.jitterMinMs +
   Math.floor(Math.random() * (config.send.jitterMaxMs - config.send.jitterMinMs));
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Kurz auf eine offene Verbindung warten (überbrückt normale Reconnects). */
+async function waitForConnection() {
+  const deadline = Date.now() + WAIT_FOR_CONNECTION_MS;
+  while (Date.now() < deadline) {
+    if (state.sock && state.connection === 'open') return true;
+    if (state.stopped) return false; // 403/440: nichts mehr senden
+    await sleep(1500);
+  }
+  return false;
+}
 
 async function work() {
   if (running) return;
@@ -23,8 +36,8 @@ async function work() {
       let sent = false;
       for (let attempt = 0; attempt <= config.send.maxRetries && !sent; attempt++) {
         try {
-          if (!state.sock || state.connection !== 'open') {
-            throw new Error('Socket nicht verbunden');
+          if (!(await waitForConnection())) {
+            throw new Error('Socket nicht verbunden (Timeout beim Warten auf Reconnect)');
           }
           const result = await state.sock.sendMessage(job.jid, job.content, job.options);
           rolloverDay();
