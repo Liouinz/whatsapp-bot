@@ -29,6 +29,7 @@ import { funCommands } from './commands/fun.js';
 import { pollCommands } from './commands/polls.js';
 import { birthdayCommands } from './commands/birthdays.js';
 import { profileCommands } from './commands/profile.js';
+import { wordleCommands } from './commands/wordle.js';
 import { activeTitle } from './commands/economy.js';
 
 // ── Registry + Live-Toggles ────────────────────────────────────────
@@ -45,6 +46,7 @@ export const registry = [
   ...scheduleCommands,
   ...toolCommands,
   ...gameCommands,
+  ...wordleCommands,
   ...funCommands,
   ...adminCommands,
 ];

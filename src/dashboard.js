@@ -15,7 +15,7 @@ import { registry, isCommandEnabled, setCommandEnabled } from './router.js';
 import { listCustom, loadCustomCommands } from './commands/custom.js';
 import { invalidateSettings, unmuteUser, unbanUser, clearWarnings, kickUser, banUser, audit } from './moderation.js';
 import { botIsAdminInMeta } from './permissions.js';
-import { queueLength } from './queue.js';
+import { queueLength, sendText } from './queue.js';
 import { LOGIN_HTML, APP_HTML, APP_CSS, APP_JS } from './dashboard-ui.js';
 
 // ── Auth-Grundlagen ────────────────────────────────────────────────
@@ -101,6 +101,29 @@ export function createDashboard() {
   // ── Öffentlich ──
   app.get('/health', (req, res) => res.status(200).send('ok'));
   app.get('/robots.txt', (req, res) => res.type('text/plain').send('User-agent: *\nDisallow: /\n'));
+
+  // PWA: Manifest + Icon (macht das Panel auf dem Handy installierbar)
+  app.get('/manifest.webmanifest', (req, res) => {
+    res.type('application/manifest+json').json({
+      name: `${BOT_NAME} Control Center`,
+      short_name: BOT_NAME,
+      start_url: '/',
+      display: 'standalone',
+      background_color: '#05070d',
+      theme_color: '#05070d',
+      icons: [{ src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }],
+    });
+  });
+  app.get('/icon.svg', (req, res) => {
+    res.type('image/svg+xml').send(
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">` +
+        `<defs><radialGradient id="g" cx="50%" cy="35%"><stop offset="0%" stop-color="#00e5d0"/><stop offset="100%" stop-color="#063b3f"/></radialGradient></defs>` +
+        `<rect width="100" height="100" rx="24" fill="#05070d"/>` +
+        `<circle cx="50" cy="50" r="26" fill="url(#g)"/>` +
+        `<circle cx="50" cy="50" r="34" fill="none" stroke="#00e5d0" stroke-opacity=".35" stroke-width="3"/>` +
+        `</svg>`
+    );
+  });
 
   // ── Login ──
   const loginLimiter = rateLimit({ windowMs: 60_000, max: 20, standardHeaders: true, legacyHeaders: false });
@@ -247,6 +270,19 @@ export function createDashboard() {
       logError(err, 'panel.settings');
       res.status(500).json({ error: 'Speichern fehlgeschlagen.' });
     }
+  });
+
+  // Nachricht aus dem Panel in eine Gruppe senden (läuft über die Sende-Queue)
+  api.post('/groups/:jid/send', async (req, res) => {
+    const jid = req.params.jid;
+    const text = String(req.body?.text || '').trim();
+    if (!jid.endsWith('@g.us')) return res.status(400).json({ error: 'Ungültige Gruppe.' });
+    if (!text) return res.status(400).json({ error: 'Text fehlt.' });
+    if (text.length > 1500) return res.status(400).json({ error: 'Maximal 1500 Zeichen.' });
+    if (state.connection !== 'open') return res.status(409).json({ error: 'Bot ist gerade nicht verbunden.' });
+    const result = await sendText(jid, text);
+    await audit('panel-send', jid, '', 'panel', text.slice(0, 80));
+    res.json({ ok: !!result });
   });
 
   api.post('/groups/:jid/kick', async (req, res) => {

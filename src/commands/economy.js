@@ -249,6 +249,44 @@ export const economyCommands = [
     },
   },
   {
+    name: 'roulette',
+    group: 'economy',
+    desc: 'Roulette: rot/schwarz (×2) oder Zahl 0–36 (×30)',
+    usage: '!roulette <betrag> rot|schwarz|<zahl>',
+    async run(ctx) {
+      const wallet = await getWallet(ctx.sender, ctx.senderName);
+      const amount = parseAmount(ctx.args[0], Number(wallet.balance));
+      const rawPick = (ctx.args[1] || '').toLowerCase();
+      const isColor = rawPick === 'rot' || rawPick === 'schwarz';
+      const numPick = /^\d{1,2}$/.test(rawPick) ? parseInt(rawPick, 10) : null;
+      if (!amount || (!isColor && (numPick === null || numPick > 36))) {
+        return ctx.reply('ℹ️ Nutzung: `!roulette <betrag> rot`, `!roulette <betrag> schwarz` oder `!roulette <betrag> 17`');
+      }
+      if (amount < config.economy.betMin) return ctx.reply(`⚠️ Mindesteinsatz: ${fmtCoins(config.economy.betMin)}`);
+      if (amount > config.economy.betMax) return ctx.reply(`⚠️ Maximaleinsatz: ${fmtCoins(config.economy.betMax)}`);
+      if (!(await takeCoins(ctx.sender, amount))) {
+        return ctx.reply(`⚠️ So viel hast du nicht (Kontostand: ${fmtCoins(wallet.balance)}).`);
+      }
+      await dbRun('UPDATE coins SET total_gambled = total_gambled + ? WHERE user_jid = ?', [amount, resolveLid(ctx.sender)]);
+
+      const RED = new Set([1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]);
+      const spin = Math.floor(Math.random() * 37); // 0–36
+      const color = spin === 0 ? '🟢' : RED.has(spin) ? '🔴' : '⚫';
+      let win = 0;
+      if (isColor && spin !== 0 && ((rawPick === 'rot') === RED.has(spin))) win = amount * 2;
+      if (numPick !== null && numPick === spin) win = amount * 30;
+
+      let text = `🎡 Die Kugel rollt … *${color} ${spin}*!\n`;
+      if (win > 0) {
+        await addCoins(ctx.sender, win, ctx.senderName);
+        text += `🎉 *Gewonnen!* Du bekommst *${fmtCoins(win)}*.`;
+      } else {
+        text += `😬 Daneben — ${fmtCoins(amount)} verloren.`;
+      }
+      return ctx.reply(text);
+    },
+  },
+  {
     name: 'shop',
     group: 'economy',
     desc: 'Titel-Shop — Coins gegen Style',

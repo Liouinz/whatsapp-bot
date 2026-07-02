@@ -188,6 +188,29 @@ export const adminCommands = [
     },
   },
   {
+    name: 'warnliste',
+    group: 'admin',
+    desc: 'Alle aktiven Verwarnungen dieser Gruppe',
+    usage: '!warnliste',
+    adminOnly: true,
+    groupOnly: true,
+    async run(ctx) {
+      const rows = await dbRows(
+        `SELECT user_jid, COUNT(*) AS c, MAX(created_at) AS last FROM warnings
+         WHERE group_jid = ? AND expires_at > ? GROUP BY user_jid ORDER BY c DESC LIMIT 15`,
+        [ctx.chatJid, Date.now()]
+      );
+      if (!rows.length) return ctx.reply('✅ Keine aktiven Verwarnungen in dieser Gruppe — saubere Sache!');
+      const lines = rows.map((r) => {
+        const num = String(r.user_jid).split('@')[0];
+        return `• +${num} — *${r.c}/${config.moderation.warnLimitKick}* (zuletzt ${new Date(Number(r.last)).toLocaleDateString('de-DE')})`;
+      });
+      return ctx.reply(
+        `🛡️ *Aktive Verwarnungen* (${rows.length} Personen)\n${lines.join('\n')}\n\nℹ️ Details: \`!warns @person\` · Verfall nach ${config.moderation.warnExpiryDays} Tagen`
+      );
+    },
+  },
+  {
     name: 'clearwarns',
     group: 'admin',
     desc: 'Löscht alle Verwarnungen einer Person',

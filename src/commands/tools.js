@@ -91,7 +91,75 @@ export function safeCalc(expr) {
   return vals[0];
 }
 
+// ── Einheiten-Umrechner (offline, kein API-Zwang) ──────────────────
+
+const UNITS = {
+  // Länge (Basis: Meter)
+  mm: { f: 0.001, kind: 'länge' }, cm: { f: 0.01, kind: 'länge' }, m: { f: 1, kind: 'länge' },
+  km: { f: 1000, kind: 'länge' }, mi: { f: 1609.344, kind: 'länge', label: 'Meilen' },
+  ft: { f: 0.3048, kind: 'länge', label: 'Fuß' }, inch: { f: 0.0254, kind: 'länge', label: 'Zoll' },
+  zoll: { f: 0.0254, kind: 'länge' }, yd: { f: 0.9144, kind: 'länge' },
+  // Gewicht (Basis: Kilogramm)
+  g: { f: 0.001, kind: 'gewicht' }, kg: { f: 1, kind: 'gewicht' }, t: { f: 1000, kind: 'gewicht' },
+  lb: { f: 0.453592, kind: 'gewicht', label: 'Pfund' }, oz: { f: 0.0283495, kind: 'gewicht', label: 'Unzen' },
+  // Volumen (Basis: Liter)
+  ml: { f: 0.001, kind: 'volumen' }, l: { f: 1, kind: 'volumen' },
+  gal: { f: 3.78541, kind: 'volumen', label: 'Gallonen' }, cup: { f: 0.24, kind: 'volumen', label: 'Cups' },
+  // Geschwindigkeit (Basis: km/h)
+  kmh: { f: 1, kind: 'tempo' }, mph: { f: 1.609344, kind: 'tempo' }, kn: { f: 1.852, kind: 'tempo', label: 'Knoten' },
+  ms: { f: 3.6, kind: 'tempo', label: 'm/s' },
+  // Daten (Basis: MB)
+  kb: { f: 0.001, kind: 'daten' }, mb: { f: 1, kind: 'daten' }, gb: { f: 1000, kind: 'daten' }, tb: { f: 1_000_000, kind: 'daten' },
+};
+
+function convertUnits(value, fromRaw, toRaw) {
+  const norm = (u) => u.toLowerCase().replace('km/h', 'kmh').replace('m/s', 'ms').replace('"', 'zoll');
+  const from = UNITS[norm(fromRaw)];
+  const to = UNITS[norm(toRaw)];
+  if (!from || !to || from.kind !== to.kind) return null;
+  return (value * from.f) / to.f;
+}
+
+// Temperatur separat (keine lineare Faktor-Umrechnung)
+function convertTemp(value, from, to) {
+  const f = from.toLowerCase().replace('°', ''), t = to.toLowerCase().replace('°', '');
+  const c =
+    f === 'c' ? value :
+    f === 'f' ? (value - 32) * 5 / 9 :
+    f === 'k' ? value - 273.15 : null;
+  if (c === null) return null;
+  if (t === 'c') return c;
+  if (t === 'f') return c * 9 / 5 + 32;
+  if (t === 'k') return c + 273.15;
+  return null;
+}
+
 export const toolCommands = [
+  {
+    name: 'umrechnen',
+    aliases: ['convert'],
+    group: 'tools',
+    desc: 'Rechnet Einheiten um (km/mi, kg/lb, °C/°F …)',
+    usage: '!umrechnen 10 km in mi',
+    async run(ctx) {
+      const m = /^([\d.,-]+)\s*([a-zA-Z°/"]+)\s+(?:in|nach|zu|to)\s+([a-zA-Z°/"]+)$/.exec(ctx.argText.trim());
+      if (!m) {
+        return ctx.reply(
+          'ℹ️ Nutzung: `!umrechnen 10 km in mi`\n' +
+            'Kann: mm cm m km mi ft zoll yd · g kg t lb oz · ml l gal cup · km/h mph kn m/s · kb mb gb tb · °C °F K'
+        );
+      }
+      const value = parseFloat(m[1].replace(',', '.'));
+      if (!Number.isFinite(value)) return ctx.reply('⚠️ Das ist keine Zahl, die ich umrechnen kann.');
+      const isTemp = /^[°]?[cfk]$/i.test(m[2].replace('°', '')) && /^[°]?[cfk]$/i.test(m[3].replace('°', ''));
+      const result = isTemp ? convertTemp(value, m[2], m[3]) : convertUnits(value, m[2], m[3]);
+      if (result === null) {
+        return ctx.reply('⚠️ Diese Einheiten passen nicht zusammen (oder ich kenne sie nicht). `!umrechnen` zeigt die Liste.');
+      }
+      const pretty = Math.abs(result) >= 1000 ? Math.round(result).toLocaleString('de-DE') : String(Math.round(result * 10000) / 10000);
+      return ctx.reply(`🔁 ${m[1]} ${m[2]} = *${pretty} ${m[3]}*`);
+    },
+  },
   {
     name: 'qr',
     group: 'tools',

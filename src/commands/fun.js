@@ -140,6 +140,42 @@ const MOTIVATION = [
   '🏆 Champions trainieren, wenn niemand hinschaut.',
 ];
 
+const WAHRHEIT = [
+  'Was war dein peinlichster Moment in diesem Jahr?',
+  'Welchen Kontakt hast du zuletzt gestalkt?',
+  'Was ist deine unbeliebteste heiße Meinung (Hot Take)?',
+  'Welche App würdest du nie freiwillig löschen?',
+  'Was war die kindischste Sache, die du diese Woche gemacht hast?',
+  'Welche Nachricht hast du mal an die falsche Person geschickt?',
+  'Was ist dein Guilty-Pleasure-Song?',
+  'Wen aus dieser Gruppe würdest du auf eine einsame Insel mitnehmen?',
+  'Was war deine schlechteste Frisur aller Zeiten?',
+  'Welche Lüge erzählst du am häufigsten?',
+  'Was war dein seltsamster Traum in letzter Zeit?',
+  'Wie viele Stunden warst du gestern wirklich am Handy?',
+  'Was ist das Kurioseste in deinem Suchverlauf?',
+  'Welches Essen isst du heimlich, obwohl du es öffentlich schlecht redest?',
+  'Was würdest du tun, wenn du einen Tag unsichtbar wärst?',
+];
+
+const PFLICHT = [
+  'Schreib die nächsten 3 Nachrichten nur in GROSSBUCHSTABEN.',
+  'Schick ein Foto von deinen Schuhen. Jetzt.',
+  'Sag der Gruppe dein ehrliches Lieblingslied — ohne Ausreden.',
+  'Beende jede Nachricht der nächsten 10 Minuten mit „…meow".',
+  'Schreib ein Mini-Gedicht (2 Zeilen) über die Person über dir im Chat.',
+  'Ändere für 1 Stunde deinen Status auf „Ich liebe Brokkoli 🥦".',
+  'Erzähl einen Witz — er MUSS schlecht sein.',
+  'Gib der letzten Person, die geschrieben hat, ein ernst gemeintes Kompliment.',
+  'Sprachnachricht: Sing 5 Sekunden von deinem Lieblingslied.',
+  'Schreib das Alphabet rückwärts — ohne zu googeln.',
+  'Nutze in deiner nächsten Nachricht mindestens 7 Emojis.',
+  'Erkläre in 2 Sätzen, warum Ananas auf Pizza gehört (auch wenn du es hasst).',
+  'Poste dein ältestes Foto aus der Galerie, das du zeigen kannst.',
+  'Tippe deine nächste Nachricht nur mit der Nase.',
+  'Verrate dein aktuelles Handy-Hintergrundbild (Beschreibung reicht).',
+];
+
 const SSP = ['schere', 'stein', 'papier'];
 const SSP_ICON = { schere: '✂️', stein: '🪨', papier: '📄' };
 
@@ -286,6 +322,32 @@ export const funCommands = [
       if (result === 0) return ctx.reply(`${line}\n🤝 Unentschieden — nochmal!`);
       if (result === 1) return ctx.reply(`${line}\n🎉 Du gewinnst! ${mine} schlägt ${bot}.`);
       return ctx.reply(`${line}\n😎 Ich gewinne! ${bot} schlägt ${mine}.`);
+    },
+  },
+  {
+    name: 'wahrheit',
+    aliases: ['truth'],
+    group: 'games',
+    desc: 'Wahrheit-Frage (Wahrheit oder Pflicht)',
+    usage: '!wahrheit [@person]',
+    groupOnly: true,
+    async run(ctx) {
+      const target = ctx.targetUser();
+      const who = target ? ctx.mentionTag(target) : `*${ctx.senderName}*`;
+      return ctx.reply(`🎤 *Wahrheit für ${who}:*\n${pick(WAHRHEIT)}`, target ? [target] : undefined);
+    },
+  },
+  {
+    name: 'pflicht',
+    aliases: ['dare'],
+    group: 'games',
+    desc: 'Pflicht-Aufgabe (Wahrheit oder Pflicht)',
+    usage: '!pflicht [@person]',
+    groupOnly: true,
+    async run(ctx) {
+      const target = ctx.targetUser();
+      const who = target ? ctx.mentionTag(target) : `*${ctx.senderName}*`;
+      return ctx.reply(`🔥 *Pflicht für ${who}:*\n${pick(PFLICHT)}`, target ? [target] : undefined);
     },
   },
   {

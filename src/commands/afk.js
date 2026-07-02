@@ -50,6 +50,21 @@ export function fmtSince(ts) {
 
 export const afkCommands = [
   {
+    name: 'afkliste',
+    aliases: ['whoafk'],
+    group: 'community',
+    desc: 'Wer ist gerade AFK?',
+    usage: '!afkliste',
+    async run(ctx) {
+      if (!afkCache.size) return ctx.reply('✅ Niemand ist AFK — alle an Deck!');
+      const lines = [...afkCache.entries()]
+        .sort((a, b) => a[1].since - b[1].since)
+        .slice(0, 15)
+        .map(([jid, entry]) => `• +${String(jid).split('@')[0]} — seit ${fmtSince(entry.since)}: _${entry.reason}_`);
+      return ctx.reply(`💤 *Gerade AFK* (${afkCache.size})\n${lines.join('\n')}`);
+    },
+  },
+  {
     name: 'afk',
     group: 'community',
     desc: 'Setzt dich auf abwesend (mit optionalem Grund)',

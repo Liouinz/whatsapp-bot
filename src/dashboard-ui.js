@@ -42,6 +42,9 @@ export const APP_HTML = `<!doctype html>
 <meta name="robots" content="noindex">
 <meta name="theme-color" content="#05070d">
 <title>${BOT_NAME} — Control Center</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon.svg">
 <link rel="stylesheet" href="/app.css">
 </head>
 <body>
@@ -747,6 +750,22 @@ function renderGroupDetail(gr){
       h('label', { class:'switch' }, [nmEnabled, h('span', { class:'sl' })]),
       nmStart, h('span', { class:'muted' }, ['bis']), nmEnd, nmSave
     ])
+  ]));
+
+  /* Nachricht direkt aus dem Panel senden */
+  var msgInput = h('textarea', { placeholder:'Nachricht an die Gruppe …', rows:'2', style:'width:100%;resize:vertical' });
+  var msgBtn = h('button', { class:'small', style:'margin-top:8px', onclick:function(){
+    var text = msgInput.value.trim();
+    if (!text) return toast('⚠️ Erst Text eingeben.');
+    msgBtn.disabled = true;
+    api('/groups/' + encodeURIComponent(gr.jid) + '/send', { method:'POST', body:{ text:text } })
+      .then(function(r){ toast(r.ok ? '✅ Gesendet' : '⚠️ Senden fehlgeschlagen'); msgInput.value = ''; })
+      .catch(function(e){ toast('⚠️ ' + e.message); })
+      .then(function(){ msgBtn.disabled = false; });
+  } }, ['📨 Senden']);
+  content.appendChild(h('div', { class:'glass card', style:'margin-top:12px' }, [
+    h('h3', {}, ['📨 Nachricht senden']),
+    msgInput, msgBtn
   ]));
 
   var mBox = h('div', { style:'margin-top:14px' }, [skel(46), skel(46), skel(46)]);
