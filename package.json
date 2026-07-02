@@ -1,10 +1,10 @@
 {
   "name": "community-bot",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "private": true,
-  "description": "WhatsApp Community Bot v2 — modular, anti-ban, session-persistent (Turso).",
+  "description": "WhatsApp Community Bot — Turso-Session, Preflight, LID-Admin-Fix, Gemini-Fallback, Glassmorphism-Panel.",
   "main": "src/index.js",
-  "type": "commonjs",
+  "type": "module",
   "scripts": {
     "start": "node src/index.js"
   },
@@ -13,9 +13,10 @@
   },
   "dependencies": {
     "@libsql/client": "^0.14.0",
-    "@whiskeysockets/baileys": "^6.7.0",
+    "@whiskeysockets/baileys": "^6.7.9",
     "express": "^4.19.2",
-    "mongodb": "^6.5.0",
+    "express-rate-limit": "^7.4.0",
+    "helmet": "^8.0.0",
     "pino": "^9.0.0",
     "qrcode": "^1.5.3"
   }

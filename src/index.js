@@ -1,75 +1,279 @@
-'use strict';
+// Einstiegspunkt: preflight() → initDb() → Web-Panel → Baileys-Socket-Lifecycle.
+// Reconnect-Logik folgt exakt der DisconnectReason-Tabelle (515/428/440/411/401/403).
 
-const logger = require('./core/logger');
+import makeWASocket, {
+  DisconnectReason,
+  fetchLatestBaileysVersion,
+  makeCacheableSignalKeyStore,
+  jidNormalizedUser,
+} from '@whiskeysockets/baileys';
+import QRCode from 'qrcode';
+import pino from 'pino';
 
-// Crash-Schutz: ein Fehler darf den Bot nie killen (Anti-Ban + Stabilität)
-process.on('uncaughtException', (err) => logger.error({ err }, 'uncaughtException'));
-process.on('unhandledRejection', (err) => logger.error({ err }, 'unhandledRejection'));
+import { BOT_NAME, OWNER_NUMBERS, config } from './config.js';
+import { preflight } from './preflight.js';
+import { initDb, startFlushLoop, stopFlushLoop, flushBuffers } from './db.js';
+import { useTursoAuthState } from './auth.js';
+import { state } from './state.js';
+import { logInfo, logWarn, logError, ownerAlert, setOwnerNotifier } from './logger.js';
+import { sendText } from './queue.js';
+import { handleUpsert, loadToggles } from './router.js';
+import { loadCustomCommands } from './commands/custom.js';
+import { loadAfk } from './commands/afk.js';
+import { loadMutes, handleJoin, getGroupSettings } from './moderation.js';
+import { initAiUsage } from './ai.js';
+import { startScheduler, stopScheduler } from './scheduler.js';
+import { createDashboard } from './dashboard.js';
 
-const config = require('./core/config');
-const { getDb } = require('./core/db');
-const storage = require('./core/storage');
-const { initStorage, flushStats } = storage;
-const { startSocket, state } = require('./core/connection');
-const { startWeb } = require('./web/server');
-const registry = require('./bot/registry');
+const baileysLogger = pino({ level: 'silent' }); // Baileys-Rauschen komplett stumm
 
-async function main() {
-  logger.info('🚀 CommunityBot v2 startet …');
+let clearSessionFn = null;
+let reconnectTimer = null;
+let selfPingTimer = null;
+let httpServer = null;
+let shuttingDown = false;
 
-  // DB-Client initialisieren (legt bei Bedarf lokale Datei an / verbindet Turso)
-  getDb();
+// In-Memory-Ministore für getMessage (gegen Retry-/Decrypt-Probleme)
+const messageStore = new Map(); // "jid|id" → message
+function storeMessage(msg) {
+  if (!msg?.key?.id || !msg.message) return;
+  messageStore.set(`${msg.key.remoteJid}|${msg.key.id}`, msg.message);
+  if (messageStore.size > 1500) messageStore.delete(messageStore.keys().next().value);
+}
 
-  // Daten-Schema anlegen + Debounced-Flush-Loop starten (Phase 2)
-  await initStorage();
+// ── Socket-Lifecycle ───────────────────────────────────────────────
 
-  // Befehle laden (Phase 3)
-  registry.loadCommands();
+async function startSocket() {
+  if (shuttingDown || state.stopped) return;
 
-  // Power-Zustand aus den Settings wiederherstellen (Web-UI An/Aus)
+  const { state: authState, saveCreds, clearSession } = await useTursoAuthState('main');
+  clearSessionFn = clearSession;
+
+  let version;
   try {
-    state.powered = await storage.getSetting('powered', true);
-  } catch (_) {
-    /* default true */
+    ({ version } = await fetchLatestBaileysVersion());
+  } catch {
+    version = undefined; // Baileys nimmt dann seinen eingebauten Standard
   }
 
-  // Web zuerst, damit /qr und /ping sofort erreichbar sind
-  startWeb();
+  const sock = makeWASocket({
+    version,
+    auth: {
+      creds: authState.creds,
+      keys: makeCacheableSignalKeyStore(authState.keys, baileysLogger),
+    },
+    logger: baileysLogger,
+    printQRInTerminal: false, // QR läuft über /qr (geschützt) + ASCII im Log
+    markOnlineOnConnect: false, // WICHTIG: Handy bekommt weiter Push-Benachrichtigungen
+    syncFullHistory: false,
+    browser: [BOT_NAME, 'Chrome', '1.0.0'],
+    getMessage: async (key) => messageStore.get(`${key.remoteJid}|${key.id}`) || undefined,
+  });
 
-  // Keep-Alive: interner Selbst-Ping (zusätzlich zum empfohlenen EXTERNEN Pinger)
-  if (config.selfUrl) startKeepAlive();
+  state.sock = sock;
+  state.connection = 'connecting';
 
-  // WhatsApp-Verbindung aufbauen (lädt Session aus der DB → kein neuer QR nötig)
-  await startSocket();
+  sock.ev.on('creds.update', () => saveCreds().catch((e) => logError(e, 'saveCreds')));
 
-  // Wöchentlicher Report an Admins (optionale Auto-Funktion, pro Gruppe schaltbar)
-  require('./bot/report').startScheduler();
+  sock.ev.on('connection.update', (update) => {
+    handleConnectionUpdate(update).catch((e) => logError(e, 'connection.update'));
+  });
+
+  sock.ev.on('messages.upsert', (upsert) => {
+    try {
+      for (const m of upsert.messages || []) storeMessage(m);
+    } catch { /* Store ist nur Beiwerk */ }
+    handleUpsert(upsert).catch((e) => logError(e, 'upsert'));
+  });
+
+  sock.ev.on('group-participants.update', (ev) => {
+    handleParticipants(ev).catch((e) => logError(e, 'participants'));
+  });
 }
 
-function startKeepAlive() {
-  const url = config.selfUrl.replace(/\/$/, '') + '/ping';
-  setInterval(() => {
-    // Node ≥ 20 hat globales fetch
-    fetch(url).catch(() => {});
-  }, 5 * 60 * 1000);
-  logger.info(`Keep-Alive aktiv → ${url} (alle 5 Min). Hinweis: externen Pinger (UptimeRobot/cron-job.org) zusätzlich einrichten.`);
+async function handleConnectionUpdate({ connection, lastDisconnect, qr }) {
+  if (qr) {
+    // QR-Schleife ist normal, solange nicht gescannt (~60 s neuer Code)
+    state.currentQr = await QRCode.toDataURL(qr, { width: 512, margin: 2 }).catch(() => null);
+    state.qrUpdatedAt = Date.now();
+    logInfo('📱 Neuer QR-Code bereit — im Panel unter /qr scannen.');
+    printQrAscii(qr);
+    return;
+  }
+
+  if (connection === 'open') {
+    state.connection = 'open';
+    state.currentQr = null;
+    state.lastConnectedAt = Date.now();
+    state.reconnectAttempts = 0;
+
+    // LID-Basis: PN-JID UND LID des Bots erfassen (Grundlage der Admin-Erkennung)
+    state.botJidPn = state.sock?.user?.id ? jidNormalizedUser(state.sock.user.id) : null;
+    state.botJidLid = state.sock?.user?.lid ? jidNormalizedUser(state.sock.user.lid) : null;
+    logInfo(`✅ Verbunden als ${BOT_NAME} (PN: ${state.botJidPn || '—'} · LID: ${state.botJidLid || '—'})`);
+    return;
+  }
+
+  if (connection === 'close') {
+    state.connection = 'close';
+    const code = lastDisconnect?.error?.output?.statusCode ?? 0;
+
+    if (shuttingDown) return;
+
+    switch (code) {
+      case DisconnectReason.restartRequired: // 515 — normal nach Pairing
+        logInfo('🔁 Restart nach Pairing (515) — verbinde sofort neu (kein Fehler).');
+        return void startSocket().catch((e) => logError(e, 'startSocket'));
+
+      case DisconnectReason.loggedOut: // 401 — NICHT reconnecten
+        state.stopped = true;
+        state.stopReason = 'Ausgeloggt (401)';
+        await clearSessionFn?.().catch(() => {});
+        await ownerAlert(
+          '⛔ *Bot wurde ausgeloggt (401).* Die Session wurde gelöscht — bitte im Panel unter /qr neu koppeln und den Dienst neu starten.'
+        );
+        logWarn('⛔ 401 loggedOut: Session gelöscht, KEIN Reconnect. Neustart + QR-Scan nötig.');
+        return;
+
+      case DisconnectReason.badSession: // 411 — Session kaputt → löschen, neuer QR
+        logWarn('⚠️ Session beschädigt (411) — lösche Session, neuer QR nötig.');
+        await clearSessionFn?.().catch(() => {});
+        await ownerAlert('⚠️ Session war beschädigt und wurde zurückgesetzt — bitte /qr neu scannen.');
+        return void startSocket().catch((e) => logError(e, 'startSocket'));
+
+      case DisconnectReason.connectionReplaced: // 440 — nicht blind reconnecten
+        state.stopped = true;
+        state.stopReason = 'Andere Session aktiv (440)';
+        await ownerAlert(
+          '⚠️ *Verbindung ersetzt (440):* Irgendwo läuft eine zweite Bot-Session. Ich stoppe, um keine Endlosschleife zu bauen — andere Instanz beenden, dann neu starten.'
+        );
+        return;
+
+      case DisconnectReason.forbidden: // 403 — möglicher Ban → STOPPEN
+      case 403:
+        state.stopped = true;
+        state.stopReason = 'Möglicher Ban (403)';
+        await ownerAlert(
+          '🚨 *403 erhalten — möglicherweise wurde die Nummer gesperrt!* Ich stoppe alle Reconnects. Bitte Nummer in WhatsApp prüfen, bevor irgendetwas neu gestartet wird.'
+        );
+        return;
+
+      default:
+        scheduleReconnect(code);
+    }
+  }
 }
 
-// Graceful Shutdown: ausstehende Stat-Deltas vor dem Beenden persistieren
-// (Render schickt SIGTERM beim Neustart/Deploy)
-let shuttingDown = false;
+function scheduleReconnect(code) {
+  state.reconnectAttempts++;
+  if (state.reconnectAttempts > config.reconnect.maxAttempts) {
+    state.stopped = true;
+    state.stopReason = `Zu viele Reconnect-Versuche (zuletzt Code ${code || '?'})`;
+    ownerAlert(
+      `🚨 *Verbindung dauerhaft gescheitert* (${config.reconnect.maxAttempts} Versuche, zuletzt Code ${code || '?'}). Ich stoppe — bitte Logs/Render prüfen.`
+    ).catch(() => {});
+    return;
+  }
+  // Exponentieller Backoff (1 s → max 60 s) + Jitter — nie in enger Schleife
+  const base = Math.min(
+    config.reconnect.baseDelayMs * 2 ** (state.reconnectAttempts - 1),
+    config.reconnect.maxDelayMs
+  );
+  const delay = base + Math.floor(Math.random() * 1000);
+  logInfo(`🔁 Verbindung zu (Code ${code || '?'}) — Reconnect-Versuch ${state.reconnectAttempts} in ${Math.round(delay / 1000)}s.`);
+  clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(() => {
+    startSocket().catch((e) => logError(e, 'startSocket'));
+  }, delay);
+}
+
+function printQrAscii(qr) {
+  QRCode.toString(qr, { type: 'terminal', small: true })
+    .then((s) => console.log(s))
+    .catch(() => {});
+}
+
+// ── Gruppen-Events (Joins: Willkommen, Bans, Anti-Raid) ────────────
+
+async function handleParticipants({ id, participants, action }) {
+  if (action !== 'add') return;
+  await handleJoin(id, participants);
+  try {
+    const settings = await getGroupSettings(id);
+    if (Number(settings.welcome) && Number(settings.enabled)) {
+      const tags = participants.slice(0, 5).map((p) => `@${String(p).split('@')[0]}`).join(' ');
+      await sendText(id, `👋 Willkommen ${tags}! Schau dir mit \`!regeln\` die Gruppenregeln an — Befehle: \`!hilfe\``, participants.slice(0, 5));
+    }
+  } catch (err) {
+    logError(err, 'welcome');
+  }
+}
+
+// ── Owner-Benachrichtigung für logger.ownerAlert ───────────────────
+
+setOwnerNotifier(async (message) => {
+  if (state.connection !== 'open') return;
+  for (const num of OWNER_NUMBERS) {
+    await sendText(`${num}@s.whatsapp.net`, `🤖 *${BOT_NAME}*\n${message}`);
+  }
+});
+
+// ── Prozess-Sicherheitsnetze & Graceful Shutdown ───────────────────
+
+process.on('uncaughtException', (err) => logError(err, 'uncaughtException'));
+process.on('unhandledRejection', (err) => logError(err, 'unhandledRejection'));
+
 async function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
-  logger.info(`${signal} empfangen — flushe ausstehende Daten …`);
+  logInfo(`🛑 ${signal} empfangen — fahre sauber herunter (Session bleibt intakt).`);
   try {
-    await flushStats();
+    stopScheduler();
+    stopFlushLoop();
+    clearTimeout(reconnectTimer);
+    clearInterval(selfPingTimer);
+    await flushBuffers().catch(() => {});
+    httpServer?.close();
+    state.sock?.end?.(undefined);
   } catch (err) {
-    logger.error({ err }, 'Flush beim Shutdown fehlgeschlagen');
+    logError(err, 'shutdown');
   }
-  process.exit(0);
+  setTimeout(() => process.exit(0), 1500);
 }
-process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGTERM', () => shutdown('SIGTERM')); // Render-Deploy
 process.on('SIGINT', () => shutdown('SIGINT'));
 
-main().catch((err) => logger.error({ err }, 'Fataler Start-Fehler'));
+// ── Start ──────────────────────────────────────────────────────────
+
+async function main() {
+  console.log(`🤖 ${BOT_NAME} startet …`);
+  await preflight(); // beendet sich selbst mit Klartext-Meldung bei Config-Fehlern
+  await initDb();
+
+  // Persistente Zustände in den RAM laden
+  await Promise.all([loadToggles(), loadCustomCommands(), loadAfk(), loadMutes(), initAiUsage()]);
+
+  startFlushLoop();
+  startScheduler();
+
+  // Web-Panel sofort starten, damit /qr und /health von Anfang an erreichbar sind
+  const app = createDashboard();
+  const port = process.env.PORT || 3000;
+  httpServer = app.listen(port, () => logInfo(`🌐 Panel & /health laufen auf Port ${port}.`));
+
+  // Interner Zusatz-Ping (der externe UptimeRobot auf SELF_URL/health bleibt Pflicht!)
+  const selfUrl = (process.env.SELF_URL || '').trim().replace(/\/+$/, '');
+  if (selfUrl) {
+    selfPingTimer = setInterval(() => {
+      fetch(`${selfUrl}/health`).catch(() => {});
+    }, config.keepAlive.selfPingMs);
+  }
+
+  await startSocket();
+}
+
+main().catch((err) => {
+  console.error('❌ START ABGEBROCHEN: Unerwarteter Fehler beim Hochfahren:');
+  console.error(String(err?.stack || err));
+  process.exit(1);
+});

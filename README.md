@@ -1,91 +1,85 @@
-# 🤖 CommunityBot v2
+# 🤖 WhatsApp-Community-Bot
 
-Modularer, sperr-sicherer WhatsApp-Community-Bot (Baileys) mit Session-Persistenz
-in Turso, zentraler Sende-Drossel (Anti-Ban), intelligenter Befehlssuche,
-Auto-Moderation und einer mobilen, abgesicherten Web-Oberfläche.
+Stabiler, sicherer WhatsApp-Community-Bot auf Basis von [`@whiskeysockets/baileys`](https://github.com/WhiskeySockets/Baileys) — gebaut für **Render Free-Tier + Turso**. Der Anzeige-Name kommt aus der Env-Variable `BOT_NAME` (Standard: `CommunityBot`).
 
-## Architektur
+## Highlights
+
+- **Session in Turso** — Neustarts & Deploys ohne neuen QR-Code (`useMultiFileAuthState` wird bewusst nicht benutzt).
+- **Preflight beim Start** — falsche `DATABASE_URL`/`DATABASE_KEY` oder fehlende Env-Variablen ergeben eine klare deutsche Fehlermeldung statt eines Stacktraces.
+- **LID-aware Admin-Erkennung** — Bot-Telefonnummer **und** LID werden verglichen (WhatsApp-Umstellung 2025/2026). Diagnose: `!debugadmin`.
+- **KI (Gemini) nur als Fallback** für unbekannte Befehle + Fehler-Zusammenfassungen. Pro-User-Cooldown + Tageslimit. Nie auf normale Nachrichten.
+- **Sauberer Fehlerlog** — Baileys-Decrypt-Rauschen wird gefiltert, identische Fehler dedupliziert.
+- **Web-Panel „Control Center"** — Dark Glassmorphism, mobile-first: Live-Status, QR-Ansicht, Gruppen-Einstellungen, Befehls-Toggles, Moderation, Logs, Config-Export/-Import.
+- **Voller Funktionsumfang** — Moderation mit Warn-Eskalation (Warn → Mute → Kick), Anti-Link/-Spam/-Raid, Nachtmodus, XP/Level, AFK, Custom-Commands/FAQ, geplante Nachrichten, Tools (`!qr`, `!timer`, `!rechne` — ohne `eval`), Mini-Spiele.
+
+## Struktur
 
 ```
 src/
-  index.js              # Bootstrap: config → DB → Storage → Registry → Web → Socket
-  core/
-    config.js           # Env-Auflösung (v2-Namen + Blueprint-Fallback)
-    logger.js           # pino + Fehler-Ring-Buffer (Web-Fehlerlog)
-    db.js               # libSQL-Client (Turso remote / lokale Datei)
-    auth-turso.js       # Session (Creds + Keys) in der DB → kein neuer QR
-    connection.js       # Baileys, Reconnect-Backoff, Health-Watch, QR→PNG
-    send-queue.js       # FIFO-Sende-Drossel mit Jitter + composing (Anti-Ban)
-    storage.js          # Datenschicht (9 Tabellen) + debounced Stats
-  bot/
-    router.js           # Pipeline: Präfix→Registry→Rolle→Gates→Cooldown→run
-    permissions.js      # Rollen owner>admin>mod>user + Metadaten-Cache (5min)
-    help.js             # intelligente Hilfe (Frage → passender Befehl)
-    moderation.js       # Badwords/Links/Spam → löschen+verwarnen+Eskalation
-    events.js           # liest mit: Mute→Stats→Befehl/Moderation; Welcome; Rejoin
-    reminders.js        # !remind-Scheduler
-    commands/           # utility.js, moderation.js, owner.js (45 Befehle)
-  web/
-    server.js           # Express + Security-Header + geheimer Login + Routing
-    auth.js             # Sessions, CSRF, IP-Lockout, Rate-Limit (timing-safe)
-    routes.js           # Dashboard, Gruppen-Settings, Mitglieder, Daten, Backup
-    views.js            # Dark-Tech-Glassmorphism (Mobile-First)
+  index.js        Einstieg: preflight() → initDb → Socket-Lifecycle, Reconnect
+  preflight.js    Env-Check + DB-Verbindungstest (Klartext-Fehler)
+  config.js       BOT_NAME + alle Stellschrauben
+  db.js           Turso-Client, Schema (28 Tabellen), Schreib-Batching, Level-Kurve
+  auth.js         Turso-Auth-State (BufferJSON + AppStateSyncKeyData-Gotcha)
+  state.js        gemeinsamer Laufzeit-Zustand
+  logger.js       Fehlerlog mit Rausch-Whitelist + Dedupe, Owner-Alarme
+  queue.js        serielle Sende-Queue mit Jitter (800–2500 ms)
+  permissions.js  LID-aware botIsAdmin / isUserAdmin / Owner-Check
+  router.js       Befehls-Router (fest → Custom/FAQ → KI), Dedupe, XP, AFK
+  ai.js           Gemini-Fallback (gemini-3-flash, Cooldown + Tageslimit)
+  moderation.js   Auto-Mod, Warn-Eskalation, Mutes, Bans, Anti-Raid
+  scheduler.js    geplante Nachrichten, Nachtmodus, Auto-Cleanup
+  dashboard.js    Panel-Server (Auth, API, SSE) — Sicherheit s. u.
+  dashboard-ui.js Panel-UI (Vanilla HTML/CSS/JS, kein Build-Step)
+  commands/       admin, community, levels, afk, custom, schedule, tools, games
 ```
 
-## Environment-Variablen
+## Render-Env-Variablen
 
-Der Code akzeptiert beide Namensschemata (v2-Spec primär, Blueprint als Fallback).
+| Variable | Zweck |
+|---|---|
+| `DATABASE_URL` | Turso-URL, beginnt mit `libsql://…turso.io` (falsche URL → Preflight meldet 404 in Klartext) |
+| `DATABASE_KEY` | Turso Auth-Token (Read & Write, Expiry „Never") |
+| `OWNER_NUMBERS` | Owner-Nummern, komma-getrennt, nur Ziffern (z. B. `4915112345678`) |
+| `ACCESS_SECRET` | Passwort für Panel & `/qr` — langes Zufalls-Secret |
+| `SELF_URL` | eigene öffentliche URL, z. B. `https://whatsapp-bot-ewwe.onrender.com` |
+| `GEMINI_API_KEY` | Google AI Studio Key (Free-Tier) |
+| `BOT_NAME` *(optional)* | Anzeige-Name, Standard `CommunityBot` |
 
-| Variable (v2) | Fallback | Pflicht | Zweck |
-|---|---|---|---|
-| `DATABASE_URL` | `TURSO_DATABASE_URL` | ✅ | Turso/libSQL-URL (`libsql://…turso.io`) — Session **und** Daten |
-| `DATABASE_KEY` | `TURSO_AUTH_TOKEN` | ✅ | Turso Auth-Token |
-| `OWNER_NUMBERS` | `OWNER_JIDS` | ✅ | Owner-Nummern, nur Ziffern, Komma-getrennt (`4915123456789`) |
-| `ACCESS_SECRET` | `QR_PASSWORD` | ✅ | Langer Zufallswert für den geheimen Panel-Link |
-| `SELF_URL` | `RENDER_EXTERNAL_URL` | – | Öffentliche URL (Keep-Alive) — **erst nach 1. Deploy** |
-| `COMMAND_PREFIX` | – | – | Befehls-Präfix (Default `!`) |
-| `MONGODB_URI` / `MONGODB_DB` | – | – | Optionaler Fallback (derzeit nicht aktiv genutzt) |
-| `LOG_LEVEL` | – | – | pino-Level (Default `info`) |
+`PORT` **nicht** setzen (kommt von Render). Start-Command: `node src/index.js`.
 
-> `PORT` **nicht** setzen — Render vergibt automatisch.
-> Ohne `DATABASE_URL` nutzt der Bot eine lokale SQLite-Datei (`data/local.db`) —
-> nur für lokale Entwicklung; auf Render-Free geht die Session beim Neustart verloren.
+## Go-Live
 
-## Lokal starten
+1. Env-Variablen in Render setzen (ohne Anführungszeichen/Leerzeichen).
+2. Deploy — der Preflight prüft alles und meldet Konfig-Fehler in Klartext.
+3. Panel öffnen: `SELF_URL` → Login mit `ACCESS_SECRET` → Tab **QR** → mit WhatsApp scannen (Einstellungen → Verknüpfte Geräte). Neuer QR alle ~60 s ist normal, solange nicht gescannt.
+4. **UptimeRobot** (Pflicht!): HTTP-Monitor auf `SELF_URL/health`, Intervall 5 Minuten — sonst schläft der Free-Tier ein und es hagelt Decrypt-Fehler.
+
+## Sicherheit
+
+- Panel-Login timing-safe (SHA-256 + `timingSafeEqual`), Brute-Force-Lockout (5 Versuche → 15 Min IP-Sperre), Rate-Limit, `helmet` + strenge CSP, `Cache-Control: no-store`, Session-Cookie `HttpOnly/Secure/SameSite=Strict`. `/qr` ist geschützt.
+- Keine Secrets im Repo — alles über Env-Variablen.
+- `!rechne` nutzt einen eigenen sicheren Parser (nur Zahlen/Operatoren), niemals `eval`.
+- Reconnect-Logik: 515 → sofort neu (normal nach Pairing) · 401 → Session löschen, **kein** Reconnect, Owner-Alarm · 403 → **Stopp** + Alarm (Ban-Verdacht) · 440 → Stopp + Alarm · sonst Backoff mit Jitter (1 s → 60 s).
+
+## Notfall-Rollback
+
+Zurück zum alten Bot (Stand vor dem Neuaufbau):
 
 ```bash
-npm install
-DATABASE_URL=... DATABASE_KEY=... OWNER_NUMBERS=49... ACCESS_SECRET=$(openssl rand -hex 24) npm start
-# QR scannen unter:  http://localhost:3000/<ACCESS_SECRET>  → /qr
+git checkout backup/pre-umbau
+git push -f origin main
 ```
 
-## Auf Render deployen
+Render deployt dann automatisch wieder den alten Stand. **Achtung:** `-f` überschreibt den neuen Code auf `main` — nur im echten Notfall.
 
-1. Neuer **Web Service** aus diesem Repo, Branch `claude/whatsapp-bot-v2-rebuild-sp1u6i` (bzw. `main`).
-2. **Build Command**: `npm install` · **Start Command**: `node src/index.js` · Root leer.
-3. Env-Variablen aus der Tabelle oben setzen (mind. die 4 Pflicht-Werte).
-4. Deploy. Danach `SELF_URL` = die vergebene `https://….onrender.com` setzen.
-5. Panel öffnen: `https://….onrender.com/<ACCESS_SECRET>` → **QR scannen**.
+## Troubleshooting
 
-### Externer Keep-Alive (Free-Tier schläft sonst ~15 Min ein)
-
-UptimeRobot / cron-job.org alle ~5 Min auf `https://….onrender.com/ping` zeigen lassen.
-
-## Go-Live-Checkliste (Phase 6)
-
-- [ ] Mit **Test-Nummer/Test-Gruppe** prüfen:
-  - [ ] QR scannen → in Render „Restart" → Bot kommt **ohne** neuen QR online (Turso-Session).
-  - [ ] `!ping`, `!hilfe`, `!hilfe wie banne ich jemanden` (→ `!ban`).
-  - [ ] `!kick`/`!warn` als Admin; Rechte-Check als Nicht-Admin.
-  - [ ] Moderation in der Web-UI für die Testgruppe an → Beleidigung → wird gelöscht + verwarnt.
-  - [ ] Welcome an → neues Mitglied wird begrüßt.
-  - [ ] Web-Panel am Handy: alle Seiten, Power-Toggle, Backup-Export.
-- [ ] Externen Pinger einrichten.
-- [ ] Auf die **dedizierte Bot-Nummer** schalten (nie privat!). Läuft ein alter Bot auf derselben Nummer → vorher abschalten.
-
-## Sicherheit & Anti-Ban (eingebaut)
-
-- Dedizierte Bot-Nummer verwenden; niemals Secrets ins Repo.
-- Zentrale Sende-Queue mit Jitter (800–2500 ms) + `composing`; `!alle`/`!announce` 1×/10 Min pro Gruppe.
-- Reconnect mit exponentiellem Backoff (≤60 s); Metadaten-Cache (5 Min); bei 403 pausiert die Queue.
-- Web: geheimer Link statt Passwort, CSRF auf POST, IP-Lockout, Rate-Limit, Security-Header, destruktive Aktionen mit Bestätigung.
+| Symptom | Ursache / Fix |
+|---|---|
+| `START ABGEBROCHEN: DATABASE_URL …404` | URL zeigt auf gelöschte/falsche Turso-DB → neue URL aus dem Turso-Dashboard |
+| `START ABGEBROCHEN: DATABASE_KEY …401/403` | Token falsch/abgelaufen → neuen Token (R&W, Never) erstellen |
+| Alle ~60 s neuer QR | Noch nicht gescannt — kein Bug, einfach `/qr` scannen |
+| `No matching sessions` / `failed to decrypt` | Normales Baileys-Rauschen, wird bewusst nicht geloggt |
+| Dienst reagiert erst nach ~50 s | Free-Tier-Hibernation → UptimeRobot auf `/health` prüfen |
+| Admin-Befehle tun nichts | `!debugadmin` ausführen — zeigt PN/LID-Erkennung und Admin-Status |

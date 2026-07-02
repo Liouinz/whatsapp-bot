@@ -1,0 +1,501 @@
+// Web-Panel "Control Center" — Express-Server, Auth & JSON-API.
+// Sicherheit: timing-safe Login, IP-Lockout, Rate-Limit, Helmet + strenge CSP,
+// Session-Cookies (HttpOnly/Secure/SameSite=Strict), Cache-Control: no-store.
+
+import crypto from 'node:crypto';
+import express from 'express';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import { BOT_NAME, config } from './config.js';
+import { state, rolloverDay } from './state.js';
+import { dbRun, dbRows } from './db.js';
+import { getRing, logError, logInfo } from './logger.js';
+import { getAiQuota } from './ai.js';
+import { registry, isCommandEnabled, setCommandEnabled } from './router.js';
+import { listCustom, loadCustomCommands } from './commands/custom.js';
+import { invalidateSettings, unmuteUser, unbanUser, clearWarnings, kickUser, banUser, audit } from './moderation.js';
+import { invalidateGroupMeta, botIsAdmin } from './permissions.js';
+import { queueLength } from './queue.js';
+import { LOGIN_HTML, APP_HTML, APP_CSS, APP_JS } from './dashboard-ui.js';
+
+// ── Auth-Grundlagen ────────────────────────────────────────────────
+
+const sessions = new Map(); // token → Ablauf-Zeitstempel
+const loginFails = new Map(); // ip → { count, lockedUntil }
+let lastPanelRestartAt = 0;
+
+const sha256 = (s) => crypto.createHash('sha256').update(String(s), 'utf8').digest();
+
+function passwordOk(candidate) {
+  const secret = (process.env.ACCESS_SECRET || '').trim();
+  if (!secret) return false;
+  return crypto.timingSafeEqual(sha256(candidate), sha256(secret));
+}
+
+function clientIp(req) {
+  return (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '?';
+}
+
+function issueSession(res) {
+  const token = crypto.randomBytes(32).toString('hex');
+  sessions.set(token, Date.now() + config.web.sessionTtlMs);
+  if (sessions.size > 200) sessions.delete(sessions.keys().next().value);
+  res.cookie?.('sid', token); // express ohne cookie-parser → selbst setzen:
+  res.setHeader(
+    'Set-Cookie',
+    `sid=${token}; Max-Age=${Math.floor(config.web.sessionTtlMs / 1000)}; Path=/; HttpOnly; Secure; SameSite=Strict`
+  );
+}
+
+function readSession(req) {
+  const raw = req.headers.cookie || '';
+  const m = /(?:^|;\s*)sid=([a-f0-9]{64})/.exec(raw);
+  if (!m) return false;
+  const expiry = sessions.get(m[1]);
+  if (!expiry || expiry < Date.now()) {
+    sessions.delete(m[1]);
+    return false;
+  }
+  return true;
+}
+
+function requireAuth(req, res, next) {
+  if (readSession(req)) return next();
+  if ((req.originalUrl || req.path).startsWith('/api/')) {
+    return res.status(401).json({ error: 'nicht angemeldet' });
+  }
+  return res.redirect('/login');
+}
+
+// ── App bauen ──────────────────────────────────────────────────────
+
+export function createDashboard() {
+  const app = express();
+  app.disable('x-powered-by');
+  app.set('trust proxy', 1); // Render sitzt hinter einem Proxy
+
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'"],
+          imgSrc: ["'self'", 'data:'],
+          connectSrc: ["'self'"],
+          objectSrc: ["'none'"],
+          frameAncestors: ["'none'"],
+          baseUri: ["'none'"],
+          upgradeInsecureRequests: null, // Render liefert ohnehin nur HTTPS aus
+        },
+      },
+    })
+  );
+  app.use(express.json({ limit: '256kb' }));
+
+  // Geschützte Seiten nie cachen
+  app.use((req, res, next) => {
+    if (req.path !== '/health') res.setHeader('Cache-Control', 'no-store');
+    next();
+  });
+
+  // ── Öffentlich ──
+  app.get('/health', (req, res) => res.status(200).send('ok'));
+  app.get('/robots.txt', (req, res) => res.type('text/plain').send('User-agent: *\nDisallow: /\n'));
+
+  // ── Login ──
+  const loginLimiter = rateLimit({ windowMs: 60_000, max: 20, standardHeaders: true, legacyHeaders: false });
+
+  app.get('/login', (req, res) => {
+    if (readSession(req)) return res.redirect('/');
+    res.type('html').send(LOGIN_HTML);
+  });
+
+  app.post('/login', loginLimiter, (req, res) => {
+    const ip = clientIp(req);
+    const entry = loginFails.get(ip) || { count: 0, lockedUntil: 0 };
+    if (entry.lockedUntil > Date.now()) {
+      const mins = Math.ceil((entry.lockedUntil - Date.now()) / 60_000);
+      return res.status(429).json({ error: `Zu viele Fehlversuche — gesperrt für ${mins} Min.` });
+    }
+    const pw = String(req.body?.password || '');
+    if (pw && passwordOk(pw)) {
+      loginFails.delete(ip);
+      issueSession(res);
+      return res.json({ ok: true });
+    }
+    entry.count++;
+    if (entry.count >= config.web.loginMaxFails) {
+      entry.count = 0;
+      entry.lockedUntil = Date.now() + config.web.loginLockMinutes * 60_000;
+    }
+    loginFails.set(ip, entry);
+    if (loginFails.size > 500) loginFails.delete(loginFails.keys().next().value);
+    return res.status(401).json({ error: 'Falsches Passwort.' });
+  });
+
+  app.post('/logout', requireAuth, (req, res) => {
+    const m = /(?:^|;\s*)sid=([a-f0-9]{64})/.exec(req.headers.cookie || '');
+    if (m) sessions.delete(m[1]);
+    res.setHeader('Set-Cookie', 'sid=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Strict');
+    res.json({ ok: true });
+  });
+
+  // ── Panel-Assets (hinter Login) ──
+  app.get('/', requireAuth, (req, res) => res.type('html').send(APP_HTML));
+  app.get('/qr', requireAuth, (req, res) => res.type('html').send(APP_HTML)); // gleiche App, QR-Tab
+  // CSS/JS sind reine UI ohne Geheimnisse — braucht auch die Login-Seite
+  app.get('/app.css', (req, res) => res.type('text/css').send(APP_CSS));
+  app.get('/app.js', (req, res) => res.type('application/javascript').send(APP_JS));
+
+  // ── API ──
+  const api = express.Router();
+  app.use('/api', requireAuth, api);
+
+  api.get('/status', async (req, res) => {
+    rolloverDay();
+    res.json(await statusPayload());
+  });
+
+  // Server-Sent Events für das Live-Gefühl (Status alle 3 s)
+  api.get('/events', (req, res) => {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-store',
+      Connection: 'keep-alive',
+    });
+    let closed = false;
+    const push = async () => {
+      if (closed) return;
+      try {
+        res.write(`data: ${JSON.stringify(await statusPayload())}\n\n`);
+      } catch {
+        /* Verbindung weg */
+      }
+    };
+    push();
+    const timer = setInterval(push, 3000);
+    req.on('close', () => {
+      closed = true;
+      clearInterval(timer);
+    });
+  });
+
+  api.get('/qr', (req, res) => {
+    res.json({ connection: state.connection, qr: state.currentQr, updatedAt: state.qrUpdatedAt });
+  });
+
+  api.get('/groups', async (req, res) => {
+    try {
+      const groups = await listGroups();
+      res.json({ groups });
+    } catch (err) {
+      logError(err, 'panel.groups');
+      res.status(500).json({ error: 'Gruppen konnten nicht geladen werden.' });
+    }
+  });
+
+  api.get('/groups/:jid/members', async (req, res) => {
+    try {
+      const jid = req.params.jid;
+      if (!jid.endsWith('@g.us')) return res.status(400).json({ error: 'Ungültige Gruppe.' });
+      const meta = await state.sock.groupMetadata(jid);
+      const members = (meta.participants || []).map((p) => ({
+        id: p.id,
+        pn: p.phoneNumber || p.jid || null,
+        admin: p.admin || null,
+      }));
+      res.json({ name: meta.subject, members });
+    } catch (err) {
+      logError(err, 'panel.members');
+      res.status(500).json({ error: 'Mitglieder konnten nicht geladen werden.' });
+    }
+  });
+
+  api.post('/groups/:jid/settings', async (req, res) => {
+    const jid = req.params.jid;
+    const { field, value } = req.body || {};
+    const boolFields = ['enabled', 'antilink', 'antispam', 'blacklist_on', 'welcome', 'levelup_announce'];
+    try {
+      if (boolFields.includes(field)) {
+        await dbRun('INSERT OR IGNORE INTO group_settings (jid) VALUES (?)', [jid]);
+        await dbRun(`UPDATE group_settings SET ${field} = ? WHERE jid = ?`, [value ? 1 : 0, jid]);
+        invalidateSettings(jid);
+      } else if (field === 'antiraid') {
+        await dbRun(
+          `INSERT INTO antiraid (group_jid, enabled) VALUES (?, ?)
+           ON CONFLICT(group_jid) DO UPDATE SET enabled = excluded.enabled`,
+          [jid, value ? 1 : 0]
+        );
+      } else if (field === 'nightmode') {
+        const { enabled, start, end } = value || {};
+        const re = /^([01]?\d|2[0-3]):[0-5]\d$/;
+        if (enabled && (!re.test(start || '') || !re.test(end || ''))) {
+          return res.status(400).json({ error: 'Zeiten bitte als HH:MM angeben.' });
+        }
+        await dbRun(
+          `INSERT INTO nightmode (group_jid, enabled, start_hhmm, end_hhmm) VALUES (?, ?, ?, ?)
+           ON CONFLICT(group_jid) DO UPDATE SET enabled = excluded.enabled,
+             start_hhmm = excluded.start_hhmm, end_hhmm = excluded.end_hhmm`,
+          [jid, enabled ? 1 : 0, start || '22:00', end || '07:00']
+        );
+      } else {
+        return res.status(400).json({ error: 'Unbekannte Einstellung.' });
+      }
+      await audit('panel-setting', jid, field, 'panel', JSON.stringify(value).slice(0, 100));
+      res.json({ ok: true });
+    } catch (err) {
+      logError(err, 'panel.settings');
+      res.status(500).json({ error: 'Speichern fehlgeschlagen.' });
+    }
+  });
+
+  api.post('/groups/:jid/kick', async (req, res) => {
+    const jid = req.params.jid;
+    const user = String(req.body?.user || '');
+    if (!user) return res.status(400).json({ error: 'Nutzer fehlt.' });
+    const ok = await kickUser(jid, user, 'per Panel');
+    await audit('panel-kick', jid, user, 'panel', '');
+    res.json({ ok });
+  });
+
+  api.post('/groups/:jid/ban', async (req, res) => {
+    const jid = req.params.jid;
+    const user = String(req.body?.user || '');
+    if (!user) return res.status(400).json({ error: 'Nutzer fehlt.' });
+    const ok = await banUser(jid, user, 'per Panel', 'panel');
+    res.json({ ok });
+  });
+
+  api.get('/commands', (req, res) => {
+    const { commands: custom, faqs } = listCustom();
+    res.json({
+      commands: registry.map((c) => ({
+        name: c.name,
+        group: c.group,
+        desc: c.desc,
+        usage: c.usage,
+        adminOnly: !!c.adminOnly,
+        enabled: isCommandEnabled(c.name),
+      })),
+      custom,
+      faqs,
+    });
+  });
+
+  api.post('/commands/:name', async (req, res) => {
+    const name = req.params.name;
+    if (!registry.some((c) => c.name === name)) return res.status(404).json({ error: 'Unbekannter Befehl.' });
+    if (name === 'hilfe') return res.status(400).json({ error: '!hilfe kann nicht deaktiviert werden.' });
+    await setCommandEnabled(name, !!req.body?.enabled);
+    res.json({ ok: true, enabled: isCommandEnabled(name) });
+  });
+
+  api.post('/custom', async (req, res) => {
+    const { type, name, reply } = req.body || {};
+    const key = String(name || '').toLowerCase().trim();
+    const text = String(reply || '').trim();
+    if (!/^[a-z0-9äöüß_-]{2,24}$/.test(key) || !text) {
+      return res.status(400).json({ error: 'Name (2–24 Zeichen, a-z 0-9 - _) und Antwort angeben.' });
+    }
+    if (registry.some((c) => c.name === key || c.aliases?.includes(key))) {
+      return res.status(400).json({ error: 'Name kollidiert mit einem festen Befehl.' });
+    }
+    const table = type === 'faq' ? 'faq' : 'custom_commands';
+    const cols = type === 'faq' ? '(keyword, answer, by_jid, created_at)' : '(name, reply, by_jid, created_at)';
+    const conflictCol = type === 'faq' ? 'keyword' : 'name';
+    const valCol = type === 'faq' ? 'answer' : 'reply';
+    await dbRun(
+      `INSERT INTO ${table} ${cols} VALUES (?, ?, 'panel', ?)
+       ON CONFLICT(${conflictCol}) DO UPDATE SET ${valCol} = excluded.${valCol}`,
+      [key, text.slice(0, 1500), Date.now()]
+    );
+    await loadCustomCommands();
+    res.json({ ok: true });
+  });
+
+  api.delete('/custom/:type/:name', async (req, res) => {
+    const key = String(req.params.name || '').toLowerCase();
+    if (req.params.type === 'faq') await dbRun('DELETE FROM faq WHERE keyword = ?', [key]);
+    else await dbRun('DELETE FROM custom_commands WHERE name = ?', [key]);
+    await loadCustomCommands();
+    res.json({ ok: true });
+  });
+
+  api.get('/moderation', async (req, res) => {
+    const now = Date.now();
+    const [warns, mutes, bans, auditRows] = await Promise.all([
+      dbRows(
+        `SELECT id, group_jid, user_jid, reason, created_at, expires_at FROM warnings
+         WHERE expires_at > ? ORDER BY created_at DESC LIMIT 50`, [now]
+      ),
+      dbRows('SELECT group_jid, user_jid, until, reason FROM mutes WHERE until > ? LIMIT 50', [now]),
+      dbRows('SELECT group_jid, user_jid, reason, created_at FROM bans ORDER BY created_at DESC LIMIT 50', []),
+      dbRows('SELECT action, group_jid, target, by_jid, detail, created_at FROM audit_log ORDER BY created_at DESC LIMIT 30', []),
+    ]);
+    res.json({ warns, mutes, bans, audit: auditRows });
+  });
+
+  api.post('/moderation/clear', async (req, res) => {
+    const { type, group, user } = req.body || {};
+    if (!group || !user) return res.status(400).json({ error: 'Gruppe/Nutzer fehlt.' });
+    try {
+      if (type === 'warn') await clearWarnings(group, user);
+      else if (type === 'mute') await unmuteUser(group, user, 'panel');
+      else if (type === 'ban') await unbanUser(group, user, 'panel');
+      else return res.status(400).json({ error: 'Unbekannter Typ.' });
+      res.json({ ok: true });
+    } catch (err) {
+      logError(err, 'panel.modClear');
+      res.status(500).json({ error: 'Aufheben fehlgeschlagen.' });
+    }
+  });
+
+  api.get('/logs', (req, res) => {
+    res.json({ logs: getRing().slice(-config.log.ringSize) });
+  });
+
+  api.post('/restart', async (req, res) => {
+    const wait = config.web.restartCooldownMs - (Date.now() - lastPanelRestartAt);
+    if (wait > 0) {
+      return res.status(429).json({ error: `Cooldown aktiv — noch ${Math.ceil(wait / 1000)} s warten.` });
+    }
+    lastPanelRestartAt = Date.now();
+    await audit('restart', '', '', 'panel', '');
+    res.json({ ok: true, message: 'Neustart in 2 Sekunden …' });
+    logInfo('🔄 Neustart über das Panel ausgelöst.');
+    setTimeout(() => process.exit(0), 2000);
+  });
+
+  api.get('/config/export', async (req, res) => {
+    try {
+      const data = {};
+      const tables = ['group_settings', 'nightmode', 'antiraid', 'blocked_words', 'custom_commands', 'faq', 'command_toggles', 'allowed_chats'];
+      for (const t of tables) data[t] = await dbRows(`SELECT * FROM ${t}`, []);
+      res.setHeader('Content-Disposition', `attachment; filename="${BOT_NAME.toLowerCase()}-config.json"`);
+      res.json({ exportedAt: new Date().toISOString(), bot: BOT_NAME, data });
+    } catch (err) {
+      logError(err, 'panel.export');
+      res.status(500).json({ error: 'Export fehlgeschlagen.' });
+    }
+  });
+
+  api.post('/config/import', async (req, res) => {
+    const data = req.body?.data;
+    if (!data || typeof data !== 'object') return res.status(400).json({ error: 'Ungültige Config-Datei.' });
+    const allowed = {
+      group_settings: ['jid', 'enabled', 'antilink', 'antispam', 'blacklist_on', 'welcome', 'rules', 'levelup_announce'],
+      nightmode: ['group_jid', 'enabled', 'start_hhmm', 'end_hhmm', 'is_closed'],
+      antiraid: ['group_jid', 'enabled', 'locked_until'],
+      blocked_words: ['group_jid', 'word'],
+      custom_commands: ['name', 'reply', 'by_jid', 'created_at'],
+      faq: ['keyword', 'answer', 'by_jid', 'created_at'],
+      command_toggles: ['name', 'enabled'],
+      allowed_chats: ['jid', 'note'],
+    };
+    try {
+      let imported = 0;
+      for (const [table, cols] of Object.entries(allowed)) {
+        const rows = data[table];
+        if (!Array.isArray(rows)) continue;
+        for (const row of rows.slice(0, 500)) {
+          const vals = cols.map((c) => (row[c] === undefined ? null : row[c]));
+          await dbRun(
+            `INSERT OR REPLACE INTO ${table} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`,
+            vals
+          );
+          imported++;
+        }
+      }
+      invalidateSettings();
+      await loadCustomCommands();
+      await audit('config-import', '', '', 'panel', `${imported} Zeilen`);
+      res.json({ ok: true, imported });
+    } catch (err) {
+      logError(err, 'panel.import');
+      res.status(500).json({ error: 'Import fehlgeschlagen — Datei prüfen.' });
+    }
+  });
+
+  // Fallbacks
+  app.use('/api', (req, res) => res.status(404).json({ error: 'Unbekannter Endpunkt.' }));
+  app.use((req, res) => res.redirect('/'));
+  // Express-Fehler sauber abfangen (nie Stacktrace nach außen)
+  app.use((err, req, res, next) => {
+    logError(err, 'panel');
+    res.status(500).json({ error: 'Interner Fehler.' });
+  });
+
+  return app;
+}
+
+// ── Hilfen ─────────────────────────────────────────────────────────
+
+let groupCache = { at: 0, list: [] };
+
+async function listGroups() {
+  if (Date.now() - groupCache.at < 60_000) return groupCache.list;
+  if (!state.sock || state.connection !== 'open') return groupCache.list;
+  const all = await state.sock.groupFetchAllParticipating();
+  const metas = Object.values(all);
+  const [settings, night, raid] = await Promise.all([
+    dbRows('SELECT * FROM group_settings', []),
+    dbRows('SELECT * FROM nightmode', []),
+    dbRows('SELECT * FROM antiraid', []),
+  ]);
+  const sMap = new Map(settings.map((r) => [r.jid, r]));
+  const nMap = new Map(night.map((r) => [r.group_jid, r]));
+  const rMap = new Map(raid.map((r) => [r.group_jid, r]));
+
+  const list = [];
+  for (const meta of metas) {
+    invalidateGroupMeta(meta.id);
+    let admin = false;
+    try {
+      admin = await botIsAdmin(meta.id);
+    } catch { /* bleibt false */ }
+    const s = sMap.get(meta.id) || {};
+    const n = nMap.get(meta.id) || {};
+    const r = rMap.get(meta.id) || {};
+    list.push({
+      jid: meta.id,
+      name: meta.subject || 'Ohne Namen',
+      members: meta.participants?.length || 0,
+      botAdmin: admin,
+      enabled: s.enabled === undefined ? true : Number(s.enabled) === 1,
+      antilink: Number(s.antilink) === 1,
+      antispam: Number(s.antispam) === 1,
+      antiraid: Number(r.enabled) === 1,
+      nightmode: { enabled: Number(n.enabled) === 1, start: n.start_hhmm || '22:00', end: n.end_hhmm || '07:00' },
+    });
+    dbRun(
+      `INSERT INTO groups (jid, name, member_count, bot_is_admin, updated_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(jid) DO UPDATE SET name = excluded.name, member_count = excluded.member_count,
+         bot_is_admin = excluded.bot_is_admin, updated_at = excluded.updated_at`,
+      [meta.id, meta.subject || '', meta.participants?.length || 0, admin ? 1 : 0, Date.now()]
+    ).catch(() => {});
+  }
+  list.sort((a, b) => a.name.localeCompare(b.name));
+  groupCache = { at: Date.now(), list };
+  return list;
+}
+
+async function statusPayload() {
+  const quota = getAiQuota();
+  return {
+    botName: BOT_NAME,
+    connection: state.connection,
+    stopped: state.stopped,
+    stopReason: state.stopReason,
+    qrAvailable: !!state.currentQr,
+    startedAt: state.startedAt,
+    lastConnectedAt: state.lastConnectedAt,
+    uptimeMs: Date.now() - state.startedAt,
+    sentToday: state.sentToday,
+    commandsToday: state.commandsToday,
+    ai: quota,
+    queue: queueLength(),
+    groups: groupCache.list.length || null,
+    activity: state.activity,
+  };
+}
