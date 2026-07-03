@@ -17,16 +17,19 @@ import { listCustom, loadCustomCommands } from './commands/custom.js';
 import { invalidateSettings, unmuteUser, unbanUser, clearWarnings, kickUser, banUser, audit } from './moderation.js';
 import { botIsAdminInMeta } from './permissions.js';
 import { queueLength, sendText } from './queue.js';
-import { LOGIN_HTML, APP_HTML, APP_CSS, APP_JS } from './dashboard-ui.js';
+import { LOGIN_HTML, APP_HTML, APP_CSS, APP_JS, THEME_INIT_JS } from './dashboard-ui.js';
 
 // ── Statische Assets: Versionierung + Vorab-Kompression ───────────
 // CSS/JS ändern sich nur mit einem Deploy → Content-Hash in die URL,
 // dann darf der Browser sie ein Jahr lang cachen (immutable). Gzip wird
 // einmal beim Start berechnet, nicht pro Request.
 
-const ASSET_VER = crypto.createHash('sha256').update(APP_CSS + APP_JS).digest('hex').slice(0, 10);
+const ASSET_VER = crypto.createHash('sha256').update(APP_CSS + APP_JS + THEME_INIT_JS).digest('hex').slice(0, 10);
 const versioned = (html) =>
-  html.replaceAll('/app.css', `/app.css?v=${ASSET_VER}`).replaceAll('/app.js', `/app.js?v=${ASSET_VER}`);
+  html
+    .replaceAll('/app.css', `/app.css?v=${ASSET_VER}`)
+    .replaceAll('/theme-init.js', `/theme-init.js?v=${ASSET_VER}`)
+    .replaceAll('/app.js', `/app.js?v=${ASSET_VER}`);
 
 const LOGIN_HTML_V = versioned(LOGIN_HTML);
 const APP_HTML_V = versioned(APP_HTML);
@@ -35,6 +38,7 @@ const GZ = new Map(
   Object.entries({
     '/app.css': [APP_CSS, 'text/css'],
     '/app.js': [APP_JS, 'application/javascript'],
+    '/theme-init.js': [THEME_INIT_JS, 'application/javascript'],
     login: [LOGIN_HTML_V, 'text/html; charset=utf-8'],
     app: [APP_HTML_V, 'text/html; charset=utf-8'],
   }).map(([k, [body, type]]) => [k, { body, type, gz: gzipSync(Buffer.from(body, 'utf8')) }])
@@ -205,6 +209,8 @@ export function createDashboard() {
   // Content-Hash in der URL → darf aggressiv gecacht werden (Instant-Reload).
   app.get('/app.css', (req, res) => sendAsset(req, res, '/app.css', 'public, max-age=31536000, immutable'));
   app.get('/app.js', (req, res) => sendAsset(req, res, '/app.js', 'public, max-age=31536000, immutable'));
+  // Winziges Theme-Init (setzt data-theme/data-accent vor dem ersten Paint)
+  app.get('/theme-init.js', (req, res) => sendAsset(req, res, '/theme-init.js', 'public, max-age=31536000, immutable'));
 
   // ── API ──
   const api = express.Router();

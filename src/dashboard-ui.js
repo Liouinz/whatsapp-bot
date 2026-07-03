@@ -16,11 +16,13 @@ export const LOGIN_HTML = `<!doctype html>
 <meta name="robots" content="noindex">
 <meta name="theme-color" content="#05070d">
 <title>${BOT_NAME} — Login</title>
+<script src="/theme-init.js"></script>
 <link rel="stylesheet" href="/app.css">
 <script src="/app.js" defer></script>
 </head>
 <body class="login-body">
 <div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
+<div class="flora" aria-hidden="true"></div>
 <canvas id="fx" aria-hidden="true"></canvas>
 <main class="login-wrap">
   <form class="glass login-card" id="loginForm" autocomplete="off">
@@ -49,10 +51,12 @@ export const APP_HTML = `<!doctype html>
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/icon.svg">
 <link rel="stylesheet" href="/app.css">
+<script src="/theme-init.js"></script>
 <script src="/app.js" defer></script>
 </head>
 <body>
 <div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
+<div class="flora" aria-hidden="true"></div>
 <canvas id="fx" aria-hidden="true"></canvas>
 
 <div class="layout">
@@ -73,6 +77,15 @@ export const APP_HTML = `<!doctype html>
 <div class="toast" id="toast" role="status"></div>
 </body>
 </html>`;
+
+// Winziges Sync-Skript im <head>: setzt Theme + Akzent aus localStorage VOR
+// dem ersten Paint, damit das gewählte Design nicht kurz schwarz aufblitzt
+// (FOUC). Eigenes Asset statt Inline-Script — die strenge CSP verbietet inline.
+export const THEME_INIT_JS =
+  "(function(){try{var d=document.documentElement;" +
+  "var t=localStorage.getItem('theme');if(t&&t!=='dark')d.setAttribute('data-theme',t);" +
+  "var a=localStorage.getItem('accent');if(a&&a!=='cyan')d.setAttribute('data-accent',a);" +
+  "}catch(e){}})();";
 
 export const APP_CSS = `
 :root{
@@ -348,6 +361,66 @@ input:focus,textarea:focus,select:focus{border-color:var(--accent);box-shadow:0 
 @keyframes rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
 @keyframes rise3d{from{opacity:0;transform:translateY(16px) rotateX(5deg)}to{opacity:1;transform:none}}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Theme „Natur" — hell, lebendig, grün-organisch. Umschaltbar in Extras
+   (data-theme="nature" auf <html>). Ohne Attribut bleibt alles wie oben
+   (dunkel/„Schwarz"). Muss NACH den Basisregeln stehen (Kaskade).
+   ═══════════════════════════════════════════════════════════════════ */
+.flora{display:none;position:fixed;inset:0;z-index:0;pointer-events:none;
+  background:
+    radial-gradient(closest-side at 100% 2%, rgba(38,120,58,.14), transparent 70%),
+    radial-gradient(closest-side at 2% 98%, rgba(46,150,110,.12), transparent 70%),
+    radial-gradient(closest-side at 88% 96%, rgba(150,190,70,.1), transparent 72%);
+}
+[data-theme="nature"]{
+  --bg:#e4f0e2;
+  --glass:rgba(255,255,255,.6); --glass2:rgba(255,255,255,.78);
+  --surface:rgba(255,255,255,.86);
+  --line:rgba(28,74,42,.16); --line2:rgba(28,74,42,.3);
+  --text:#16301f; --muted:#4c6353;
+  --accent:#1f7a43; --accent2:#3fa35c;
+  --accent-dim:rgba(31,122,67,.14); --accent-glow:rgba(31,122,67,.34);
+  --warn:#9a6206; --bad:#c62a48; --ok:#1f8a4c;
+}
+[data-theme="nature"][data-accent="violet"]{ --accent:#7c3aed; --accent2:#9d5cf5; --accent-dim:rgba(124,58,237,.13); --accent-glow:rgba(124,58,237,.32); }
+[data-theme="nature"][data-accent="mint"]{ --accent:#0f9d76; --accent2:#2bb389; --accent-dim:rgba(15,157,118,.14); --accent-glow:rgba(15,157,118,.32); }
+
+/* Sonnenlicht-durch-Blätter statt kühler Void-Vignette */
+[data-theme="nature"] body:before{
+  background:
+    radial-gradient(1100px 720px at 78% -12%, rgba(120,205,120,.3), transparent 60%),
+    radial-gradient(900px 720px at -12% 108%, rgba(80,180,150,.24), transparent 58%),
+    radial-gradient(760px 620px at 52% 122%, rgba(205,220,120,.18), transparent 62%);
+}
+[data-theme="nature"] .flora{display:block}
+[data-theme="nature"] #fx{display:none}
+/* Aurora → weiche Blattgrün-Wolken (normal-blend, damit sie auf Hell tragen) */
+[data-theme="nature"] .aurora{opacity:.42;mix-blend-mode:normal}
+[data-theme="nature"] .aurora i{mix-blend-mode:normal}
+[data-theme="nature"] .aurora i:nth-child(1){background:radial-gradient(circle,#4cc768 0%,transparent 66%)}
+[data-theme="nature"] .aurora i:nth-child(2){background:radial-gradient(circle,#2bb389 0%,transparent 66%);opacity:.5}
+[data-theme="nature"] .aurora i:nth-child(3){background:radial-gradient(circle,#a7d94a 0%,transparent 66%);opacity:.4}
+
+/* Helle Flächen: Formularfelder, Schalter, Log-Zeilen, Badges neu tönen */
+[data-theme="nature"] input[type=text],[data-theme="nature"] input[type=password],
+[data-theme="nature"] input[type=time],[data-theme="nature"] textarea,
+[data-theme="nature"] select,[data-theme="nature"] .login-card input{
+  background:rgba(255,255,255,.72);color:var(--text);
+}
+[data-theme="nature"] .switch .sl{background:rgba(28,74,42,.2)}
+[data-theme="nature"] .switch .sl:before{background:#fff}
+[data-theme="nature"] .log-line.error{background:rgba(198,42,72,.1);color:#8f1d33}
+[data-theme="nature"] .log-line.warn{background:rgba(154,98,6,.12);color:#6f4705}
+[data-theme="nature"] .log-line.info{background:rgba(28,74,42,.07);color:var(--muted)}
+[data-theme="nature"] .badge.ok{color:#1f7a43;background:rgba(31,138,76,.15)}
+[data-theme="nature"] .badge.bad{color:#c62a48;background:rgba(198,42,72,.12)}
+[data-theme="nature"] .badge.warn{color:#8a5806;background:rgba(154,98,6,.15)}
+/* Karten-Glanzlicht auf Hell abdunkeln, sonst unsichtbar */
+[data-theme="nature"] .grid .card.hover:after{background:radial-gradient(240px circle at var(--mx,50%) var(--my,50%),rgba(31,122,67,.12),transparent 60%)}
+[data-theme="nature"] .card.hover:hover,[data-theme="nature"] .grid .card.hover:hover{box-shadow:0 16px 44px rgba(24,60,36,.16),0 0 0 1px var(--accent-dim)}
+[data-theme="nature"] .glass{box-shadow:0 10px 34px rgba(24,60,36,.12), inset 0 1px 0 rgba(255,255,255,.5)}
+
 @media(prefers-reduced-motion:reduce){
   *,*:before,*:after{animation:none!important;transition:none!important}
   .aurora{display:none}
@@ -375,11 +448,27 @@ var savedAccent = 'cyan';
 try { savedAccent = localStorage.getItem('accent') || 'cyan'; } catch(e){}
 applyAccent(savedAccent);
 
+/* ── Design/Theme: „dark" (Schwarz) oder „nature" (Natur, hell) ── */
+function applyTheme(id){
+  if (id === 'nature') document.documentElement.setAttribute('data-theme', 'nature');
+  else document.documentElement.removeAttribute('data-theme');
+  try { localStorage.setItem('theme', id); } catch(e){}
+  // Handy-Browserleiste passend einfärben
+  var mc = document.querySelector('meta[name=theme-color]');
+  if (mc) mc.setAttribute('content', id === 'nature' ? '#e4f0e2' : '#05070d');
+}
+function currentTheme(){
+  try { return localStorage.getItem('theme') || 'dark'; } catch(e){ return 'dark'; }
+}
+applyTheme(currentTheme());
+
 /* ── Hintergrund: Sternen-Grid (nur Desktop, 30 fps, pausiert bei hidden tab) ── */
 var fx = document.getElementById('fx');
 var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 var finePointer = window.matchMedia('(pointer: fine)').matches;
-if (fx && !reduced && window.matchMedia('(min-width: 900px)').matches) {
+// Sternen-Canvas nur im dunklen Theme sinnvoll (auf Hell unsichtbar → CSS blendet es aus,
+// also gar nicht erst rechnen lassen)
+if (fx && !reduced && currentTheme() !== 'nature' && window.matchMedia('(min-width: 900px)').matches) {
   var g = fx.getContext('2d'); var raf = 0; var t = 0; var lastFrame = 0;
   function size(){ fx.width = innerWidth; fx.height = Math.min(innerHeight, 950); }
   function draw(now){
@@ -1133,6 +1222,22 @@ function renderSettings(){
       h('button', { class:'small ghost', onclick:function(){ fileInput.click(); } }, ['⬆️ Import']),
       fileInput
     ])
+  ]));
+
+  // Design: Schwarz (dunkel) ↔ Natur (hell, lebendig)
+  var THEMES = [ { id:'dark', label:'🌑 Schwarz' }, { id:'nature', label:'🌿 Natur' } ];
+  var themeRow = h('div', { class:'row wrap' });
+  var cur = currentTheme();
+  THEMES.forEach(function(tm){
+    themeRow.appendChild(h('button', {
+      class: 'small' + (cur === tm.id ? '' : ' ghost'),
+      onclick:function(){ applyTheme(tm.id); render(); toast('🎨 Design: ' + tm.label); }
+    }, [tm.label]));
+  });
+  content.appendChild(h('div', { class:'glass card', style:'margin-top:12px' }, [
+    h('h3', {}, ['🎨 Design']),
+    h('p', { class:'muted sm', style:'margin-bottom:10px' }, ['Schwarz (dunkel) oder Natur (hell & lebendig). Gilt für dieses Gerät.']),
+    themeRow
   ]));
 
   var accRow = h('div', { class:'row', style:'gap:12px' });
