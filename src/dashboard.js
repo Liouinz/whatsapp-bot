@@ -3,6 +3,7 @@
 // Session-Cookies (HttpOnly/Secure/SameSite=Strict), Cache-Control: no-store.
 
 import crypto from 'node:crypto';
+import { gzipSync } from 'node:zlib';
 import express from 'express';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -17,6 +18,40 @@ import { invalidateSettings, unmuteUser, unbanUser, clearWarnings, kickUser, ban
 import { botIsAdminInMeta } from './permissions.js';
 import { queueLength, sendText } from './queue.js';
 import { LOGIN_HTML, APP_HTML, APP_CSS, APP_JS } from './dashboard-ui.js';
+
+// ── Statische Assets: Versionierung + Vorab-Kompression ───────────
+// CSS/JS ändern sich nur mit einem Deploy → Content-Hash in die URL,
+// dann darf der Browser sie ein Jahr lang cachen (immutable). Gzip wird
+// einmal beim Start berechnet, nicht pro Request.
+
+const ASSET_VER = crypto.createHash('sha256').update(APP_CSS + APP_JS).digest('hex').slice(0, 10);
+const versioned = (html) =>
+  html.replaceAll('/app.css', `/app.css?v=${ASSET_VER}`).replaceAll('/app.js', `/app.js?v=${ASSET_VER}`);
+
+const LOGIN_HTML_V = versioned(LOGIN_HTML);
+const APP_HTML_V = versioned(APP_HTML);
+
+const GZ = new Map(
+  Object.entries({
+    '/app.css': [APP_CSS, 'text/css'],
+    '/app.js': [APP_JS, 'application/javascript'],
+    login: [LOGIN_HTML_V, 'text/html; charset=utf-8'],
+    app: [APP_HTML_V, 'text/html; charset=utf-8'],
+  }).map(([k, [body, type]]) => [k, { body, type, gz: gzipSync(Buffer.from(body, 'utf8')) }])
+);
+
+/** Antwort mit optionalem Gzip (je nach Accept-Encoding) senden. */
+function sendAsset(req, res, key, cacheControl) {
+  const a = GZ.get(key);
+  res.setHeader('Content-Type', a.type);
+  res.setHeader('Cache-Control', cacheControl);
+  res.setHeader('Vary', 'Accept-Encoding');
+  if (/\bgzip\b/.test(req.headers['accept-encoding'] || '')) {
+    res.setHeader('Content-Encoding', 'gzip');
+    return res.end(a.gz);
+  }
+  return res.end(a.body);
+}
 
 // ── Auth-Grundlagen ────────────────────────────────────────────────
 
@@ -130,7 +165,7 @@ export function createDashboard() {
 
   app.get('/login', (req, res) => {
     if (readSession(req)) return res.redirect('/');
-    res.type('html').send(LOGIN_HTML);
+    sendAsset(req, res, 'login', 'no-store');
   });
 
   app.post('/login', loginLimiter, (req, res) => {
@@ -164,11 +199,12 @@ export function createDashboard() {
   });
 
   // ── Panel-Assets (hinter Login) ──
-  app.get('/', requireAuth, (req, res) => res.type('html').send(APP_HTML));
-  app.get('/qr', requireAuth, (req, res) => res.type('html').send(APP_HTML)); // gleiche App, QR-Tab
-  // CSS/JS sind reine UI ohne Geheimnisse — braucht auch die Login-Seite
-  app.get('/app.css', (req, res) => res.type('text/css').send(APP_CSS));
-  app.get('/app.js', (req, res) => res.type('application/javascript').send(APP_JS));
+  app.get('/', requireAuth, (req, res) => sendAsset(req, res, 'app', 'no-store'));
+  app.get('/qr', requireAuth, (req, res) => sendAsset(req, res, 'app', 'no-store')); // gleiche App, QR-Tab
+  // CSS/JS sind reine UI ohne Geheimnisse — braucht auch die Login-Seite.
+  // Content-Hash in der URL → darf aggressiv gecacht werden (Instant-Reload).
+  app.get('/app.css', (req, res) => sendAsset(req, res, '/app.css', 'public, max-age=31536000, immutable'));
+  app.get('/app.js', (req, res) => sendAsset(req, res, '/app.js', 'public, max-age=31536000, immutable'));
 
   // ── API ──
   const api = express.Router();
@@ -257,6 +293,7 @@ export function createDashboard() {
 
   api.post('/groups/:jid/settings', async (req, res) => {
     const jid = req.params.jid;
+    if (!jid.endsWith('@g.us')) return res.status(400).json({ error: 'Ungültige Gruppe.' });
     const { field, value } = req.body || {};
     const boolFields = ['enabled', 'antilink', 'antispam', 'blacklist_on', 'welcome', 'levelup_announce'];
     try {
