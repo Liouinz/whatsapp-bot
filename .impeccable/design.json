@@ -1,0 +1,132 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-03T00:00:00.000Z",
+  "title": "Design System: WhatsApp Community Bot — Control Center",
+  "extensions": {
+    "colorMeta": {
+      "void": { "role": "neutral", "displayName": "Void", "canonical": "#05070d", "tonalRamp": ["#020204", "#030407", "#04060a", "#0f1117", "#4b4c51", "#87888b", "#c3c3c5", "#e6e6e7"] },
+      "text": { "role": "neutral", "displayName": "Ink", "canonical": "#eaf0ff", "tonalRamp": ["#46484d", "#83868f", "#bbc0cc", "#ebf1ff", "#f0f4ff", "#f5f8ff", "#fafbff", "#fdfeff"] },
+      "muted": { "role": "neutral", "displayName": "Muted", "canonical": "#8d97b5", "tonalRamp": ["#2a2d36", "#4f5565", "#717991", "#929bb8", "#adb4ca", "#c8cddb", "#e4e6ed", "#f4f5f8"] },
+      "accent-cyan": { "role": "primary", "displayName": "Signal Cyan", "canonical": "#00e5d0", "tonalRamp": ["#00453e", "#008074", "#00b7a6", "#0ae6d2", "#47ecdd", "#85f3e8", "#c2f9f4", "#e5fcfa"] },
+      "accent-violet": { "role": "primary", "displayName": "Violet Signal", "canonical": "#8b6bff", "tonalRamp": ["#2a204d", "#4e3c8f", "#6f56cc", "#9071ff", "#ab94ff", "#c7b8ff", "#e3dbff", "#f3f0ff"] },
+      "accent-mint": { "role": "primary", "displayName": "Mint Signal", "canonical": "#42e695", "tonalRamp": ["#14452d", "#258153", "#35b877", "#4ae799", "#77edb3", "#a4f3cc", "#d2f9e6", "#ecfdf4"] },
+      "warn": { "role": "state", "displayName": "Warn Amber", "canonical": "#ffb454" },
+      "bad": { "role": "state", "displayName": "Bad Red", "canonical": "#ff5d7a" },
+      "ok": { "role": "state", "displayName": "Ok Green", "canonical": "#37e08d" }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Login screen bot name only — largest text in the app." },
+      "headline": { "displayName": "Headline", "purpose": "Page title, one per screen." },
+      "title": { "displayName": "Title", "purpose": "Hero card title and animated stat numbers." },
+      "body": { "displayName": "Body", "purpose": "Default UI text, forms, buttons." },
+      "label": { "displayName": "Label", "purpose": "Card headings and section headers — uppercase, wide tracking, muted." },
+      "mono": { "displayName": "Mono", "purpose": "Log lines only." }
+    },
+    "shadows": [
+      { "name": "resting-glass", "value": "0 10px 38px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.045)", "purpose": "Default shadow for every .glass panel at rest." },
+      { "name": "hover-lift", "value": "0 14px 44px rgba(0,0,0,.5), 0 0 0 1px var(--accent-dim)", "purpose": "Hoverable cards — adds depth plus a thin accent ring." },
+      { "name": "glow-soft", "value": "0 0 18px var(--accent-dim)", "purpose": "Button hover glow." },
+      { "name": "glow-strong", "value": "0 0 16px var(--accent), 0 0 46px var(--accent-glow)", "purpose": "Persistent glow for the logo dot and connected status dot." }
+    ],
+    "motion": [
+      { "name": "ease-rise", "value": "cubic-bezier(.2,.8,.25,1)", "purpose": "Card and login-card entrance (rise animation)." },
+      { "name": "duration-rise-card", "value": "0.4s", "purpose": "Card entrance duration." },
+      { "name": "duration-rise-login", "value": "0.55s", "purpose": "Login card entrance duration." },
+      { "name": "pulse-fast", "value": "1.2s ease-in-out infinite", "purpose": "Connecting status dot pulse." },
+      { "name": "pulse-slow", "value": "2.4s-2.6s ease-in-out infinite", "purpose": "Connected status dot and logo dot pulse." }
+    ],
+    "breakpoints": [
+      { "name": "desktop", "value": "900px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Default action button — accent-tinted gradient wash, glows on hover.",
+      "html": "<button class=\"ds-btn-primary\">Anmelden <span class=\"ds-btn-arrow\">→</span></button>",
+      "css": ".ds-btn-primary { border: 1px solid rgba(130,165,255,.13); background: linear-gradient(180deg, rgba(0,229,208,.13), rgba(0,0,0,.12)); color: #00e5d0; padding: 11px 18px; border-radius: 12px; font-size: .95rem; font-weight: 600; cursor: pointer; transition: transform .12s, box-shadow .2s, background .2s; font-family: inherit; } .ds-btn-primary:hover { box-shadow: 0 0 18px rgba(0,229,208,.13); } .ds-btn-primary:active { transform: scale(.97); } .ds-btn-arrow { display: inline-block; transition: transform .2s; } .ds-btn-primary:hover .ds-btn-arrow { transform: translateX(4px); }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Secondary action — transparent, brightens on hover instead of glowing.",
+      "html": "<button class=\"ds-btn-ghost\">← Zurück</button>",
+      "css": ".ds-btn-ghost { border: 1px solid rgba(130,165,255,.13); background: transparent; color: #8d97b5; padding: 11px 18px; border-radius: 12px; font-size: .95rem; font-weight: 600; cursor: pointer; transition: color .2s; font-family: inherit; } .ds-btn-ghost:hover { color: #eaf0ff; }"
+    },
+    {
+      "name": "Stat Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Glass panel with a label and an animated tabular-nums stat — the core content unit.",
+      "html": "<div class=\"ds-card\"><h3 class=\"ds-card-h3\">Gesendet heute</h3><div class=\"ds-stat\">1.284</div></div>",
+      "css": ".ds-card { background: rgba(15,21,38,.58); border: 1px solid rgba(130,165,255,.13); border-radius: 18px; backdrop-filter: blur(16px) saturate(1.25); box-shadow: 0 10px 38px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.045); padding: 18px; color: #eaf0ff; transition: transform .18s, box-shadow .18s; } .ds-card:hover { transform: translateY(-2px); box-shadow: 0 14px 44px rgba(0,0,0,.5), 0 0 0 1px rgba(0,229,208,.13); } .ds-card-h3 { font-size: .76rem; color: #8d97b5; font-weight: 600; text-transform: uppercase; letter-spacing: .09em; margin-bottom: 7px; } .ds-stat { font-size: 1.7rem; font-weight: 700; font-variant-numeric: tabular-nums; }"
+    },
+    {
+      "name": "Status Badge",
+      "kind": "chip",
+      "refersTo": "badge-ok",
+      "description": "State-colored pill used for online/offline, warn, and moderation labels.",
+      "html": "<span class=\"ds-badge ds-badge-ok\">BOT ADMIN</span>",
+      "css": ".ds-badge { font-size: .68rem; padding: 3px 9px; border-radius: 99px; font-weight: 700; letter-spacing: .04em; } .ds-badge-ok { color: #37e08d; background: rgba(55,224,141,.12); } .ds-badge-bad { color: #ff5d7a; background: rgba(255,93,122,.12); } .ds-badge-warn { color: #ffb454; background: rgba(255,180,84,.12); }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": null,
+      "description": "Dark translucent field with hairline border; focus swaps border to the active accent.",
+      "html": "<input type=\"text\" class=\"ds-input\" placeholder=\"Gruppe suchen …\">",
+      "css": ".ds-input { background: rgba(4,7,14,.65); border: 1px solid rgba(130,165,255,.13); color: #eaf0ff; border-radius: 11px; padding: 10px 13px; font-size: .95rem; outline: none; font-family: inherit; transition: border-color .2s; } .ds-input:focus { border-color: #00e5d0; }"
+    },
+    {
+      "name": "Toggle Switch",
+      "kind": "input",
+      "refersTo": null,
+      "description": "Pill switch — off is neutral blue-gray, on swaps to accent with a glow on the thumb.",
+      "html": "<label class=\"ds-switch\"><input type=\"checkbox\" checked><span class=\"ds-switch-sl\"></span></label>",
+      "css": ".ds-switch { position: relative; display: inline-block; width: 46px; height: 26px; } .ds-switch input { opacity: 0; width: 0; height: 0; } .ds-switch-sl { position: absolute; inset: 0; border-radius: 26px; background: rgba(130,165,255,.16); transition: background .2s; cursor: pointer; } .ds-switch-sl:before { content: ''; position: absolute; width: 20px; height: 20px; border-radius: 50%; left: 3px; top: 3px; background: #c6d2ee; transition: transform .2s, background .2s; } .ds-switch input:checked + .ds-switch-sl { background: rgba(0,229,208,.13); } .ds-switch input:checked + .ds-switch-sl:before { transform: translateX(20px); background: #00e5d0; box-shadow: 0 0 10px #00e5d0; }"
+    },
+    {
+      "name": "Status Dot",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "Signature component — the single connected/connecting/stopped indicator, glow-only elevation.",
+      "html": "<span class=\"ds-status-dot ds-status-dot-open\"></span>",
+      "css": ".ds-status-dot { width: 14px; height: 14px; border-radius: 50%; background: #ff5d7a; box-shadow: 0 0 10px currentColor; } .ds-status-dot-open { background: #37e08d; box-shadow: 0 0 14px rgba(55,224,141,.8); animation: ds-pulse 2.4s ease-in-out infinite; } .ds-status-dot-connecting { background: #ffb454; animation: ds-pulse 1.2s ease-in-out infinite; } @keyframes ds-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } } @media (prefers-reduced-motion: reduce) { .ds-status-dot-open, .ds-status-dot-connecting { animation: none; } }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Signal Room",
+    "overview": "A dark operations room for a bot that runs unattended: aurora-glow fields drift slowly behind glass panels, a single status dot tells you in one glance whether the connection is alive, and every number on screen ticks and pulses because it's live, not a screenshot. The palette is near-black and quiet by default; color only shows up where it means something — a cyan glow on the thing you can act on, amber for \"watch this,\" red for \"this broke,\" green for \"this is fine.\" Underneath the technical shell, the bot itself is playful (games, coins, birthdays, emoji-rich lists), and the Control Center lets that personality surface in its interactive states: buttons glow on press, counters tween upward, toasts slide in with a bit of bounce-free energy. It explicitly rejects the flat, light, corporate-SaaS-admin look — this is a control console you'd want to watch at 2am, not a spreadsheet with rounded corners.",
+    "keyCharacteristics": [
+      "Near-black void background (#05070d) with slow-drifting aurora-glow blobs behind translucent glass panels.",
+      "One primary accent (cyan by default, user-switchable to violet or mint) used sparingly — glows, active states, the status pulse — never as a body-text or large-surface color.",
+      "Depth from blur + colored glow, not gray drop shadows: cards lift with an accent-tinted ring, not a heavier shadow.",
+      "Playful, energetic component feedback (animated counters, hover lift, pulsing status dot, toast slide-in) layered on an otherwise precise, technical shell.",
+      "Mobile-first: a bottom tab bar on phones becomes a sticky sidebar at ≥900px — the same components, no separate 'desktop design.'"
+    ],
+    "rules": [
+      { "name": "The One Glow Rule", "body": "Only one accent hue is live at a time (cyan, violet, or mint — chosen by the user, persisted to localStorage). Never mix two accent hues in the same view; the aurora field's third blob (#3a5bff, fixed blue) is the one deliberate exception.", "section": "colors" },
+      { "name": "The Dim-Then-Glow Rule", "body": "Every accent use has exactly two states: a 13%-opacity tint for backgrounds/washes (accent-dim) and a 40%-opacity halo for glow (accent-glow). Don't invent a third opacity step.", "section": "colors" },
+      { "name": "The One Family Rule", "body": "Every UI text element uses Inter. The only exception is log output, which switches to monospace so timestamps and structured messages align.", "section": "typography" },
+      { "name": "The Glow-Is-Status Rule", "body": "Colored glow is reserved for things that are live or actionable right now (status dot, active nav, focused input, hovered button). A static, non-interactive element never gets a glow — only the neutral resting-glass shadow.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do keep the void (#05070d) as the true background color on every screen — glass panels float on top of it, they never replace it.",
+      "Do use exactly the two accent-opacity steps (13% dim, 40% glow) — see The Dim-Then-Glow Rule.",
+      "Do pair neutral resting shadows with accent-colored interactive glow (The Glow-Is-Status Rule) rather than inventing new shadow colors.",
+      "Do keep all body/UI text in Inter; switch to the monospace stack only for log output.",
+      "Do let the bot's playful register (emoji, animated counters, medal-style leaderboards) show up in content and micro-interactions, even though the shell itself is precise and dark.",
+      "Do maintain WCAG 2.1 AA contrast (≥4.5:1 body text, ≥3:1 large text) against the dark/glass backgrounds, and ship every animation with a prefers-reduced-motion fallback."
+    ],
+    "donts": [
+      "Don't introduce a light or cream-neutral surface anywhere in the panel — this is not a generic light-mode SaaS admin template.",
+      "Don't run two accent hues at once outside the fixed third aurora blob (#3a5bff) — see The One Glow Rule.",
+      "Don't add gray/neutral drop shadows to status or brand elements (logo dot, status dot, active nav) — those glow, they don't shadow.",
+      "Don't pair a 1px border with a wide, soft, non-accent-colored drop shadow on cards or buttons (\"ghost-card\" pattern).",
+      "Don't add a second font family for 'variety' — one sans (Inter) plus one monospace (logs only) is the complete type system."
+    ]
+  }
+}
