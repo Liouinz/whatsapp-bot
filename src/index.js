@@ -9,6 +9,7 @@ import makeWASocket, {
 } from '@whiskeysockets/baileys';
 import QRCode from 'qrcode';
 import pino from 'pino';
+import HttpsProxyAgent from 'https-proxy-agent';
 
 import { BOT_NAME, OWNER_NUMBERS, config } from './config.js';
 import { preflight } from './preflight.js';
@@ -27,6 +28,22 @@ import { startScheduler, stopScheduler } from './scheduler.js';
 import { createDashboard, refreshGroupCache } from './dashboard.js';
 
 const baileysLogger = pino({ level: 'silent' }); // Baileys-Rauschen komplett stumm
+
+// Optionaler Proxy für die WhatsApp-Verbindung. WhatsApp lehnt die
+// Geräte-Registrierung (v. a. per Pairing-Code) von manchen Server-IPs
+// (Rechenzentren wie Render) ab — ein Proxy mit besserer IP-Reputation
+// (Wohn-/Mobil-Proxy) umgeht das. Über Env PROXY_URL setzbar, z. B.
+// http://user:pass@host:port. Ohne Env: ganz normale Direktverbindung.
+let waProxyAgent = null;
+const PROXY_URL = (process.env.PROXY_URL || '').trim();
+if (PROXY_URL) {
+  try {
+    waProxyAgent = new HttpsProxyAgent(PROXY_URL);
+    console.log(`🌐 WhatsApp-Verbindung läuft über Proxy: ${PROXY_URL.replace(/\/\/[^@]*@/, '//***@')}`);
+  } catch (err) {
+    console.warn(`⚠️ PROXY_URL ungültig (${String(err?.message || err)}) — nutze Direktverbindung.`);
+  }
+}
 
 let clearSessionFn = null;
 let reconnectTimer = null;
@@ -98,6 +115,10 @@ async function startSocket() {
     // Socket (und damit QR- bzw. Pairing-Fenster) lange offen halten — sonst
     // rotiert Baileys nach 60s und ein noch offener Pairing-Code wird ungültig.
     qrTimeout: config.pairing.qrTimeoutMs,
+    // Proxy (falls PROXY_URL gesetzt) für WS-Verbindung UND Versions-Fetch —
+    // damit die gesamte WhatsApp-Kommunikation über die bessere IP läuft.
+    agent: waProxyAgent || undefined,
+    fetchAgent: waProxyAgent || undefined,
     getMessage: async (key) => messageStore.get(`${key.remoteJid}|${key.id}`) || undefined,
   });
 
