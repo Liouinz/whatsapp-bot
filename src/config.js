@@ -101,7 +101,11 @@ export const config = {
   // ── Pairing-Code (Alternative zum QR-Scan) ──────────────────────
   pairing: {
     cooldownMs: 30_000, // Mindestabstand zwischen zwei Code-Anfragen
-    codeValidMs: 60_000, // solange zeigt das Panel den Code an, dann ausgeblendet
+    codeValidMs: 3 * 60_000, // solange zeigt das Panel den Code an (= Pairing-Fenster)
+    windowMs: 3 * 60_000, // so lange gilt eine Code-Anfrage als "aktiv" (Eintipp-Zeit)
+    qrTimeoutMs: 3 * 60_000, // wie lange ein QR/Pairing-Socket lebt, bevor er rotiert
+    maxReissues: 1, // höchstens EINE sanfte Neuausgabe — WhatsApp flaggt sonst die Nummer
+    reissueDelayMs: 3_000, // vor der Neuausgabe warten (kein Hämmern gegen WhatsApp)
   },
 
   // ── Sitzung zurücksetzen (Notfall-Knopf, wenn die Verbindung feststeckt) ──

@@ -41,6 +41,17 @@ let shuttingDown = false;
 // QR-Socket führt auf dem Handy zu "Gerät konnte nicht hinzugefügt werden".
 let pendingPairing = null; // { phoneNumber, resolve, reject }
 
+// Aktives Pairing-Fenster: sobald ein Code angefordert wurde, setzt
+// requestPairingCode() intern creds.me.id — jeder normale Reconnect würde
+// danach einen LOGIN versuchen (statt Registrierung) und mit 401 sterben, was
+// den offenen Code ungültig macht. Deshalb wird im Fenster bei jedem
+// Verbindungsabbruch (solange NOCH NICHT registriert) stattdessen die Session
+// frisch geleert und ein neuer Code auf einem frischen Socket ausgegeben — das
+// Panel zeigt per 3s-Poll stets den aktuell gültigen Code.
+let activePairingNumber = null;
+let activePairingUntil = 0;
+let pairingReissues = 0;
+
 /** clearSessionFn ist erst nach dem ersten startSocket()-Durchlauf gesetzt —
  * niemals ungeprüft aufrufen (clearSessionFn?.().catch(...) würde bei null
  * mit "Cannot read properties of undefined (reading 'catch')" crashen). */
@@ -84,6 +95,9 @@ async function startSocket() {
     markOnlineOnConnect: false, // WICHTIG: Handy bekommt weiter Push-Benachrichtigungen
     syncFullHistory: false,
     browser: [BOT_NAME, 'Chrome', '1.0.0'],
+    // Socket (und damit QR- bzw. Pairing-Fenster) lange offen halten — sonst
+    // rotiert Baileys nach 60s und ein noch offener Pairing-Code wird ungültig.
+    qrTimeout: config.pairing.qrTimeoutMs,
     getMessage: async (key) => messageStore.get(`${key.remoteJid}|${key.id}`) || undefined,
   });
 
@@ -96,7 +110,7 @@ async function startSocket() {
     // Events verwaister Sockets ignorieren — sonst stößt ein alter Socket nach
     // 515/411 einen zweiten Reconnect an (Doppel-Socket → 440-Schleife).
     if (state.sock !== sock) return;
-    handleConnectionUpdate(update).catch((e) => logError(e, 'connection.update'));
+    handleConnectionUpdate(update, sock).catch((e) => logError(e, 'connection.update'));
   });
 
   sock.ev.on('messages.upsert', (upsert) => {
@@ -144,7 +158,7 @@ async function startSocket() {
   }
 }
 
-async function handleConnectionUpdate({ connection, lastDisconnect, qr }) {
+async function handleConnectionUpdate({ connection, lastDisconnect, qr }, sock) {
   if (qr) {
     // QR-Schleife ist normal, solange nicht gescannt (~60 s neuer Code)
     state.currentQr = await QRCode.toDataURL(qr, { width: 512, margin: 2 }).catch(() => null);
@@ -158,6 +172,8 @@ async function handleConnectionUpdate({ connection, lastDisconnect, qr }) {
     state.connection = 'open';
     state.currentQr = null;
     state.pairingCode = null; // gekoppelt — Code hat ausgedient
+    activePairingNumber = null; // Pairing-Fenster geschlossen
+    pairingReissues = 0;
     state.lastConnectedAt = Date.now();
     state.reconnectAttempts = 0;
 
@@ -177,6 +193,36 @@ async function handleConnectionUpdate({ connection, lastDisconnect, qr }) {
     const code = lastDisconnect?.error?.output?.statusCode ?? 0;
 
     if (shuttingDown) return;
+
+    // Aktives Pairing-Fenster, noch NICHT registriert → NICHT normal reconnecten
+    // (das würde als Login enden und mit 401 den offenen Code töten). Stattdessen
+    // Session frisch leeren und einen neuen Code auf einem frischen Socket
+    // ausgeben. registered=true (Pairing erfolgreich) fällt bewusst durch zum
+    // normalen 515-Reconnect, der dann als Login sauber online geht.
+    const registered = !!sock?.authState?.creds?.registered;
+    if (activePairingNumber && !registered && Date.now() < activePairingUntil) {
+      if (pairingReissues < config.pairing.maxReissues) {
+        pairingReissues++;
+        logWarn(`🔢 Pairing-Abbruch (Code ${code || '?'}) — EIN sanfter neuer Versuch in ${config.pairing.reissueDelayMs / 1000}s.`);
+        clearTimeout(reconnectTimer);
+        const oldSock = state.sock;
+        state.sock = null;
+        try { oldSock?.end?.(new Error('Pairing-Neuausgabe')); } catch { /* egal */ }
+        await safeClearSession(); // wischt creds.me → nächster Socket registriert (kein Login-401)
+        // Bewusst mit Pause: rapides Neuanfordern lässt WhatsApp die Nummer als
+        // verdächtig einstufen (Registrierung wird dann dauerhaft abgelehnt).
+        await new Promise((r) => setTimeout(r, config.pairing.reissueDelayMs));
+        if (state.sock) return; // in der Pause hat schon etwas anderes übernommen
+        pendingPairing = { phoneNumber: activePairingNumber, resolve: () => {}, reject: () => {} };
+        return void startSocket().catch((e) => logError(e, 'pairing-reissue'));
+      }
+      // Sanfter Versuch gescheitert → aufgeben und in den QR-Modus (zuverlässiger).
+      activePairingNumber = null;
+      state.pairingCode = null;
+      pairingReissues = 0;
+      logWarn('🔢 Code-Verbindung scheitert wiederholt — bitte stattdessen den QR-Code scannen.');
+      // fällt durch zum normalen Handling (401 → Session frisch → QR erscheint)
+    }
 
     switch (code) {
       case DisconnectReason.restartRequired: // 515 — normal nach Pairing
@@ -301,6 +347,13 @@ setPairingCodeRequester((phoneNumber) => {
   }
   lastPairingRequestAt = Date.now();
 
+  // Pairing-Fenster öffnen: ab jetzt hält handleConnectionUpdate den Code bei
+  // jedem Abbruch am Leben (frischer Socket + neuer Code), bis registriert oder
+  // das Fenster abläuft.
+  activePairingNumber = phoneNumber;
+  activePairingUntil = Date.now() + config.pairing.windowMs;
+  pairingReissues = 0;
+
   // Verbindung sauber neu aufbauen — der Code wird erst auf dem FRISCHEN
   // Socket eingelöst (in startSocket), nicht auf diesem hier, der ggf. schon
   // mitten im QR-Handshake steckt.
@@ -342,6 +395,8 @@ setForceRelinkHandler(async () => {
   lastRelinkAt = Date.now();
 
   clearTimeout(reconnectTimer);
+  activePairingNumber = null; // evtl. offenes Pairing-Fenster verwerfen
+  pairingReissues = 0;
   const oldSock = state.sock;
   state.sock = null; // sofort entkoppeln — Events des sterbenden Sockets werden dank
                       // der "if (state.sock !== sock) return;"-Guards ignoriert

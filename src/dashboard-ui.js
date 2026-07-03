@@ -866,7 +866,8 @@ function renderQr(){
   var pairBox = h('div', { class:'glass card', id:'pairBox', style:'margin-top:12px;display:none' }, [
     h('h3', {}, ['🔢 Oder per Code verbinden']),
     h('p', { class:'muted sm', style:'margin-bottom:10px' }, [
-      'Nummer mit Ländervorwahl eingeben (nur Ziffern) statt QR zu scannen: WhatsApp → Einstellungen → Verknüpfte Geräte → Mit Telefonnummer verbinden.'
+      'Nummer mit Ländervorwahl eingeben (nur Ziffern) statt QR zu scannen: WhatsApp → Einstellungen → Verknüpfte Geräte → Mit Telefonnummer verbinden. ',
+      h('b', {}, ['Wichtig: exakt die Nummer dieses WhatsApp-Kontos.'])
     ])
   ]);
   var input = h('input', { type:'text', id:'pairPhone', placeholder:'z.B. 4915112345678', inputmode:'numeric' });
@@ -881,6 +882,11 @@ function renderQr(){
   } }, ['Code anfordern']);
   pairBox.appendChild(h('div', { class:'row wrap' }, [input, btn]));
   pairBox.appendChild(h('div', { id:'pairCodeDisplay' }));
+  pairBox.appendChild(h('p', { class:'muted sm', style:'margin-top:10px' }, [
+    '💡 Klappt der Code nicht („Gerät konnte nicht hinzugefügt werden"), nutze oben den ',
+    h('b', {}, ['QR-Code']),
+    ' — der ist der zuverlässigere Weg.'
+  ]));
   content.appendChild(pairBox);
 
   loadQr();
