@@ -34,6 +34,22 @@ let selfPingTimer = null;
 let httpServer = null;
 let shuttingDown = false;
 
+// Steht eine Pairing-Code-Anfrage aus, wird sie GENAU EINMAL direkt nach dem
+// Aufbau des nächsten frischen Sockets eingelöst (siehe startSocket) — QR- und
+// Code-Verknüpfung sind zwei getrennte Modi derselben Verbindung, die von
+// Anfang an feststehen müssen. Anfordern auf einem bereits laufenden
+// QR-Socket führt auf dem Handy zu "Gerät konnte nicht hinzugefügt werden".
+let pendingPairing = null; // { phoneNumber, resolve, reject }
+
+/** clearSessionFn ist erst nach dem ersten startSocket()-Durchlauf gesetzt —
+ * niemals ungeprüft aufrufen (clearSessionFn?.().catch(...) würde bei null
+ * mit "Cannot read properties of undefined (reading 'catch')" crashen). */
+async function safeClearSession() {
+  try {
+    if (clearSessionFn) await clearSessionFn();
+  } catch { /* Löschen darf nie werfen — Aufrufer macht trotzdem weiter */ }
+}
+
 // In-Memory-Ministore für getMessage (gegen Retry-/Decrypt-Probleme)
 const messageStore = new Map(); // "jid|id" → message
 function storeMessage(msg) {
@@ -93,6 +109,39 @@ async function startSocket() {
   sock.ev.on('group-participants.update', (ev) => {
     handleParticipants(ev).catch((e) => logError(e, 'participants'));
   });
+
+  // Pairing-Code SOFORT auf dem frischen Socket anfordern — bevor der normale
+  // QR-Handshake überhaupt Fahrt aufnimmt (siehe Kommentar bei pendingPairing).
+  // makeWASocket() liefert den Socket zurück, BEVOR die zugrunde liegende
+  // WebSocket-Verbindung tatsächlich offen ist — requestPairingCode() wirft in
+  // diesem kurzen Fenster hart "Connection Closed" (Baileys wartet dort nicht
+  // selbst). Deshalb kurz mit Backoff wiederholen, bis die Verbindung steht.
+  if (pendingPairing) {
+    const { phoneNumber, resolve, reject } = pendingPairing;
+    pendingPairing = null;
+    try {
+      let raw, lastErr;
+      for (let attempt = 0; attempt < 20 && state.sock === sock; attempt++) {
+        try {
+          raw = await sock.requestPairingCode(phoneNumber);
+          lastErr = null;
+          break;
+        } catch (err) {
+          lastErr = err;
+          await new Promise((r) => setTimeout(r, 150));
+        }
+      }
+      if (lastErr) throw lastErr;
+      if (state.sock !== sock) throw new Error('Socket wurde zwischenzeitlich ersetzt.');
+      const formatted = raw.match(/.{1,4}/g)?.join('-') || raw;
+      state.pairingCode = formatted;
+      state.pairingCodeUpdatedAt = Date.now();
+      logInfo(`🔢 Pairing-Code angefordert für +${phoneNumber} (frischer Socket).`);
+      resolve(formatted);
+    } catch (err) {
+      reject(err);
+    }
+  }
 }
 
 async function handleConnectionUpdate({ connection, lastDisconnect, qr }) {
@@ -136,7 +185,7 @@ async function handleConnectionUpdate({ connection, lastDisconnect, qr }) {
 
       case DisconnectReason.loggedOut: // 401 — alte Session NICHT reconnecten
         logWarn('⛔ 401 loggedOut: Session wird gelöscht, frische Kopplung über /qr nötig.');
-        await clearSessionFn?.().catch(() => {});
+        await safeClearSession();
         state.pairingCode = null; // alter Code gehörte zur gelöschten Session
         await ownerAlert(
           '⛔ *Bot wurde ausgeloggt (401).* Die Session wurde zurückgesetzt — bitte im Panel unter /qr neu koppeln.'
@@ -146,7 +195,7 @@ async function handleConnectionUpdate({ connection, lastDisconnect, qr }) {
 
       case DisconnectReason.badSession: // 411 — Session kaputt → löschen, neuer QR
         logWarn('⚠️ Session beschädigt (411) — lösche Session, neuer QR nötig.');
-        await clearSessionFn?.().catch(() => {});
+        await safeClearSession();
         state.pairingCode = null; // alter Code gehörte zur gelöschten Session
         await ownerAlert('⚠️ Session war beschädigt und wurde zurückgesetzt — bitte /qr neu scannen.');
         return void startSocket().catch((e) => logError(e, 'startSocket'));
@@ -240,22 +289,39 @@ setOwnerNotifier(async (message) => {
 
 let lastPairingRequestAt = 0;
 
-setPairingCodeRequester(async (phoneNumber) => {
-  if (!state.sock) throw new Error('Kein aktiver Socket — bitte kurz warten und erneut versuchen.');
-  if (state.connection === 'open') throw new Error('Der Bot ist bereits verbunden — kein Code nötig.');
+setPairingCodeRequester((phoneNumber) => {
+  if (!state.sock) return Promise.reject(new Error('Kein aktiver Socket — bitte kurz warten und erneut versuchen.'));
+  if (state.connection === 'open') return Promise.reject(new Error('Der Bot ist bereits verbunden — kein Code nötig.'));
   if (state.sock.authState?.creds?.registered) {
-    throw new Error('Diese Session ist schon gekoppelt — erst trennen (401/Logout), dann neu koppeln.');
+    return Promise.reject(new Error('Diese Session ist schon gekoppelt — erst zurücksetzen, dann neu koppeln.'));
   }
   const wait = config.pairing.cooldownMs - (Date.now() - lastPairingRequestAt);
-  if (wait > 0) throw new Error(`Bitte noch ${Math.ceil(wait / 1000)} Sekunden warten, bevor ein neuer Code angefragt wird.`);
+  if (wait > 0) {
+    return Promise.reject(new Error(`Bitte noch ${Math.ceil(wait / 1000)} Sekunden warten, bevor ein neuer Code angefragt wird.`));
+  }
   lastPairingRequestAt = Date.now();
 
-  const raw = await state.sock.requestPairingCode(phoneNumber);
-  const formatted = raw.match(/.{1,4}/g)?.join('-') || raw;
-  state.pairingCode = formatted;
-  state.pairingCodeUpdatedAt = Date.now();
-  logInfo(`🔢 Pairing-Code angefordert für +${phoneNumber}.`);
-  return formatted;
+  // Verbindung sauber neu aufbauen — der Code wird erst auf dem FRISCHEN
+  // Socket eingelöst (in startSocket), nicht auf diesem hier, der ggf. schon
+  // mitten im QR-Handshake steckt.
+  return new Promise((resolve, reject) => {
+    pendingPairing = { phoneNumber, resolve, reject };
+    clearTimeout(reconnectTimer);
+    const oldSock = state.sock;
+    state.sock = null; // Events des sterbenden Sockets werden über den state.sock!==sock-Guard verworfen
+    state.currentQr = null;
+    state.pairingCode = null;
+    state.stopped = false;
+    state.reconnectAttempts = 0;
+    state.connection = 'connecting';
+    try { oldSock?.end?.(new Error('Neustart für Pairing-Code-Anfrage')); } catch { /* egal, wird verworfen */ }
+    safeClearSession().then(() =>
+      startSocket().catch((err) => {
+        pendingPairing = null;
+        reject(err);
+      })
+    );
+  });
 });
 
 // ── Sitzung hart zurücksetzen (Notfall-Knopf im Panel) ─────────────
@@ -287,7 +353,7 @@ setForceRelinkHandler(async () => {
   state.connection = 'connecting';
 
   try { oldSock?.end?.(new Error('Manueller Reset über das Panel')); } catch { /* egal, wird eh verworfen */ }
-  await clearSessionFn?.().catch(() => {});
+  await safeClearSession();
   logWarn('🔁 Sitzung manuell über das Panel zurückgesetzt — starte frisch (neuer QR/Pairing-Code folgt).');
   await startSocket();
 });
