@@ -845,6 +845,24 @@ function renderQr(){
   content.appendChild(h('h2', { class:'page-title' }, ['Verbindung / QR']));
   content.appendChild(h('div', { class:'glass qr-box', id:'qrBox' }, [skel(200, 'width:200px')]));
 
+  // Notfall-Knopf: falls die Verbindung feststeckt (Session kaputt, aber nie ein
+  // neuer QR/Code erscheint) — hart zurücksetzen und sofort frisch neu starten.
+  var relinkBtn = h('button', { class:'small danger', onclick:function(){
+    if (!confirm('Sitzung wirklich komplett zurücksetzen? Die alte Verknüpfung wird sofort ungültig — danach neu per QR oder Code verbinden. Auf dem alten Handy kann „Verknüpfte Geräte" das noch kurz falsch anzeigen, das ist egal.')) return;
+    relinkBtn.disabled = true;
+    api('/relink', { method:'POST' })
+      .then(function(r){ toast('🔁 ' + r.message); setTimeout(loadQr, 800); })
+      .catch(function(e){ toast('⚠️ ' + e.message); })
+      .then(function(){ relinkBtn.disabled = false; });
+  } }, ['🔁 Sitzung zurücksetzen']);
+  content.appendChild(h('div', { class:'glass card', style:'margin-top:12px' }, [
+    h('h3', {}, ['🆘 Verbindung hängt fest?']),
+    h('p', { class:'muted sm', style:'margin-bottom:10px' }, [
+      'Wenn hier dauerhaft „verbindet sich gerade" steht und nie ein QR-/Pairing-Code erscheint, ist die gespeicherte Sitzung vermutlich kaputt. Dieser Knopf löscht sie und startet sofort frisch — unabhängig davon, was das alte Gerät noch anzeigt.'
+    ]),
+    relinkBtn
+  ]));
+
   var pairBox = h('div', { class:'glass card', id:'pairBox', style:'margin-top:12px;display:none' }, [
     h('h3', {}, ['🔢 Oder per Code verbinden']),
     h('p', { class:'muted sm', style:'margin-bottom:10px' }, [

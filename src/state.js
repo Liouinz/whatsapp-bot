@@ -65,3 +65,15 @@ export async function requestPairingCode(phoneNumber) {
   if (!pairingCodeRequester) throw new Error('Der Bot ist noch nicht bereit — bitte kurz warten.');
   return pairingCodeRequester(phoneNumber);
 }
+
+// Sitzung hart zurücksetzen (Notfall-Knopf im Panel): für den Fall, dass der
+// Socket mit einer kaputten, aber noch als "registriert" geltenden Session
+// endlos gegen dieselbe Wand rennt und nie einen neuen QR/Pairing-Code zeigt.
+let forceRelinkHandler = null;
+export function setForceRelinkHandler(fn) {
+  forceRelinkHandler = fn;
+}
+export async function forceRelink() {
+  if (!forceRelinkHandler) throw new Error('Der Bot ist noch nicht bereit — bitte kurz warten.');
+  return forceRelinkHandler();
+}

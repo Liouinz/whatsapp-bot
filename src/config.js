@@ -104,6 +104,11 @@ export const config = {
     codeValidMs: 60_000, // solange zeigt das Panel den Code an, dann ausgeblendet
   },
 
+  // ── Sitzung zurücksetzen (Notfall-Knopf, wenn die Verbindung feststeckt) ──
+  session: {
+    relinkCooldownMs: 15_000, // schützt vor versehentlichem Doppel-Klick
+  },
+
   // ── Keep-Alive ─────────────────────────────────────────────────
   keepAlive: {
     selfPingMs: 4 * 60_000, // interner Zusatz-Ping (externer UptimeRobot bleibt Pflicht)

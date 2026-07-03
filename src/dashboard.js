@@ -8,7 +8,7 @@ import express from 'express';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { BOT_NAME, config } from './config.js';
-import { state, rolloverDay, requestPairingCode } from './state.js';
+import { state, rolloverDay, requestPairingCode, forceRelink } from './state.js';
 import { dbRun, dbRows, flushBuffers } from './db.js';
 import { getRing, logError, logInfo } from './logger.js';
 import { getAiQuota } from './ai.js';
@@ -267,6 +267,18 @@ export function createDashboard() {
       res.json({ ok: true, code });
     } catch (err) {
       res.status(400).json({ error: err.message || 'Code konnte nicht angefordert werden.' });
+    }
+  });
+
+  // Notfall-Knopf: Sitzung hart zurücksetzen, wenn die Verbindung feststeckt
+  // (Session kaputt, aber kein neuer QR/Pairing-Code erscheint mehr von selbst)
+  api.post('/relink', async (req, res) => {
+    try {
+      await forceRelink();
+      await audit('relink', '', '', 'panel', '');
+      res.json({ ok: true, message: 'Sitzung zurückgesetzt — neuer QR-/Pairing-Code folgt gleich.' });
+    } catch (err) {
+      res.status(400).json({ error: err.message || 'Zurücksetzen fehlgeschlagen.' });
     }
   });
 

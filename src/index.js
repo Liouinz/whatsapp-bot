@@ -14,7 +14,7 @@ import { BOT_NAME, OWNER_NUMBERS, config } from './config.js';
 import { preflight } from './preflight.js';
 import { initDb, startFlushLoop, stopFlushLoop, flushBuffers } from './db.js';
 import { useTursoAuthState } from './auth.js';
-import { state, setPairingCodeRequester } from './state.js';
+import { state, setPairingCodeRequester, setForceRelinkHandler } from './state.js';
 import { logInfo, logWarn, logError, ownerAlert, setOwnerNotifier } from './logger.js';
 import { sendText } from './queue.js';
 import { handleUpsert, loadToggles } from './router.js';
@@ -256,6 +256,40 @@ setPairingCodeRequester(async (phoneNumber) => {
   state.pairingCodeUpdatedAt = Date.now();
   logInfo(`🔢 Pairing-Code angefordert für +${phoneNumber}.`);
   return formatted;
+});
+
+// ── Sitzung hart zurücksetzen (Notfall-Knopf im Panel) ─────────────
+// Für den Fall, dass die gespeicherte Session kaputt ist, Baileys sich aber
+// noch für "registriert" hält: scheduleReconnect() würde dann endlos mit
+// denselben toten Zugangsdaten gegen dieselbe Wand rennen — nie ein neuer
+// QR/Pairing-Code, weil der nur bei UNregistrierten Creds erscheint. Dieser
+// Knopf ist bewusst kompromisslos: alte Session in der DB löschen, alten
+// Socket sofort kappen, sofort blank neu starten. Ob das alte Handy die
+// Verknüpfung noch anzeigt, spielt keine Rolle — das klärt sich von selbst,
+// sobald sich woanders neu verbunden wird.
+
+let lastRelinkAt = 0;
+
+setForceRelinkHandler(async () => {
+  const wait = config.session.relinkCooldownMs - (Date.now() - lastRelinkAt);
+  if (wait > 0) throw new Error(`Bitte noch ${Math.ceil(wait / 1000)} Sekunden warten.`);
+  lastRelinkAt = Date.now();
+
+  clearTimeout(reconnectTimer);
+  const oldSock = state.sock;
+  state.sock = null; // sofort entkoppeln — Events des sterbenden Sockets werden dank
+                      // der "if (state.sock !== sock) return;"-Guards ignoriert
+  state.currentQr = null;
+  state.pairingCode = null;
+  state.stopped = false;
+  state.stopReason = '';
+  state.reconnectAttempts = 0;
+  state.connection = 'connecting';
+
+  try { oldSock?.end?.(new Error('Manueller Reset über das Panel')); } catch { /* egal, wird eh verworfen */ }
+  await clearSessionFn?.().catch(() => {});
+  logWarn('🔁 Sitzung manuell über das Panel zurückgesetzt — starte frisch (neuer QR/Pairing-Code folgt).');
+  await startSocket();
 });
 
 // ── Prozess-Sicherheitsnetze & Graceful Shutdown ───────────────────
