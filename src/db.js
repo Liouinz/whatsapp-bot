@@ -191,6 +191,10 @@ const MIGRATIONS = [
   ['group_settings', 'slowmode_secs', 'INTEGER DEFAULT 0'],
   ['group_settings', 'welcome_text', "TEXT DEFAULT ''"],
   ['group_settings', 'weekly_report', 'INTEGER DEFAULT 0'],
+  // Produktions-DB stammt von vor dem Neuaufbau — warnings existierte schon,
+  // CREATE TABLE IF NOT EXISTS hat expires_at darum nie ergänzt (crasht sonst
+  // beim Anlegen von idx_warnings_active weiter unten).
+  ['warnings', 'expires_at', 'INTEGER DEFAULT 0'],
 ];
 
 async function migrate(db) {
@@ -225,10 +229,19 @@ export async function initDb() {
     await db.execute(sql);
   }
   await migrate(db);
+  // Indizes sind reine Optimierung, nie Voraussetzung fürs Starten — ein einzelner
+  // fehlschlagender Index (z. B. weitere Altlast aus der Zeit vor dem Neuaufbau)
+  // darf den Bot nie mehr komplett lahmlegen wie eben mit warnings.expires_at.
+  let indexesOk = 0;
   for (const sql of INDEXES) {
-    await db.execute(sql);
+    try {
+      await db.execute(sql);
+      indexesOk++;
+    } catch (err) {
+      console.warn(`⚠️ Index übersprungen (${String(err?.message || err).slice(0, 120)}): ${sql}`);
+    }
   }
-  console.log(`✅ DB initialisiert (${TABLES.length} Tabellen, ${INDEXES.length} Indizes).`);
+  console.log(`✅ DB initialisiert (${TABLES.length} Tabellen, ${indexesOk}/${INDEXES.length} Indizes).`);
 }
 
 // ── Schreib-Batching (XP + Tages-Counter) ──────────────────────────
