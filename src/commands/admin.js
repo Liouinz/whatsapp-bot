@@ -2,7 +2,7 @@
 // Jeder Befehl: Rechteprüfung → Aktion → klare Rückmeldung. Nie "nichts passiert".
 
 import { config } from '../config.js';
-import { dbRun, dbRows } from '../db.js';
+import { dbRun, dbRows, flushBuffers } from '../db.js';
 import { state } from '../state.js';
 import {
   addWarning, activeWarnings, clearWarnings, muteUser, unmuteUser,
@@ -495,6 +495,7 @@ export const adminCommands = [
       lastRestartAt = now;
       await ctx.reply('🔄 Alles klar, ich starte neu — bin gleich wieder da!');
       await audit('restart', ctx.chatJid, '', ctx.sender, 'per Befehl');
+      await flushBuffers().catch(() => {}); // gepufferte XP/Zähler retten, bevor der Prozess endet
       setTimeout(() => process.exit(0), 3000); // Render startet den Prozess automatisch neu
     },
   },

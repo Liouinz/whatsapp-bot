@@ -207,13 +207,28 @@ async function migrate(db) {
   }
 }
 
+// Indizes für die Abfragen, die nicht schon von einem Primary Key abgedeckt sind.
+const INDEXES = [
+  // activeWarnings läuft bei jeder Verwarnung + !warns/!profil
+  `CREATE INDEX IF NOT EXISTS idx_warnings_active ON warnings (group_jid, user_jid, expires_at)`,
+  // processDueMessages läuft alle 30s (Scheduler-Tick) über alle Chats hinweg
+  `CREATE INDEX IF NOT EXISTS idx_scheduled_due ON scheduled_messages (done, send_at)`,
+  // Panel-Statistik: Tages-Range über ALLE Gruppen hinweg (PK beginnt mit group_jid, hilft hier nicht)
+  `CREATE INDEX IF NOT EXISTS idx_group_daily_day ON group_daily (day)`,
+  // !rank / !leaderboard: Platzierung + Top-10 pro Gruppe
+  `CREATE INDEX IF NOT EXISTS idx_xp_group_xp ON xp (group_jid, xp)`,
+];
+
 export async function initDb() {
   const db = getDb();
   for (const sql of TABLES) {
     await db.execute(sql);
   }
   await migrate(db);
-  console.log(`✅ DB initialisiert (${TABLES.length} Tabellen).`);
+  for (const sql of INDEXES) {
+    await db.execute(sql);
+  }
+  console.log(`✅ DB initialisiert (${TABLES.length} Tabellen, ${INDEXES.length} Indizes).`);
 }
 
 // ── Schreib-Batching (XP + Tages-Counter) ──────────────────────────

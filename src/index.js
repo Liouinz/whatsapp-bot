@@ -14,7 +14,7 @@ import { BOT_NAME, OWNER_NUMBERS, config } from './config.js';
 import { preflight } from './preflight.js';
 import { initDb, startFlushLoop, stopFlushLoop, flushBuffers } from './db.js';
 import { useTursoAuthState } from './auth.js';
-import { state } from './state.js';
+import { state, setPairingCodeRequester } from './state.js';
 import { logInfo, logWarn, logError, ownerAlert, setOwnerNotifier } from './logger.js';
 import { sendText } from './queue.js';
 import { handleUpsert, loadToggles } from './router.js';
@@ -108,6 +108,7 @@ async function handleConnectionUpdate({ connection, lastDisconnect, qr }) {
   if (connection === 'open') {
     state.connection = 'open';
     state.currentQr = null;
+    state.pairingCode = null; // gekoppelt — Code hat ausgedient
     state.lastConnectedAt = Date.now();
     state.reconnectAttempts = 0;
 
@@ -136,6 +137,7 @@ async function handleConnectionUpdate({ connection, lastDisconnect, qr }) {
       case DisconnectReason.loggedOut: // 401 — alte Session NICHT reconnecten
         logWarn('⛔ 401 loggedOut: Session wird gelöscht, frische Kopplung über /qr nötig.');
         await clearSessionFn?.().catch(() => {});
+        state.pairingCode = null; // alter Code gehörte zur gelöschten Session
         await ownerAlert(
           '⛔ *Bot wurde ausgeloggt (401).* Die Session wurde zurückgesetzt — bitte im Panel unter /qr neu koppeln.'
         );
@@ -145,6 +147,7 @@ async function handleConnectionUpdate({ connection, lastDisconnect, qr }) {
       case DisconnectReason.badSession: // 411 — Session kaputt → löschen, neuer QR
         logWarn('⚠️ Session beschädigt (411) — lösche Session, neuer QR nötig.');
         await clearSessionFn?.().catch(() => {});
+        state.pairingCode = null; // alter Code gehörte zur gelöschten Session
         await ownerAlert('⚠️ Session war beschädigt und wurde zurückgesetzt — bitte /qr neu scannen.');
         return void startSocket().catch((e) => logError(e, 'startSocket'));
 
@@ -231,6 +234,28 @@ setOwnerNotifier(async (message) => {
   for (const num of OWNER_NUMBERS) {
     await sendText(`${num}@s.whatsapp.net`, `🤖 *${BOT_NAME}*\n${message}`);
   }
+});
+
+// ── Pairing-Code (Alternative zum QR-Scan, fürs Panel) ─────────────
+
+let lastPairingRequestAt = 0;
+
+setPairingCodeRequester(async (phoneNumber) => {
+  if (!state.sock) throw new Error('Kein aktiver Socket — bitte kurz warten und erneut versuchen.');
+  if (state.connection === 'open') throw new Error('Der Bot ist bereits verbunden — kein Code nötig.');
+  if (state.sock.authState?.creds?.registered) {
+    throw new Error('Diese Session ist schon gekoppelt — erst trennen (401/Logout), dann neu koppeln.');
+  }
+  const wait = config.pairing.cooldownMs - (Date.now() - lastPairingRequestAt);
+  if (wait > 0) throw new Error(`Bitte noch ${Math.ceil(wait / 1000)} Sekunden warten, bevor ein neuer Code angefragt wird.`);
+  lastPairingRequestAt = Date.now();
+
+  const raw = await state.sock.requestPairingCode(phoneNumber);
+  const formatted = raw.match(/.{1,4}/g)?.join('-') || raw;
+  state.pairingCode = formatted;
+  state.pairingCodeUpdatedAt = Date.now();
+  logInfo(`🔢 Pairing-Code angefordert für +${phoneNumber}.`);
+  return formatted;
 });
 
 // ── Prozess-Sicherheitsnetze & Graceful Shutdown ───────────────────

@@ -8,6 +8,9 @@ export const state = {
   currentQr: null, // aktueller QR als Data-URL (null wenn verbunden)
   qrUpdatedAt: 0,
 
+  pairingCode: null, // formatierter Pairing-Code ("XXXX-XXXX") oder null
+  pairingCodeUpdatedAt: 0,
+
   botJidPn: null, // eigene Telefonnummer-JID (normalisiert)
   botJidLid: null, // eigene LID (normalisiert)
 
@@ -49,4 +52,16 @@ export function bumpActivity() {
     state.activitySlot = slot;
   }
   state.activity[state.activity.length - 1]++;
+}
+
+// Pairing-Code-Anfrage lebt in index.js (braucht den Socket), wird hier nur
+// registriert — spart dashboard.js einen zirkulären Import auf index.js
+// (gleiches Prinzip wie setErrorSummarizer/setOwnerNotifier in logger.js).
+let pairingCodeRequester = null;
+export function setPairingCodeRequester(fn) {
+  pairingCodeRequester = fn;
+}
+export async function requestPairingCode(phoneNumber) {
+  if (!pairingCodeRequester) throw new Error('Der Bot ist noch nicht bereit — bitte kurz warten.');
+  return pairingCodeRequester(phoneNumber);
 }

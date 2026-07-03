@@ -7,8 +7,8 @@ import express from 'express';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { BOT_NAME, config } from './config.js';
-import { state, rolloverDay } from './state.js';
-import { dbRun, dbRows } from './db.js';
+import { state, rolloverDay, requestPairingCode } from './state.js';
+import { dbRun, dbRows, flushBuffers } from './db.js';
 import { getRing, logError, logInfo } from './logger.js';
 import { getAiQuota } from './ai.js';
 import { registry, isCommandEnabled, setCommandEnabled } from './router.js';
@@ -204,7 +204,28 @@ export function createDashboard() {
   });
 
   api.get('/qr', (req, res) => {
-    res.json({ connection: state.connection, qr: state.currentQr, updatedAt: state.qrUpdatedAt });
+    const pairingValid = state.pairingCode && Date.now() - state.pairingCodeUpdatedAt < config.pairing.codeValidMs;
+    res.json({
+      connection: state.connection,
+      qr: state.currentQr,
+      updatedAt: state.qrUpdatedAt,
+      pairingCode: pairingValid ? state.pairingCode : null,
+    });
+  });
+
+  // Pairing-Code anfordern (Alternative zum QR-Scan) — Nummer mit Ländervorwahl, nur Ziffern
+  api.post('/pairing-code', async (req, res) => {
+    const phone = String(req.body?.phoneNumber || '').replace(/\D/g, '');
+    if (!/^\d{6,15}$/.test(phone)) {
+      return res.status(400).json({ error: 'Bitte volle Nummer mit Ländervorwahl angeben (nur Ziffern, z. B. 4915112345678).' });
+    }
+    try {
+      const code = await requestPairingCode(phone);
+      await audit('pairing-code', '', '', 'panel', phone);
+      res.json({ ok: true, code });
+    } catch (err) {
+      res.status(400).json({ error: err.message || 'Code konnte nicht angefordert werden.' });
+    }
   });
 
   api.get('/groups', async (req, res) => {
@@ -287,6 +308,7 @@ export function createDashboard() {
 
   api.post('/groups/:jid/kick', async (req, res) => {
     const jid = req.params.jid;
+    if (!jid.endsWith('@g.us')) return res.status(400).json({ error: 'Ungültige Gruppe.' });
     const user = String(req.body?.user || '');
     if (!user) return res.status(400).json({ error: 'Nutzer fehlt.' });
     const ok = await kickUser(jid, user, 'per Panel');
@@ -296,6 +318,7 @@ export function createDashboard() {
 
   api.post('/groups/:jid/ban', async (req, res) => {
     const jid = req.params.jid;
+    if (!jid.endsWith('@g.us')) return res.status(400).json({ error: 'Ungültige Gruppe.' });
     const user = String(req.body?.user || '');
     if (!user) return res.status(400).json({ error: 'Nutzer fehlt.' });
     const ok = await banUser(jid, user, 'per Panel', 'panel');
@@ -485,6 +508,7 @@ export function createDashboard() {
     }
     lastPanelRestartAt = Date.now();
     await audit('restart', '', '', 'panel', '');
+    await flushBuffers().catch(() => {}); // gepufferte XP/Zähler retten, bevor der Prozess endet
     res.json({ ok: true, message: 'Neustart in 2 Sekunden …' });
     logInfo('🔄 Neustart über das Panel ausgelöst.');
     setTimeout(() => process.exit(0), 2000);

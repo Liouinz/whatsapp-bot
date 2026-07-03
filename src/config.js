@@ -98,6 +98,12 @@ export const config = {
     restartCooldownMs: 2 * 60_000, // Neustart-Button/-Befehl: 2 Min Cooldown
   },
 
+  // ── Pairing-Code (Alternative zum QR-Scan) ──────────────────────
+  pairing: {
+    cooldownMs: 30_000, // Mindestabstand zwischen zwei Code-Anfragen
+    codeValidMs: 60_000, // solange zeigt das Panel den Code an, dann ausgeblendet
+  },
+
   // ── Keep-Alive ─────────────────────────────────────────────────
   keepAlive: {
     selfPingMs: 4 * 60_000, // interner Zusatz-Ping (externer UptimeRobot bleibt Pflicht)

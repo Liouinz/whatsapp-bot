@@ -655,10 +655,42 @@ function barChart(daily){
 function renderQr(){
   content.appendChild(h('h2', { class:'page-title' }, ['Verbindung / QR']));
   content.appendChild(h('div', { class:'glass qr-box', id:'qrBox' }, [skel(200, 'width:200px')]));
+
+  var pairBox = h('div', { class:'glass card', id:'pairBox', style:'margin-top:12px;display:none' }, [
+    h('h3', {}, ['🔢 Oder per Code verbinden']),
+    h('p', { class:'muted sm', style:'margin-bottom:10px' }, [
+      'Nummer mit Ländervorwahl eingeben (nur Ziffern) statt QR zu scannen: WhatsApp → Einstellungen → Verknüpfte Geräte → Mit Telefonnummer verbinden.'
+    ])
+  ]);
+  var input = h('input', { type:'text', id:'pairPhone', placeholder:'z.B. 4915112345678', inputmode:'numeric' });
+  var btn = h('button', { class:'small', onclick:function(){
+    var phone = input.value.replace(/\D/g, '');
+    if (!phone) return toast('⚠️ Bitte Nummer eingeben.');
+    btn.disabled = true;
+    api('/pairing-code', { method:'POST', body:{ phoneNumber:phone } })
+      .then(function(r){ setPairingCodeDisplay(r.code); })
+      .catch(function(e){ toast('⚠️ ' + e.message); })
+      .then(function(){ btn.disabled = false; });
+  } }, ['Code anfordern']);
+  pairBox.appendChild(h('div', { class:'row wrap' }, [input, btn]));
+  pairBox.appendChild(h('div', { id:'pairCodeDisplay' }));
+  content.appendChild(pairBox);
+
   loadQr();
+}
+function setPairingCodeDisplay(code){
+  var el = document.getElementById('pairCodeDisplay');
+  if (!el) return;
+  el.innerHTML = '';
+  if (!code) return;
+  el.appendChild(h('div', { style:'margin-top:12px;text-align:center' }, [
+    h('div', { class:'muted sm' }, ['Dein Code (60s gültig):']),
+    h('div', { style:'font-size:2rem;font-weight:700;letter-spacing:.08em;color:var(--accent)' }, [code])
+  ]));
 }
 function loadQr(){
   var box = document.getElementById('qrBox');
+  var pairBox = document.getElementById('pairBox');
   if (!box) return;
   api('/qr').then(function(res){
     box.innerHTML = '';
@@ -668,12 +700,19 @@ function loadQr(){
         h('div', { class:'h-title' }, ['Bot ist online']),
         h('p', { class:'muted sm' }, ['Session aktiv — kein QR-Code nötig.'])
       ]));
-    } else if (res.qr) {
+      if (pairBox) pairBox.style.display = 'none';
+      return;
+    }
+    if (res.qr) {
       box.appendChild(h('img', { alt:'WhatsApp QR-Code', src:res.qr }));
       box.appendChild(h('p', { class:'muted sm', style:'margin-top:12px' },
         ['Mit WhatsApp scannen: Einstellungen → Verknüpfte Geräte. Aktualisiert sich automatisch.']));
     } else {
       box.appendChild(h('p', { class:'muted' }, ['Noch kein QR-Code — der Bot verbindet sich gerade …']));
+    }
+    if (pairBox) {
+      pairBox.style.display = '';
+      setPairingCodeDisplay(res.pairingCode);
     }
   }).catch(function(){ box.textContent = 'QR-Status konnte nicht geladen werden.'; });
 }
