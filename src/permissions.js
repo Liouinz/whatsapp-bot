@@ -51,6 +51,11 @@ export function invalidateGroupMeta(groupJid) {
 }
 
 /** LID→PN-Paare aus Metadaten lernen (und für Moderation in members ablegen). */
+// Bereits persistierte Zuordnungen — verhindert die frühere Schreib-Lawine:
+// pro Metadata-Refresh ging sonst EIN Turso-Write PRO Mitglied raus (bei großen
+// Gruppen hunderte Writes pro Minute), obwohl sich fast nie etwas ändert.
+const persistedMappings = new Set(); // "groupJid|lid|pn"
+
 function learnLidMappings(meta) {
   if (!meta?.participants) return;
   for (const p of meta.participants) {
@@ -58,6 +63,10 @@ function learnLidMappings(meta) {
     const pn = normalizeId(p.phoneNumber || p.jid || (String(p.id).endsWith('@s.whatsapp.net') ? p.id : null));
     if (lid && pn) {
       lidToPn.set(lid, pn);
+      const key = `${meta.id}|${lid}|${pn}`;
+      if (persistedMappings.has(key)) continue;
+      persistedMappings.add(key);
+      if (persistedMappings.size > 20_000) persistedMappings.clear();
       dbRun(
         `INSERT INTO members (group_jid, user_jid, user_lid, last_seen) VALUES (?, ?, ?, ?)
          ON CONFLICT(group_jid, user_jid) DO UPDATE SET user_lid = excluded.user_lid, last_seen = excluded.last_seen`,

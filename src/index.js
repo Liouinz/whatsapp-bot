@@ -239,12 +239,28 @@ async function handleConnectionUpdate({ connection, lastDisconnect, qr }, sock) 
         // Frischen (ungekoppelten) Socket starten, damit /qr sofort einen neuen Code zeigt.
         return void startSocket().catch((e) => logError(e, 'startSocket'));
 
-      case DisconnectReason.badSession: // 411 — Session kaputt → löschen, neuer QR
-        logWarn('⚠️ Session beschädigt (411) — lösche Session, neuer QR nötig.');
+      case DisconnectReason.badSession: // 500 — Session kaputt → löschen, neuer QR
+        logWarn(`⚠️ Session beschädigt (${code}) — lösche Session, neuer QR nötig.`);
         await safeClearSession();
         state.pairingCode = null; // alter Code gehörte zur gelöschten Session
         await ownerAlert('⚠️ Session war beschädigt und wurde zurückgesetzt — bitte /qr neu scannen.');
         return void startSocket().catch((e) => logError(e, 'startSocket'));
+
+      case DisconnectReason.multideviceMismatch: // 411 — Geräte-/Versions-Konflikt, altes Pairing ungültig
+        logWarn('⚠️ Multi-Device-Konflikt (411) — Verknüpfung ist ungültig geworden, lösche Session.');
+        await safeClearSession();
+        state.pairingCode = null;
+        await ownerAlert(
+          '⚠️ *Verknüpfung ungültig geworden (411).* Das passiert z. B. nach einem Geräte-Limit oder App-Update auf dem Handy. Session wurde zurückgesetzt — bitte /qr neu scannen.'
+        );
+        return void startSocket().catch((e) => logError(e, 'startSocket'));
+
+      // 428/408: normale Verbindungsabbrüche (WLAN-Hopser, WhatsApp-Serverseite,
+      // Render-Idle) — kein Session-Problem, blindes Reconnecten mit Backoff reicht.
+      case DisconnectReason.connectionClosed:
+      case DisconnectReason.connectionLost: // == timedOut (beide 408)
+        scheduleReconnect(code, code === DisconnectReason.connectionClosed ? 'Verbindung geschlossen' : 'Verbindung verloren/Timeout');
+        return;
 
       case DisconnectReason.connectionReplaced: // 440 — nicht blind reconnecten
         state.stopped = true;
@@ -269,7 +285,14 @@ async function handleConnectionUpdate({ connection, lastDisconnect, qr }, sock) 
   }
 }
 
-function scheduleReconnect(code) {
+/**
+ * Reconnect mit exponentiellem Backoff (1 s → max 60 s) + Jitter — nie in
+ * enger Schleife gegen WhatsApp rennen. Deckt ALLE nicht gesondert
+ * behandelten Trennungsgründe ab (428/408 explizit, alles Unbekannte über
+ * den default-Zweig) und stoppt nach zu vielen Fehlversuchen kontrolliert,
+ * statt den Node-Prozess crashen zu lassen.
+ */
+function scheduleReconnect(code, label = '') {
   state.reconnectAttempts++;
   if (state.reconnectAttempts > config.reconnect.maxAttempts) {
     state.stopped = true;
@@ -285,7 +308,8 @@ function scheduleReconnect(code) {
     config.reconnect.maxDelayMs
   );
   const delay = base + Math.floor(Math.random() * 1000);
-  logInfo(`🔁 Verbindung zu (Code ${code || '?'}) — Reconnect-Versuch ${state.reconnectAttempts} in ${Math.round(delay / 1000)}s.`);
+  const suffix = label ? ` (${label})` : '';
+  logInfo(`🔁 Verbindungsabbruch Code ${code || '?'}${suffix} — Reconnect-Versuch ${state.reconnectAttempts} in ${Math.round(delay / 1000)}s.`);
   clearTimeout(reconnectTimer);
   reconnectTimer = setTimeout(() => {
     startSocket().catch((e) => logError(e, 'startSocket'));

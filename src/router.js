@@ -5,16 +5,16 @@
 import { PREFIX, config } from './config.js';
 import { state, rolloverDay, bumpActivity } from './state.js';
 import { dbRows, dbRun, bufferXp, bufferStat, bufferGroupMessage, xpToLevel } from './db.js';
-import { replyTo, sendText } from './queue.js';
+import { replyTo, sendText, wasSentByBot } from './queue.js';
 import { logError } from './logger.js';
 import {
   senderCandidates, senderJid, isOwner, isUserAdmin, getGroupMeta, resolveLid,
 } from './permissions.js';
 import { checkAutoMod, getGroupSettings } from './moderation.js';
 import { getAfk, clearAfk, fmtSince } from './commands/afk.js';
-import { resolveCustom } from './commands/custom.js';
+import { resolveCustom, listCustom } from './commands/custom.js';
 import { checkGameAnswer } from './commands/games.js';
-import { unknownCommandReply } from './ai.js';
+import { unknownCommandReply, askAi } from './ai.js';
 
 import { adminCommands } from './commands/admin.js';
 import { communityCommands } from './commands/community.js';
@@ -105,14 +105,21 @@ function commandRateOk(sender) {
 // ── Text-Extraktion ────────────────────────────────────────────────
 
 function unwrap(message) {
-  if (!message) return null;
-  return (
-    message.ephemeralMessage?.message ||
-    message.viewOnceMessage?.message ||
-    message.viewOnceMessageV2?.message ||
-    message.documentWithCaptionMessage?.message ||
-    message
-  );
+  // Wrapper können verschachtelt sein (z. B. ephemeral um viewOnce) — bis zur
+  // eigentlichen Nutzlast durchsteigen statt nur eine Ebene.
+  let m = message;
+  for (let i = 0; i < 4 && m; i++) {
+    const inner =
+      m.ephemeralMessage?.message ||
+      m.viewOnceMessage?.message ||
+      m.viewOnceMessageV2?.message ||
+      m.viewOnceMessageV2Extension?.message ||
+      m.documentWithCaptionMessage?.message ||
+      m.editedMessage?.message;
+    if (!inner) break;
+    m = inner;
+  }
+  return m || null;
 }
 
 export function extractText(msg) {
@@ -124,6 +131,14 @@ export function extractText(msg) {
     m.imageMessage?.caption ||
     m.videoMessage?.caption ||
     m.documentMessage?.caption ||
+    // Interaktive Antworten (Buttons/Listen) zählen auch als Text — sonst
+    // "sieht" der Bot Antippen von Buttons überhaupt nicht.
+    m.buttonsResponseMessage?.selectedDisplayText ||
+    m.buttonsResponseMessage?.selectedButtonId ||
+    m.templateButtonReplyMessage?.selectedDisplayText ||
+    m.templateButtonReplyMessage?.selectedId ||
+    m.listResponseMessage?.singleSelectReply?.selectedRowId ||
+    m.listResponseMessage?.title ||
     ''
   ).trim();
 }
@@ -142,6 +157,12 @@ function contextInfo(msg) {
 const xpCooldown = new Map(); // group|user → letzter XP-Zeitpunkt
 const xpTotals = new Map(); // group|user → bekannter XP-Stand (RAM)
 
+/** Nach einem Komplett-Reset der DB: XP-RAM-Stände verwerfen. */
+export function resetXpCache() {
+  xpTotals.clear();
+  xpCooldown.clear();
+}
+
 async function grantXp(chatJid, userJid, name, settings) {
   const user = resolveLid(userJid);
   const key = `${chatJid}|${user}`;
@@ -153,6 +174,7 @@ async function grantXp(chatJid, userJid, name, settings) {
   if (!xpTotals.has(key)) {
     const rows = await dbRows('SELECT xp FROM xp WHERE group_jid = ? AND user_jid = ?', [chatJid, user]);
     xpTotals.set(key, rows.length ? Number(rows[0].xp) : 0);
+    if (xpTotals.size > 5000) xpTotals.delete(xpTotals.keys().next().value); // sonst Speicherleck
   }
   const amount =
     config.xp.perMessageMin +
@@ -199,6 +221,7 @@ async function checkSlowmode(msg, chatJid, senderIds, settings, senderName) {
   } catch { /* ohne Admin-Rechte bleibt sie eben stehen */ }
   if (now - (slowmodeHinted.get(key) || 0) > 60_000) {
     slowmodeHinted.set(key, now);
+    if (slowmodeHinted.size > 3000) slowmodeHinted.delete(slowmodeHinted.keys().next().value);
     const wait = Math.ceil((secs * 1000 - (now - last)) / 1000);
     await sendText(chatJid, `🐢 *${senderName}*, hier ist Slowmode aktiv — bitte noch ${wait} s warten.`);
   }
@@ -223,6 +246,7 @@ async function notifyAfkMentions(msg, chatJid) {
     const key = `${chatJid}|${afk.user}`;
     if (Date.now() - (afkNoticeCooldown.get(key) || 0) < 2 * 60_000) continue;
     afkNoticeCooldown.set(key, Date.now());
+    if (afkNoticeCooldown.size > 3000) afkNoticeCooldown.delete(afkNoticeCooldown.keys().next().value);
     await replyTo(msg, `💤 Diese Person ist gerade *AFK* (seit ${fmtSince(afk.since)}): _${afk.reason}_`);
   }
 }
@@ -236,7 +260,61 @@ function findTarget(msg, args) {
   if (ci?.participant) return resolveLid(ci.participant); // Antwort auf Nachricht
   const num = (args || []).find((a) => /^\+?\d{6,17}$/.test(a.replace(/[@\s-]/g, '')));
   if (num) return `${num.replace(/\D/g, '')}@s.whatsapp.net`;
+  // Nummern mit Leerzeichen/Klammern/Punkten ("+49 171 234 5678") landen in
+  // mehreren args — deshalb zusätzlich über den gesamten Text suchen.
+  const joined = (args || []).join(' ');
+  const m = /(?:\+|00)?[\d(][\d\s().\/-]{4,24}\d/.exec(joined);
+  if (m) {
+    const digits = m[0].replace(/\D/g, '');
+    if (digits.length >= 6 && digits.length <= 17) return `${digits}@s.whatsapp.net`;
+  }
   return null;
+}
+
+// ── Tippfehler-Erkennung für Befehle (spart KI-Aufrufe) ────────────
+
+/** Levenshtein-Distanz mit frühem Abbruch oberhalb von `max`. */
+function editDistance(a, b, max) {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    let rowMin = i;
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(
+        prev[j] + 1,
+        cur[j - 1] + 1,
+        prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+      );
+      if (cur[j] < rowMin) rowMin = cur[j];
+    }
+    if (rowMin > max) return max + 1;
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+// Vorschlags-Kandidaten: sichtbare Befehle + Aliasse (hidden bleibt hidden)
+const SUGGEST_BASE = registry
+  .filter((c) => !c.hidden)
+  .flatMap((c) => [c.name, ...(c.aliases || [])]);
+
+/** Ähnlichsten bekannten Befehl finden (oder null). */
+export function suggestCommand(name) {
+  if (name.length < 3) return null;
+  const { commands: customList, faqs } = listCustom();
+  const max = name.length >= 6 ? 2 : 1;
+  let best = null;
+  let bestDist = max + 1;
+  for (const cand of [...SUGGEST_BASE, ...customList, ...faqs]) {
+    const d = editDistance(name, cand, max);
+    if (d < bestDist) {
+      bestDist = d;
+      best = cand;
+      if (d === 1) break; // besser wird es kaum noch
+    }
+  }
+  return best;
 }
 
 // ── Haupteinstieg ──────────────────────────────────────────────────
@@ -254,41 +332,70 @@ export async function handleUpsert({ messages, type }) {
 }
 
 async function handleMessage(msg) {
-  if (!msg?.message || msg.key?.fromMe) return;
+  if (!msg?.message) return;
+
+  // Der Bot läuft auf der eigenen Nummer des Owners — dessen Nachrichten kommen
+  // deshalb als fromMe an. BEFEHLE des Owners werden verarbeitet; alles andere
+  // (normale eigene Nachrichten und vor allem die Echos der Bot-Antworten
+  // selbst) wird verworfen, sonst antwortet der Bot auf sich selbst.
+  const fromSelf = !!msg.key?.fromMe;
+  if (fromSelf && (wasSentByBot(msg.key?.id) || !extractText(msg).startsWith(PREFIX))) return;
+
   if (isDuplicate(msg.key?.id)) return;
 
   const chatJid = msg.key.remoteJid;
   if (!chatJid || chatJid === 'status@broadcast') return;
   const isGroup = chatJid.endsWith('@g.us');
 
-  const senderIds = senderCandidates(msg);
-  const sender = senderJid(msg);
+  // Bearbeitete Nachrichten: den NEUEN Inhalt gegen die Auto-Mod prüfen —
+  // sonst ließe sich der Link-/Wortfilter umgehen, indem man erst harmlos
+  // postet und den Verstoß nachträglich reineditiert. Der Key wird auf die
+  // Original-Nachricht umgebogen, damit ein Löschen die richtige trifft.
+  let isEdit = false;
+  const protoMsg = msg.message.protocolMessage || unwrap(msg.message)?.protocolMessage;
+  if (protoMsg?.editedMessage) {
+    isEdit = true;
+    msg = {
+      ...msg,
+      key: { ...msg.key, id: protoMsg.key?.id || msg.key.id },
+      message: protoMsg.editedMessage,
+    };
+  }
+
+  // Bei fromMe ist der Absender IMMER die eigene Nummer — remoteJid wäre in
+  // DMs der Chat-Partner und damit die falsche Person.
+  const senderIds = fromSelf ? [state.botJidPn, state.botJidLid].filter(Boolean) : senderCandidates(msg);
+  const sender = fromSelf ? state.botJidPn : senderJid(msg);
   if (!sender) return;
   const senderName = msg.pushName || `+${String(resolveLid(sender)).split('@')[0]}`;
   const text = extractText(msg);
 
   rolloverDay();
-  bumpActivity();
-  bufferStat('messages');
-  if (isGroup) bufferGroupMessage(chatJid);
+  if (!isEdit && !fromSelf) {
+    bumpActivity();
+    bufferStat('messages'); // Edits sind keine neuen Nachrichten — nicht doppelt zählen
+    if (isGroup) bufferGroupMessage(chatJid);
+  }
 
-  // DMs: nur Owner (Panel/Owner-Steuerung) — alles andere still ignorieren
-  if (!isGroup && !isOwner(senderIds)) return;
+  // DMs: nur Owner ODER die Nummer, auf der der Bot selbst läuft — die Person
+  // am Bot-Handy ist nicht zwingend der Owner (OWNER_NUMBERS kann jemand
+  // anderes sein), soll ihren Bot aber trotzdem per Befehl bedienen können.
+  if (!isGroup && !fromSelf && !isOwner(senderIds)) return;
 
   const settings = isGroup ? await getGroupSettings(chatJid) : { enabled: 1, levelup_announce: 0 };
   if (isGroup && !Number(settings.enabled)) return; // Gruppe im Panel deaktiviert
 
   // Slowmode greift vor allem anderen (Nachricht wird ggf. gelöscht)
-  if (isGroup && (await checkSlowmode(msg, chatJid, senderIds, settings, senderName))) return;
+  if (isGroup && !isEdit && !fromSelf && (await checkSlowmode(msg, chatJid, senderIds, settings, senderName))) return;
 
-  // 1) AFK: eigener Beitrag hebt AFK auf
-  const wasAfk = await clearAfk(senderIds);
+  // 1) AFK: eigener Beitrag hebt AFK auf (Edits zählen nicht als "wieder da")
+  const wasAfk = isEdit ? null : await clearAfk(senderIds);
   if (wasAfk && isGroup) {
     await replyTo(msg, `👋 Willkommen zurück, *${senderName}*! Dein AFK-Status (seit ${fmtSince(wasAfk.since)}) ist aufgehoben.`);
   }
 
-  // 2) Auto-Moderation (nur Gruppen)
-  if (isGroup) {
+  // 2) Auto-Moderation (nur Gruppen; nie gegen den Owner selbst)
+  if (isGroup && !fromSelf) {
     const mod = await checkAutoMod(msg, chatJid, senderIds, text);
     if (mod) {
       if (mod.kind === 'muted') return; // Nachricht gelöscht, still bleiben
@@ -302,6 +409,10 @@ async function handleMessage(msg) {
       return;
     }
   }
+
+  // Edits sind damit fertig geprüft — kein XP, keine Spiele, keine Befehle
+  // (sonst würde jede Bearbeitung einer alten "!befehl"-Nachricht neu auslösen).
+  if (isEdit) return;
 
   // 3) AFK-Erwähnungen melden
   if (isGroup && !text.startsWith(PREFIX)) {
@@ -326,7 +437,8 @@ async function handleMessage(msg) {
   if (!name) return;
   const args = parts.slice(1);
 
-  if (!commandRateOk(resolveLid(sender))) return; // Flut still drosseln
+  // Flut still drosseln — Owner und die Bot-Nummer selbst nie
+  if (!fromSelf && !isOwner(senderIds) && !commandRateOk(resolveLid(sender))) return;
 
   const ctx = makeCtx(msg, chatJid, isGroup, senderIds, sender, senderName, text, args);
   const command = byName.get(name);
@@ -365,7 +477,27 @@ async function handleMessage(msg) {
     return ctx.reply(custom);
   }
 
-  // 5c) KI-Fallback — NUR hier
+  // 5c) Direkte KI-Frage über das explizite Muster !frage! — z. B.
+  // "!Erkläre Linux!". Feste Befehle (5a) und Custom (5b) haben Vorrang, hier
+  // landet also nur, was KEIN Befehl ist. Das äußere !…! wird entfernt, nur
+  // der Inhalt geht an die KI.
+  const ask = /^!\s*(.+?)\s*!$/.exec(text);
+  if (ask && ask[1].trim().length >= 2) {
+    const res = await askAi(resolveLid(sender), ask[1]);
+    if (res?.text) return ctx.reply(`🤖 ${res.text}`);
+    if (res?.blocked === 'cooldown') return ctx.reply('ℹ️ Kurz durchatmen — gleich kannst du mich wieder etwas fragen.');
+    if (res?.blocked === 'quota') return ctx.reply('ℹ️ Mein KI-Kontingent für heute ist aufgebraucht — morgen geht es weiter.');
+    return ctx.reply('⚠️ Ich konnte die KI gerade nicht erreichen — bitte gleich nochmal.');
+  }
+
+  // 5d) Tippfehler? Ähnlichsten Befehl vorschlagen — schneller als die KI
+  // und verbraucht kein Tages-Kontingent.
+  const suggestion = suggestCommand(name);
+  if (suggestion) {
+    return ctx.reply(`🤔 \`${PREFIX}${name}\` kenne ich nicht — meintest du \`${PREFIX}${suggestion}\`?`);
+  }
+
+  // 5e) KI-Fallback — NUR hier
   const known = registry.filter((c) => !c.hidden).map((c) => c.name);
   const ai = await unknownCommandReply(resolveLid(sender), text, known);
   if (ai?.text) {

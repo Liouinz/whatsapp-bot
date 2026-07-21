@@ -19,8 +19,12 @@ export const OWNER_NUMBERS = (process.env.OWNER_NUMBERS || '')
 export const config = {
   // ── Sende-Queue ────────────────────────────────────────────────
   send: {
-    jitterMinMs: 800, // zufällige Pause zwischen Sendungen (min)
-    jitterMaxMs: 2500, // zufällige Pause zwischen Sendungen (max)
+    // Sofort-Antwort: KEINE künstliche Pause vor einer Antwort. Der Jitter
+    // greift dank queue.js nur noch als Mindestabstand zwischen zwei DIREKT
+    // aufeinanderfolgenden Sends (Burst-Schutz gegen WhatsApp-Spam-Flag) —
+    // eine einzelne Befehlsantwort nach Leerlauf geht ohne Verzögerung raus.
+    jitterMinMs: 0, // kein Sockel mehr
+    jitterMaxMs: 250, // nur noch ein winziger Abstand bei Nachrichten-Bursts
     maxRetries: 2, // Wiederholungen pro fehlgeschlagenem Send
     retryBackoffMs: 1500,
   },
@@ -64,7 +68,15 @@ export const config = {
 
   // ── KI (Gemini) ────────────────────────────────────────────────
   ai: {
-    model: 'gemini-3-flash', // kostenlose Stufe (Stand 2026); KEINE alten 1.5/2.0-Modelle
+    // Freie Stufe (Stand 2026): "gemini-3-flash" allein gibt es nicht — die
+    // REST-API verlangt den vollen Preview-Namen, sonst HTTP 404 bei JEDEM
+    // Aufruf. Bestätigt gegen die offizielle Doku (ai.google.dev/gemini-api/
+    // docs/generate-content/gemini-3). KEINE alten 1.5/2.0-Modelle (abgeschaltet).
+    model: 'gemini-3-flash-preview', // Standard-Modell (frei)
+    // Leichtes Modell für kurze/einfache Fragen — schneller & schont das
+    // Kontingent. Ebenfalls FREI. Ein Pro-Modell wird bewusst NICHT genutzt:
+    // gemini-3.1-pro-preview hat KEINE Free-Tier und würde echtes Geld kosten.
+    modelLite: 'gemini-3.1-flash-lite',
     userCooldownMs: 30_000, // pro Nutzer höchstens 1 KI-Aufruf alle 30 s
     dailyLimit: 1400, // hartes Tages-Kontingent (Free-Tier ≈ 1500/Tag)
     timeoutMs: 15_000,

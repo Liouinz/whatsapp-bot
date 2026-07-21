@@ -8,7 +8,17 @@ import { logError, logInfo } from './logger.js';
 import { botIsAdmin, isUserAdmin, resolveLid, normalizeId, invalidateGroupMeta } from './permissions.js';
 import { state } from './state.js';
 
-const LINK_RE = /(https?:\/\/|www\.|chat\.whatsapp\.com\/)\S+/i;
+// Links: explizite URLs, Einladungs-/Kurzlink-Dienste UND nackte Domains mit
+// Pfad ("beispiel.xyz/abc") — die alte Regex hat t.me/discord.gg/bit.ly & Co.
+// komplett übersehen.
+export const LINK_RE = new RegExp(
+  '(https?://\\S+|www\\.\\S+' +
+    '|\\b(?:chat\\.whatsapp\\.com|wa\\.me|wa\\.link|t\\.me|telegram\\.me|discord\\.gg|discord(?:app)?\\.com/invite|' +
+    'bit\\.ly|tinyurl\\.com|is\\.gd|cutt\\.ly|rb\\.gy|goo\\.gl|linktr\\.ee|shorturl\\.at)/\\S+' +
+    '|\\b[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*' +
+    '\\.(?:com|net|org|de|at|ch|eu|io|gg|me|ly|app|xyz|info|biz|online|shop|site|club|link|live|to|tv|cc|top|vip)/\\S+)',
+  'i'
+);
 
 // ── Gruppen-Einstellungen (mit kleinem Cache) ──────────────────────
 
@@ -34,6 +44,42 @@ export async function getGroupSettings(groupJid) {
 export function invalidateSettings(groupJid) {
   if (groupJid) settingsCache.delete(groupJid);
   else settingsCache.clear();
+}
+
+// ── Wort-Blacklist (RAM-Cache — lief vorher als DB-Query bei JEDER Nachricht) ──
+
+// Erkennungs-Normalisierung: Kleinbuchstaben, Leetspeak (Sch3i55e), Umlaute/
+// Akzente (SCHEIẞE, Schéiße) — damit die üblichen Umgehungs-Tricks nicht ziehen.
+const LEET = { 0: 'o', 1: 'i', 3: 'e', 4: 'a', 5: 's', 7: 't', 8: 'b', '@': 'a', $: 's', '€': 'e' };
+
+export function normalizeForFilter(s) {
+  return String(s)
+    .toLowerCase()
+    .replace(/[0134578$@€]/g, (c) => LEET[c] ?? c)
+    .replace(/ä/g, 'a').replace(/ö/g, 'o').replace(/ü/g, 'u').replace(/ß/g, 'ss')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, ''); // kombinierende Akzente entfernen
+}
+
+const wordsCache = new Map(); // groupJid → { words: [{raw, norm, condensed}], at }
+const WORDS_CACHE_MS = 5 * 60_000;
+
+async function getBlockedWords(groupJid) {
+  const cached = wordsCache.get(groupJid);
+  if (cached && Date.now() - cached.at < WORDS_CACHE_MS) return cached.words;
+  const rows = await dbRows('SELECT word FROM blocked_words WHERE group_jid = ?', [groupJid]);
+  const words = rows.map((r) => {
+    const raw = String(r.word).toLowerCase();
+    const norm = normalizeForFilter(raw);
+    return { raw, norm, condensed: norm.replace(/[^a-z]/g, '') };
+  });
+  wordsCache.set(groupJid, { words, at: Date.now() });
+  return words;
+}
+
+export function invalidateBlockedWords(groupJid) {
+  if (groupJid) wordsCache.delete(groupJid);
+  else wordsCache.clear();
 }
 
 // ── Warnungen + Eskalation ─────────────────────────────────────────
@@ -192,9 +238,6 @@ export async function checkAutoMod(msg, groupJid, senderIds, text) {
       return { kind: 'muted', deleted: true, untilText: fmtUntil(mutedUntil) };
     }
 
-    // Admins & Owner sind von Auto-Mod ausgenommen
-    if (await isUserAdmin(groupJid, senderIds)) return null;
-
     let violation = null;
 
     // 2) Anti-Link
@@ -202,17 +245,28 @@ export async function checkAutoMod(msg, groupJid, senderIds, text) {
       violation = { kind: 'link', reason: 'Link gepostet (Anti-Link aktiv)' };
     }
 
-    // 3) Wort-Blacklist
+    // 3) Wort-Blacklist (RAM-Cache — kein DB-Roundtrip pro Nachricht mehr).
+    // Geprüft wird dreifach: roh (wie früher), normalisiert (Leetspeak/Umlaute/
+    // Akzente) und "condensed" ohne Trennzeichen (fängt "S c h e i s s e").
     if (!violation && Number(settings.blacklist_on) && text) {
-      const words = await dbRows('SELECT word FROM blocked_words WHERE group_jid = ?', [groupJid]);
-      const lower = text.toLowerCase();
-      const hit = words.find((w) => lower.includes(String(w.word).toLowerCase()));
-      if (hit) violation = { kind: 'word', reason: `verbotenes Wort ("${hit.word}")` };
+      const words = await getBlockedWords(groupJid);
+      if (words.length) {
+        const lower = text.toLowerCase();
+        const normText = normalizeForFilter(text);
+        const condText = normText.replace(/[^a-z]/g, '');
+        const hit = words.find(
+          (w) =>
+            lower.includes(w.raw) ||
+            (w.norm && normText.includes(w.norm)) ||
+            (w.condensed.length >= 4 && condText.includes(w.condensed))
+        );
+        if (hit) violation = { kind: 'word', reason: `verbotenes Wort ("${hit.raw}")` };
+      }
     }
 
     // 4) Anti-Spam (viele Nachrichten in kurzer Zeit)
     if (!violation && Number(settings.antispam)) {
-      const key = `${groupJid}|${senderIds[0]}`;
+      const key = `${groupJid}|${resolveLid(senderIds[0])}`; // stabile Form — LID & PN zählen zusammen
       const now = Date.now();
       const arr = (spamTracker.get(key) || []).filter((t) => now - t < 10_000);
       arr.push(now);
@@ -225,6 +279,10 @@ export async function checkAutoMod(msg, groupJid, senderIds, text) {
     }
 
     if (!violation) return null;
+
+    // Admins & Owner sind von Auto-Mod ausgenommen — der (teure) Metadata-Check
+    // läuft bewusst erst NACH der Verstoß-Erkennung, also nur im seltenen Fall.
+    if (await isUserAdmin(groupJid, senderIds)) return null;
 
     const deleted = await deleteMessage(msg, groupJid);
     const warned = await addWarning(groupJid, senderIds[0], violation.reason, 'auto');

@@ -8,6 +8,20 @@ import { logError } from './logger.js';
 const queue = [];
 let running = false;
 
+// IDs aller Nachrichten, die der BOT selbst gesendet hat. Nötig, weil der Bot
+// auf der eigenen Nummer des Owners läuft: dessen Befehle kommen als fromMe an
+// und werden verarbeitet — die Echos der Bot-Antworten (ebenfalls fromMe)
+// dürfen aber NIE verarbeitet werden (Antwort-Schleifen!).
+const sentIds = new Set();
+export function wasSentByBot(id) {
+  return id ? sentIds.has(id) : false;
+}
+function recordSent(id) {
+  if (!id) return;
+  sentIds.add(id);
+  if (sentIds.size > 2000) sentIds.delete(sentIds.values().next().value);
+}
+
 const WAIT_FOR_CONNECTION_MS = 45_000; // bei kurzem Reconnect nicht sofort verwerfen
 
 const jitter = () =>
@@ -27,12 +41,19 @@ async function waitForConnection() {
   return false;
 }
 
+let lastSentAt = 0;
+
 async function work() {
   if (running) return;
   running = true;
   try {
     while (queue.length) {
       const job = queue.shift();
+      // Jitter VOR dem Senden, gemessen am letzten Send: hält den Abstand
+      // zwischen Nachrichten (Spam-Schutz), lässt aber eine einzelne Antwort
+      // nach Leerlauf sofort raus — vorher hing hinter JEDEM Send ein Sleep.
+      const wait = lastSentAt + jitter() - Date.now();
+      if (wait > 0) await sleep(wait);
       let sent = false;
       for (let attempt = 0; attempt <= config.send.maxRetries && !sent; attempt++) {
         try {
@@ -42,6 +63,8 @@ async function work() {
           const result = await state.sock.sendMessage(job.jid, job.content, job.options);
           rolloverDay();
           state.sentToday++;
+          lastSentAt = Date.now();
+          recordSent(result?.key?.id);
           job.resolve?.(result);
           sent = true;
         } catch (err) {
@@ -54,7 +77,6 @@ async function work() {
           }
         }
       }
-      await sleep(jitter());
     }
   } finally {
     running = false;
