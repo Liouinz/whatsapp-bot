@@ -194,7 +194,9 @@ export const economyCommands = [
     async run(ctx) {
       const wallet = await getWallet(ctx.sender, ctx.senderName);
       const amount = parseAmount(ctx.args[0], Number(wallet.balance));
-      const pick = /^(kopf|zahl)$/i.exec(ctx.args[1] || '')?.[1]?.toLowerCase();
+      // Auch Kurzformen erkennen: "k"/"z", "heads"/"tails"
+      const rawPick = (ctx.args[1] || '').toLowerCase();
+      const pick = /^(kopf|k|heads?)$/.test(rawPick) ? 'kopf' : /^(zahl|z|tails?)$/.test(rawPick) ? 'zahl' : null;
       if (!amount || !pick) {
         return ctx.reply('ℹ️ Nutzung: `!wette <betrag> kopf` oder `!wette <betrag> zahl` (auch: `!wette alles kopf`)');
       }

@@ -16,7 +16,8 @@ const MONTH_NAMES = [
 const DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]; // Feb 29 erlaubt
 
 function parseBirthday(text) {
-  const m = /^(\d{1,2})\.(\d{1,2})\.?$/.exec((text || '').trim());
+  // Erlaubt: "24.12.", "24.12", "24.12.2000" (Jahr wird ignoriert), "24/12", "24-12"
+  const m = /^(\d{1,2})[./-](\d{1,2})(?:[./-]\d{2,4})?\.?$/.exec((text || '').trim());
   if (!m) return null;
   const day = parseInt(m[1], 10);
   const month = parseInt(m[2], 10);

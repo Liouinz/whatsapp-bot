@@ -17,6 +17,10 @@ export function parseTime(args) {
     const t = parseClock(args[1], 1);
     return t ? { at: t, used: 2 } : null;
   }
+  if (first === 'heute' && args[1]) {
+    const t = parseClock(args[1], 0);
+    return t ? { at: t, used: 2 } : null;
+  }
   const rel = /^(\d+)(m|min|h|std|d|t)$/.exec(first);
   if (rel) {
     const n = parseInt(rel[1], 10);
@@ -30,7 +34,8 @@ export function parseTime(args) {
 }
 
 function parseClock(text, dayOffset) {
-  const m = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(text);
+  // "18:30" und "18.30" — beides gängige deutsche Schreibweisen
+  const m = /^([01]?\d|2[0-3])[:.]([0-5]\d)$/.exec(text);
   if (!m) return null;
   const d = new Date();
   d.setDate(d.getDate() + dayOffset);

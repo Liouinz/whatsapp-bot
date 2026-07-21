@@ -132,6 +132,31 @@ function tttName(game, mark) {
   return mark === 'X' ? game.nameX : game.nameO;
 }
 
+/** Antwort-Normalisierung: Satzzeichen weg, Artikel vorn weg, Leerraum glätten —
+ * damit "Der Merkur!" genauso zählt wie "merkur". */
+function normalizeGuess(s) {
+  return String(s)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^(der|die|das|den|dem|ein|eine|the) /, '');
+}
+
+/** Passt die Nutzer-Eingabe zu einer der Quiz-Antworten? */
+export function quizAnswerMatches(answers, rawGuess) {
+  const guess = normalizeGuess(rawGuess);
+  if (!guess) return false;
+  return answers.some((ans) => {
+    const na = normalizeGuess(ans);
+    if (!na) return false;
+    if (guess === na) return true;
+    // Antwort darf auch in einem Satz stecken ("es ist canberra") —
+    // Mehrwort-Antworten als Teilstring, Einwort-Antworten als ganzes Wort.
+    return na.includes(' ') ? guess.includes(na) : guess.split(' ').includes(na);
+  });
+}
+
 /**
  * Router-Hook: prüft normale Nachrichten auf Spiel-Antworten (Quiz/Raten).
  * Gibt true zurück, wenn die Nachricht zu einem Spiel gehörte.
@@ -149,7 +174,7 @@ export async function checkGameAnswer(ctx) {
       await ctx.reply(`⌛ Zeit um! Die richtige Antwort wäre gewesen: *${solution}*`);
       return false;
     }
-    if (games.quiz.item.a.includes(guess)) {
+    if (quizAnswerMatches(games.quiz.item.a, guess)) {
       delete games.quiz;
       await addWin(ctx.chatJid, ctx.sender, 'quiz', ctx.senderName, {
         xp: config.games.xpRewardQuiz,
@@ -278,7 +303,11 @@ export const gameCommands = [
       const games = chatGames(ctx.chatJid);
       const game = games.galgen;
       if (!game) return ctx.reply(`ℹ️ Gerade läuft kein Galgenmännchen. Starten: \`${PREFIX}galgen\``);
-      const input = (ctx.args[0] || '').toUpperCase().replace('ß', 'SS');
+      // Umlaute auf die Schreibweise der Wortliste abbilden (KUEHLSCHRANK etc.)
+      const input = (ctx.args[0] || '')
+        .toUpperCase()
+        .replace(/ß/g, 'SS')
+        .replace(/Ä/g, 'AE').replace(/Ö/g, 'OE').replace(/Ü/g, 'UE');
       if (!/^[A-ZÄÖÜ]+$/.test(input)) {
         return ctx.reply(`ℹ️ Nutzung: \`${PREFIX}rate <buchstabe>\` oder \`${PREFIX}rate <ganzes wort>\``);
       }

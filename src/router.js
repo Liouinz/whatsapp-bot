@@ -12,7 +12,7 @@ import {
 } from './permissions.js';
 import { checkAutoMod, getGroupSettings } from './moderation.js';
 import { getAfk, clearAfk, fmtSince } from './commands/afk.js';
-import { resolveCustom } from './commands/custom.js';
+import { resolveCustom, listCustom } from './commands/custom.js';
 import { checkGameAnswer } from './commands/games.js';
 import { unknownCommandReply } from './ai.js';
 
@@ -105,14 +105,21 @@ function commandRateOk(sender) {
 // ── Text-Extraktion ────────────────────────────────────────────────
 
 function unwrap(message) {
-  if (!message) return null;
-  return (
-    message.ephemeralMessage?.message ||
-    message.viewOnceMessage?.message ||
-    message.viewOnceMessageV2?.message ||
-    message.documentWithCaptionMessage?.message ||
-    message
-  );
+  // Wrapper können verschachtelt sein (z. B. ephemeral um viewOnce) — bis zur
+  // eigentlichen Nutzlast durchsteigen statt nur eine Ebene.
+  let m = message;
+  for (let i = 0; i < 4 && m; i++) {
+    const inner =
+      m.ephemeralMessage?.message ||
+      m.viewOnceMessage?.message ||
+      m.viewOnceMessageV2?.message ||
+      m.viewOnceMessageV2Extension?.message ||
+      m.documentWithCaptionMessage?.message ||
+      m.editedMessage?.message;
+    if (!inner) break;
+    m = inner;
+  }
+  return m || null;
 }
 
 export function extractText(msg) {
@@ -124,6 +131,14 @@ export function extractText(msg) {
     m.imageMessage?.caption ||
     m.videoMessage?.caption ||
     m.documentMessage?.caption ||
+    // Interaktive Antworten (Buttons/Listen) zählen auch als Text — sonst
+    // "sieht" der Bot Antippen von Buttons überhaupt nicht.
+    m.buttonsResponseMessage?.selectedDisplayText ||
+    m.buttonsResponseMessage?.selectedButtonId ||
+    m.templateButtonReplyMessage?.selectedDisplayText ||
+    m.templateButtonReplyMessage?.selectedId ||
+    m.listResponseMessage?.singleSelectReply?.selectedRowId ||
+    m.listResponseMessage?.title ||
     ''
   ).trim();
 }
@@ -239,7 +254,61 @@ function findTarget(msg, args) {
   if (ci?.participant) return resolveLid(ci.participant); // Antwort auf Nachricht
   const num = (args || []).find((a) => /^\+?\d{6,17}$/.test(a.replace(/[@\s-]/g, '')));
   if (num) return `${num.replace(/\D/g, '')}@s.whatsapp.net`;
+  // Nummern mit Leerzeichen/Klammern/Punkten ("+49 171 234 5678") landen in
+  // mehreren args — deshalb zusätzlich über den gesamten Text suchen.
+  const joined = (args || []).join(' ');
+  const m = /(?:\+|00)?[\d(][\d\s().\/-]{4,24}\d/.exec(joined);
+  if (m) {
+    const digits = m[0].replace(/\D/g, '');
+    if (digits.length >= 6 && digits.length <= 17) return `${digits}@s.whatsapp.net`;
+  }
   return null;
+}
+
+// ── Tippfehler-Erkennung für Befehle (spart KI-Aufrufe) ────────────
+
+/** Levenshtein-Distanz mit frühem Abbruch oberhalb von `max`. */
+function editDistance(a, b, max) {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    let rowMin = i;
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(
+        prev[j] + 1,
+        cur[j - 1] + 1,
+        prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+      );
+      if (cur[j] < rowMin) rowMin = cur[j];
+    }
+    if (rowMin > max) return max + 1;
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+// Vorschlags-Kandidaten: sichtbare Befehle + Aliasse (hidden bleibt hidden)
+const SUGGEST_BASE = registry
+  .filter((c) => !c.hidden)
+  .flatMap((c) => [c.name, ...(c.aliases || [])]);
+
+/** Ähnlichsten bekannten Befehl finden (oder null). */
+export function suggestCommand(name) {
+  if (name.length < 3) return null;
+  const { commands: customList, faqs } = listCustom();
+  const max = name.length >= 6 ? 2 : 1;
+  let best = null;
+  let bestDist = max + 1;
+  for (const cand of [...SUGGEST_BASE, ...customList, ...faqs]) {
+    const d = editDistance(name, cand, max);
+    if (d < bestDist) {
+      bestDist = d;
+      best = cand;
+      if (d === 1) break; // besser wird es kaum noch
+    }
+  }
+  return best;
 }
 
 // ── Haupteinstieg ──────────────────────────────────────────────────
@@ -264,6 +333,21 @@ async function handleMessage(msg) {
   if (!chatJid || chatJid === 'status@broadcast') return;
   const isGroup = chatJid.endsWith('@g.us');
 
+  // Bearbeitete Nachrichten: den NEUEN Inhalt gegen die Auto-Mod prüfen —
+  // sonst ließe sich der Link-/Wortfilter umgehen, indem man erst harmlos
+  // postet und den Verstoß nachträglich reineditiert. Der Key wird auf die
+  // Original-Nachricht umgebogen, damit ein Löschen die richtige trifft.
+  let isEdit = false;
+  const protoMsg = msg.message.protocolMessage || unwrap(msg.message)?.protocolMessage;
+  if (protoMsg?.editedMessage) {
+    isEdit = true;
+    msg = {
+      ...msg,
+      key: { ...msg.key, id: protoMsg.key?.id || msg.key.id },
+      message: protoMsg.editedMessage,
+    };
+  }
+
   const senderIds = senderCandidates(msg);
   const sender = senderJid(msg);
   if (!sender) return;
@@ -271,9 +355,11 @@ async function handleMessage(msg) {
   const text = extractText(msg);
 
   rolloverDay();
-  bumpActivity();
-  bufferStat('messages');
-  if (isGroup) bufferGroupMessage(chatJid);
+  if (!isEdit) {
+    bumpActivity();
+    bufferStat('messages'); // Edits sind keine neuen Nachrichten — nicht doppelt zählen
+    if (isGroup) bufferGroupMessage(chatJid);
+  }
 
   // DMs: nur Owner (Panel/Owner-Steuerung) — alles andere still ignorieren
   if (!isGroup && !isOwner(senderIds)) return;
@@ -282,10 +368,10 @@ async function handleMessage(msg) {
   if (isGroup && !Number(settings.enabled)) return; // Gruppe im Panel deaktiviert
 
   // Slowmode greift vor allem anderen (Nachricht wird ggf. gelöscht)
-  if (isGroup && (await checkSlowmode(msg, chatJid, senderIds, settings, senderName))) return;
+  if (isGroup && !isEdit && (await checkSlowmode(msg, chatJid, senderIds, settings, senderName))) return;
 
-  // 1) AFK: eigener Beitrag hebt AFK auf
-  const wasAfk = await clearAfk(senderIds);
+  // 1) AFK: eigener Beitrag hebt AFK auf (Edits zählen nicht als "wieder da")
+  const wasAfk = isEdit ? null : await clearAfk(senderIds);
   if (wasAfk && isGroup) {
     await replyTo(msg, `👋 Willkommen zurück, *${senderName}*! Dein AFK-Status (seit ${fmtSince(wasAfk.since)}) ist aufgehoben.`);
   }
@@ -305,6 +391,10 @@ async function handleMessage(msg) {
       return;
     }
   }
+
+  // Edits sind damit fertig geprüft — kein XP, keine Spiele, keine Befehle
+  // (sonst würde jede Bearbeitung einer alten "!befehl"-Nachricht neu auslösen).
+  if (isEdit) return;
 
   // 3) AFK-Erwähnungen melden
   if (isGroup && !text.startsWith(PREFIX)) {
@@ -368,7 +458,14 @@ async function handleMessage(msg) {
     return ctx.reply(custom);
   }
 
-  // 5c) KI-Fallback — NUR hier
+  // 5c) Tippfehler? Ähnlichsten Befehl vorschlagen — schneller als die KI
+  // und verbraucht kein Tages-Kontingent.
+  const suggestion = suggestCommand(name);
+  if (suggestion) {
+    return ctx.reply(`🤔 \`${PREFIX}${name}\` kenne ich nicht — meintest du \`${PREFIX}${suggestion}\`?`);
+  }
+
+  // 5d) KI-Fallback — NUR hier
   const known = registry.filter((c) => !c.hidden).map((c) => c.name);
   const ai = await unknownCommandReply(resolveLid(sender), text, known);
   if (ai?.text) {
