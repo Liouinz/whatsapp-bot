@@ -203,6 +203,13 @@ const TABLES = [
      user_jid TEXT, type TEXT, mult REAL DEFAULT 1, expires_at INTEGER DEFAULT 0,
      PRIMARY KEY (user_jid, type)
    )`,
+
+  // Verträge/Quests: angenommene Verträge pro Spieler (done: 0=aktiv,1=erfüllt,2=abgelaufen)
+  `CREATE TABLE IF NOT EXISTS player_contracts (
+     id INTEGER PRIMARY KEY AUTOINCREMENT, user_jid TEXT, name TEXT, contract_id TEXT,
+     baseline INTEGER DEFAULT 0, accepted_at INTEGER, expires_at INTEGER, chat_jid TEXT,
+     done INTEGER DEFAULT 0
+   )`,
 ];
 
 // Spalten, die nach dem ersten Deploy dazukamen — werden per ALTER TABLE nachgezogen,
@@ -241,6 +248,11 @@ const INDEXES = [
   `CREATE INDEX IF NOT EXISTS idx_group_daily_day ON group_daily (day)`,
   // !rank / !leaderboard: Platzierung + Top-10 pro Gruppe
   `CREATE INDEX IF NOT EXISTS idx_xp_group_xp ON xp (group_jid, xp)`,
+  // Quest-Fortschritt: SUM(messages)/SUM(wins) pro Nutzer über alle Gruppen
+  `CREATE INDEX IF NOT EXISTS idx_xp_user ON xp (user_jid)`,
+  `CREATE INDEX IF NOT EXISTS idx_game_scores_user ON game_scores (user_jid)`,
+  // Quest-Sweep: aktive Verträge nach Ablauf sortiert
+  `CREATE INDEX IF NOT EXISTS idx_contracts_active ON player_contracts (done, expires_at)`,
 ];
 
 export async function initDb() {
@@ -277,7 +289,7 @@ const DATA_TABLES = [
   'error_log', 'error_counts', 'ai_usage', 'games', 'game_scores',
   'audit_log', 'owner_alerts', 'daily_stats', 'coins', 'purchases',
   'user_titles', 'polls', 'poll_votes', 'birthdays', 'group_daily',
-  'millionaire_games', 'millionaire_daily', 'inventory', 'user_boosts',
+  'millionaire_games', 'millionaire_daily', 'inventory', 'user_boosts', 'player_contracts',
 ];
 
 /**

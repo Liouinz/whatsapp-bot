@@ -13,7 +13,7 @@ import { ITEMS, ITEM_COUNT, getItem, listItems, RARITIES, CATEGORIES } from '../
 const PER_PAGE = 10;
 
 // ── Inventar-Helfer (atomar, exploit-sicher) ───────────────────────
-async function addToInventory(user, itemId, qty = 1) {
+export async function addToInventory(user, itemId, qty = 1) {
   await dbRun(
     `INSERT INTO inventory (user_jid, item_id, qty) VALUES (?, ?, ?)
      ON CONFLICT(user_jid, item_id) DO UPDATE SET qty = qty + excluded.qty`,
