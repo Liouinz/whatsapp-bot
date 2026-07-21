@@ -157,6 +157,12 @@ function contextInfo(msg) {
 const xpCooldown = new Map(); // group|user → letzter XP-Zeitpunkt
 const xpTotals = new Map(); // group|user → bekannter XP-Stand (RAM)
 
+/** Nach einem Komplett-Reset der DB: XP-RAM-Stände verwerfen. */
+export function resetXpCache() {
+  xpTotals.clear();
+  xpCooldown.clear();
+}
+
 async function grantXp(chatJid, userJid, name, settings) {
   const user = resolveLid(userJid);
   const key = `${chatJid}|${user}`;
@@ -371,8 +377,10 @@ async function handleMessage(msg) {
     if (isGroup) bufferGroupMessage(chatJid);
   }
 
-  // DMs: nur Owner (Panel/Owner-Steuerung) — alles andere still ignorieren
-  if (!isGroup && !isOwner(senderIds)) return;
+  // DMs: nur Owner ODER die Nummer, auf der der Bot selbst läuft — die Person
+  // am Bot-Handy ist nicht zwingend der Owner (OWNER_NUMBERS kann jemand
+  // anderes sein), soll ihren Bot aber trotzdem per Befehl bedienen können.
+  if (!isGroup && !fromSelf && !isOwner(senderIds)) return;
 
   const settings = isGroup ? await getGroupSettings(chatJid) : { enabled: 1, levelup_announce: 0 };
   if (isGroup && !Number(settings.enabled)) return; // Gruppe im Panel deaktiviert
@@ -429,7 +437,8 @@ async function handleMessage(msg) {
   if (!name) return;
   const args = parts.slice(1);
 
-  if (!isOwner(senderIds) && !commandRateOk(resolveLid(sender))) return; // Flut still drosseln (Owner nie)
+  // Flut still drosseln — Owner und die Bot-Nummer selbst nie
+  if (!fromSelf && !isOwner(senderIds) && !commandRateOk(resolveLid(sender))) return;
 
   const ctx = makeCtx(msg, chatJid, isGroup, senderIds, sender, senderName, text, args);
   const command = byName.get(name);

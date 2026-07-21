@@ -244,6 +244,38 @@ export async function initDb() {
   console.log(`✅ DB initialisiert (${TABLES.length} Tabellen, ${indexesOk}/${INDEXES.length} Indizes).`);
 }
 
+// ── Komplett-Reset (Danger-Zone im Panel) ──────────────────────────
+
+// Alle Daten-Tabellen — bewusst OHNE auth_creds/auth_keys: die Session wird
+// (falls gewünscht) separat über den Relink-Mechanismus gelöscht, der auch
+// den Socket sauber neu startet.
+const DATA_TABLES = [
+  'groups', 'group_settings', 'members',
+  'warnings', 'mutes', 'bans', 'blocked_words', 'allowed_chats',
+  'xp', 'levels', 'afk', 'custom_commands', 'faq', 'scheduled_messages',
+  'nightmode', 'antiraid', 'command_toggles', 'rate_limits',
+  'error_log', 'error_counts', 'ai_usage', 'games', 'game_scores',
+  'audit_log', 'owner_alerts', 'daily_stats', 'coins', 'purchases',
+  'user_titles', 'polls', 'poll_votes', 'birthdays', 'group_daily',
+];
+
+/**
+ * Löscht ALLE Bot-Daten (XP, Coins, Einstellungen, Logs, …) — die Tabellen
+ * bleiben bestehen, nur die Inhalte werden geleert. Session bleibt erhalten.
+ * Gibt die Anzahl geleerter Tabellen zurück.
+ */
+export async function wipeAllData() {
+  const db = getDb();
+  await db.batch(DATA_TABLES.map((t) => ({ sql: `DELETE FROM ${t}`, args: [] })), 'write');
+  // RAM-Puffer verwerfen — sonst schreibt der nächste Flush gelöschte Daten zurück
+  xpBuffer.clear();
+  groupDayBuffer.clear();
+  statBuffer.messages = 0;
+  statBuffer.commands = 0;
+  statBuffer.ai_calls = 0;
+  return DATA_TABLES.length;
+}
+
 // ── Schreib-Batching (XP + Tages-Counter) ──────────────────────────
 
 const xpBuffer = new Map(); // key "group|user" → { xp, messages, name }

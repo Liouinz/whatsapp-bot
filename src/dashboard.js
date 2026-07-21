@@ -9,12 +9,13 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { BOT_NAME, config } from './config.js';
 import { state, rolloverDay, requestPairingCode, forceRelink } from './state.js';
-import { getDb, dbRun, dbRows, flushBuffers } from './db.js';
-import { getRing, logError, logInfo } from './logger.js';
-import { getAiQuota } from './ai.js';
-import { registry, isCommandEnabled, setCommandEnabled } from './router.js';
+import { getDb, dbRun, dbRows, flushBuffers, wipeAllData } from './db.js';
+import { getRing, logError, logInfo, logWarn } from './logger.js';
+import { getAiQuota, initAiUsage } from './ai.js';
+import { registry, isCommandEnabled, setCommandEnabled, loadToggles, resetXpCache } from './router.js';
 import { listCustom, loadCustomCommands } from './commands/custom.js';
-import { invalidateSettings, invalidateBlockedWords, unmuteUser, unbanUser, clearWarnings, kickUser, banUser, audit } from './moderation.js';
+import { loadAfk } from './commands/afk.js';
+import { invalidateSettings, invalidateBlockedWords, loadMutes, unmuteUser, unbanUser, clearWarnings, kickUser, banUser, audit } from './moderation.js';
 import { botIsAdminInMeta } from './permissions.js';
 import { queueLength, sendText } from './queue.js';
 import { LOGIN_HTML, APP_HTML, APP_CSS, APP_JS, THEME_INIT_JS } from './dashboard-ui.js';
@@ -574,6 +575,43 @@ export function createDashboard() {
     res.json({ ok: true, message: 'Neustart in 2 Sekunden …' });
     logInfo('🔄 Neustart über das Panel ausgelöst.');
     setTimeout(() => process.exit(0), 2000);
+  });
+
+  // ── Danger-Zone: komplette Datenbank leeren ──
+  // Löscht ALLE Bot-Daten (XP, Coins, Einstellungen, Verwarnungen, Logs, …).
+  // Die WhatsApp-Session bleibt standardmäßig erhalten; mit includeSession
+  // wird zusätzlich die Verknüpfung zurückgesetzt (neuer QR nötig).
+  let lastWipeAt = 0;
+  api.post('/db/wipe', async (req, res) => {
+    if (String(req.body?.confirm || '') !== 'LÖSCHEN') {
+      return res.status(400).json({ error: 'Bestätigung fehlt — bitte exakt "LÖSCHEN" eingeben.' });
+    }
+    if (Date.now() - lastWipeAt < 30_000) {
+      return res.status(429).json({ error: 'Bitte kurz warten — der letzte Reset ist noch keine 30 Sekunden her.' });
+    }
+    lastWipeAt = Date.now();
+    try {
+      const tables = await wipeAllData();
+      // Alle RAM-Caches auf den frischen (leeren) Stand bringen
+      invalidateSettings();
+      invalidateBlockedWords();
+      resetXpCache();
+      groupCache = { at: 0, list: [] };
+      statsCache = { at: 0, data: null };
+      await Promise.all([loadToggles(), loadCustomCommands(), loadAfk(), loadMutes(), initAiUsage()]);
+      await audit('db-wipe', '', '', 'panel', `${tables} Tabellen geleert`);
+      logWarn(`🗑️ Datenbank über das Panel komplett geleert (${tables} Tabellen).`);
+
+      if (req.body?.includeSession) {
+        // Verknüpfung gleich mit zurücksetzen — startet den Socket frisch (neuer QR)
+        forceRelink().catch((err) => logError(err, 'panel.wipeRelink'));
+        return res.json({ ok: true, message: 'Alle Daten gelöscht. Die Verknüpfung wird zurückgesetzt — neuer QR-Code folgt gleich im Tab „QR".' });
+      }
+      return res.json({ ok: true, message: 'Alle Daten gelöscht. Die WhatsApp-Verknüpfung ist noch aktiv.' });
+    } catch (err) {
+      logError(err, 'panel.wipe');
+      res.status(500).json({ error: 'Löschen fehlgeschlagen — bitte Logs prüfen.' });
+    }
   });
 
   api.get('/config/export', async (req, res) => {

@@ -302,6 +302,8 @@ button.ghost{background:transparent;color:var(--muted)}
 button.ghost:hover{color:var(--text);box-shadow:none}
 button.danger{color:var(--bad);background:rgba(255,93,122,.08)}
 button.danger:hover{box-shadow:0 0 18px rgba(255,93,122,.15)}
+.danger-zone{border-color:rgba(255,93,122,.35)}
+.danger-zone h3{color:var(--bad)}
 button.small{padding:7px 12px;font-size:.82rem;border-radius:10px}
 button:disabled{opacity:.45;cursor:not-allowed;transform:none}
 
@@ -1338,6 +1340,30 @@ function renderSettings(){
       'Wenn das Panel ruckelt: Schnell-Modus wählen — gleiche Funktionen, ohne Glas-/Glüh-Effekte und Animationen. Gilt für dieses Gerät.'
     ]),
     fxRow
+  ]));
+
+  // Danger-Zone: komplette Datenbank leeren (mit Tipp-Bestätigung)
+  var wipeSession = h('input', { type:'checkbox' });
+  var wipeBtn = h('button', { class:'danger', onclick:function(){
+    var typed = prompt('⚠️ Das löscht ALLE Bot-Daten unwiderruflich: XP, Coins, Einstellungen, Verwarnungen, Custom-Befehle, Statistiken.\\n\\nZum Bestätigen exakt LÖSCHEN eintippen:');
+    if (typed === null) return;
+    if (typed !== 'LÖSCHEN') return toast('⚠️ Abgebrochen — Bestätigung war nicht exakt "LÖSCHEN".');
+    wipeBtn.disabled = true;
+    api('/db/wipe', { method:'POST', body:{ confirm:typed, includeSession:wipeSession.checked } })
+      .then(function(r){ toast('🗑️ ' + r.message); })
+      .catch(function(e){ toast('⚠️ ' + e.message); })
+      .then(function(){ wipeBtn.disabled = false; });
+  } }, ['🗑️ Komplette Datenbank löschen']);
+  content.appendChild(h('div', { class:'glass card danger-zone', style:'margin-top:12px' }, [
+    h('h3', {}, ['🚨 Danger-Zone']),
+    h('p', { class:'muted sm', style:'margin-bottom:10px' }, [
+      'Setzt den Bot komplett auf Null: alle XP, Coins, Einstellungen, Verwarnungen, eigenen Befehle und Statistiken werden gelöscht. Das lässt sich NICHT rückgängig machen — vorher oben per Export sichern!'
+    ]),
+    h('label', { class:'row', style:'gap:8px;margin-bottom:10px;cursor:pointer' }, [
+      wipeSession,
+      h('span', { class:'sm' }, ['Auch WhatsApp-Verknüpfung löschen (danach neu per QR koppeln)'])
+    ]),
+    wipeBtn
   ]));
 
   content.appendChild(h('div', { class:'glass card', style:'margin-top:12px' }, [

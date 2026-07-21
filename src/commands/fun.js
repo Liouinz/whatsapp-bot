@@ -176,6 +176,38 @@ const PFLICHT = [
   'Verrate dein aktuelles Handy-Hintergrundbild (Beschreibung reicht).',
 ];
 
+const ENTWEDER = [
+  ['Nie wieder Pizza', 'Nie wieder Schokolade'],
+  ['Immer 10 Minuten zu spät', 'Immer 1 Stunde zu früh'],
+  ['Gedanken lesen können', 'Fliegen können'],
+  ['Nur noch flüstern', 'Nur noch schreien'],
+  ['Ohne Internet leben', 'Ohne Musik leben'],
+  ['Immer Sommer', 'Immer Winter'],
+  ['Berühmt aber pleite', 'Reich aber unbekannt'],
+  ['In die Vergangenheit reisen', 'In die Zukunft reisen'],
+  ['Nie wieder Serien', 'Nie wieder Games'],
+  ['Jeden Tag dasselbe Essen', 'Nie zweimal dasselbe Essen'],
+  ['Mit Tieren sprechen', 'Alle Sprachen der Welt sprechen'],
+  ['Immer die Wahrheit sagen müssen', 'Nie mehr sprechen dürfen'],
+  ['Unsichtbar sein können', 'Sich teleportieren können'],
+  ['Ein Leben ohne Handy', 'Ein Leben ohne Freunde treffen'],
+  ['Immer Bahn fahren', 'Immer Fahrrad fahren'],
+];
+
+const HOROSKOP_BEREICHE = ['💼 Produktivität', '❤️ Beziehungen', '🍀 Glück', '⚡ Energie', '🧠 Fokus'];
+const HOROSKOP_TIPPS = [
+  'Sag heute einmal öfter Ja als sonst.',
+  'Räum eine kleine Sache auf — der Kopf dankt es dir.',
+  'Schreib der Person, an die du gerade denkst.',
+  'Trink mehr Wasser. Ernsthaft.',
+  'Mach heute einen kurzen Spaziergang ohne Handy.',
+  'Erledige die unangenehmste Aufgabe ZUERST.',
+  'Gönn dir was Kleines — du hast es dir verdient.',
+  'Frag heute jemanden, wie es ihm wirklich geht.',
+  'Leg das Handy eine Stunde früher weg als sonst.',
+  'Lach über dich selbst — mindestens einmal.',
+];
+
 const SSP = ['schere', 'stein', 'papier'];
 const SSP_ICON = { schere: '✂️', stein: '🪨', papier: '📄' };
 
@@ -368,6 +400,74 @@ export const funCommands = [
       return ctx.reply(
         `🔐 Dein Passwort (${len} Zeichen):\n\`\`\`${pw}\`\`\`\n⚠️ Am besten direkt kopieren und diese Nachricht löschen.`
       );
+    },
+  },
+  {
+    name: 'wer',
+    aliases: ['who'],
+    group: 'games',
+    desc: 'Wählt ein zufälliges Gruppenmitglied ("Wer muss abwaschen?")',
+    usage: '!wer [frage]',
+    groupOnly: true,
+    async run(ctx) {
+      const meta = await ctx.groupMeta();
+      const members = (meta?.participants || []).map((p) => p.id).filter(Boolean);
+      if (!members.length) return ctx.reply('⚠️ Konnte die Mitgliederliste gerade nicht laden — gleich nochmal versuchen.');
+      const chosen = pick(members);
+      const question = ctx.argText.trim();
+      const head = question ? `❓ *${question.slice(0, 120)}*\n` : '';
+      return ctx.reply(`${head}🎯 Das Schicksal wählt: ${ctx.mentionTag(chosen)}!`, [chosen]);
+    },
+  },
+  {
+    name: 'entweder',
+    aliases: ['wde', 'wouldyourather'],
+    group: 'games',
+    desc: 'Würdest du eher …? Entscheide dich!',
+    usage: '!entweder',
+    async run(ctx) {
+      const [a, b] = pick(ENTWEDER);
+      return ctx.reply(`🤔 *Würdest du eher …*\n\n1️⃣ ${a}\n— oder —\n2️⃣ ${b}\n\n_Antworte mit 1 oder 2 und verteidige deine Wahl!_`);
+    },
+  },
+  {
+    name: 'horoskop',
+    aliases: ['horoscope'],
+    group: 'games',
+    desc: 'Dein Tages-Horoskop (bleibt den ganzen Tag gleich)',
+    usage: '!horoskop',
+    async run(ctx) {
+      // Stabil pro Person + Tag — Nachfragen "würfelt" nicht neu
+      const day = new Date().toDateString();
+      const lines = HOROSKOP_BEREICHE.map((bereich) => {
+        const pct = stableHashPercent(`${ctx.sender}|${bereich}|${day}`);
+        const stars = '★'.repeat(1 + Math.round((pct / 100) * 4)).padEnd(5, '☆');
+        return `${bereich}: ${stars}`;
+      });
+      const tippIdx = stableHashPercent(`${ctx.sender}|tipp|${day}`) % HOROSKOP_TIPPS.length;
+      return ctx.reply(
+        `🔮 *Tages-Horoskop für ${ctx.senderName}*\n\n${lines.join('\n')}\n\n💡 _${HOROSKOP_TIPPS[tippIdx]}_`
+      );
+    },
+  },
+  {
+    name: 'emojify',
+    aliases: ['buchstaben'],
+    group: 'games',
+    desc: 'Verwandelt Text in große Emoji-Buchstaben',
+    usage: '!emojify hallo',
+    async run(ctx) {
+      const text = ctx.argText.trim().toLowerCase();
+      if (!text) return ctx.reply('ℹ️ Nutzung: `!emojify <text>` (max. 20 Zeichen)');
+      if (text.length > 20) return ctx.reply('⚠️ Bitte maximal 20 Zeichen.');
+      const DIGITS = ['0️⃣', '1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣'];
+      const out = [...text].map((ch) => {
+        if (ch >= 'a' && ch <= 'z') return String.fromCodePoint(0x1f1e6 + ch.charCodeAt(0) - 97);
+        if (ch >= '0' && ch <= '9') return DIGITS[Number(ch)];
+        if (ch === ' ') return '  ';
+        return ch;
+      }).join(' ');
+      return ctx.reply(out);
     },
   },
   {
