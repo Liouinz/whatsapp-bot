@@ -9,7 +9,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { BOT_NAME, config } from './config.js';
 import { state, rolloverDay, requestPairingCode, forceRelink } from './state.js';
-import { dbRun, dbRows, flushBuffers } from './db.js';
+import { getDb, dbRun, dbRows, flushBuffers } from './db.js';
 import { getRing, logError, logInfo } from './logger.js';
 import { getAiQuota } from './ai.js';
 import { registry, isCommandEnabled, setCommandEnabled } from './router.js';
@@ -468,9 +468,14 @@ export function createDashboard() {
     res.json({ logs: getRing().slice(-config.log.ringSize) });
   });
 
-  // Statistik-Daten für den Statistik-Tab (Charts + Top-Listen)
+  // Statistik-Daten für den Statistik-Tab (Charts + Top-Listen).
+  // Kurzer Cache: der Tab feuert sonst bei jedem Öffnen ~8 Turso-Queries.
+  let statsCache = { at: 0, data: null };
   api.get('/stats', async (req, res) => {
     try {
+      if (statsCache.data && Date.now() - statsCache.at < 30_000) {
+        return res.json(statsCache.data);
+      }
       const since14 = new Date(Date.now() - 13 * 86_400_000).toISOString().slice(0, 10);
       const since7 = new Date(Date.now() - 6 * 86_400_000).toISOString().slice(0, 10);
       const [daily, topGroups, richest, champions, counters] = await Promise.all([
@@ -494,7 +499,7 @@ export function createDashboard() {
           dbRows('SELECT COUNT(*) AS c FROM polls WHERE open = 1', []),
         ]),
       ]);
-      res.json({
+      const payload = {
         daily,
         topGroups,
         richest,
@@ -505,7 +510,9 @@ export function createDashboard() {
           birthdays: Number(counters[2][0]?.c || 0),
           polls: Number(counters[3][0]?.c || 0),
         },
-      });
+      };
+      statsCache = { at: Date.now(), data: payload };
+      res.json(payload);
     } catch (err) {
       logError(err, 'panel.stats');
       res.status(500).json({ error: 'Statistik konnte nicht geladen werden.' });
@@ -657,6 +664,7 @@ async function listGroups() {
   const rMap = new Map(raid.map((r) => [r.group_jid, r]));
 
   const list = [];
+  const upserts = [];
   for (const meta of metas) {
     // Admin-Status direkt aus der vorhandenen Metadata ableiten —
     // spart einen groupMetadata-Aufruf pro Gruppe und lernt LID-Mappings.
@@ -677,13 +685,15 @@ async function listGroups() {
       antiraid: Number(r.enabled) === 1,
       nightmode: { enabled: Number(n.enabled) === 1, start: n.start_hhmm || '22:00', end: n.end_hhmm || '07:00' },
     });
-    dbRun(
-      `INSERT INTO groups (jid, name, member_count, bot_is_admin, updated_at) VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(jid) DO UPDATE SET name = excluded.name, member_count = excluded.member_count,
-         bot_is_admin = excluded.bot_is_admin, updated_at = excluded.updated_at`,
-      [meta.id, meta.subject || '', meta.participants?.length || 0, admin ? 1 : 0, Date.now()]
-    ).catch(() => {});
+    upserts.push({
+      sql: `INSERT INTO groups (jid, name, member_count, bot_is_admin, updated_at) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(jid) DO UPDATE SET name = excluded.name, member_count = excluded.member_count,
+              bot_is_admin = excluded.bot_is_admin, updated_at = excluded.updated_at`,
+      args: [meta.id, meta.subject || '', meta.participants?.length || 0, admin ? 1 : 0, Date.now()],
+    });
   }
+  // Ein Batch-Roundtrip statt einem Write pro Gruppe (fire-and-forget)
+  if (upserts.length) getDb().batch(upserts, 'write').catch(() => {});
   list.sort((a, b) => a.name.localeCompare(b.name));
   groupCache = { at: Date.now(), list };
   return list;

@@ -27,12 +27,19 @@ async function waitForConnection() {
   return false;
 }
 
+let lastSentAt = 0;
+
 async function work() {
   if (running) return;
   running = true;
   try {
     while (queue.length) {
       const job = queue.shift();
+      // Jitter VOR dem Senden, gemessen am letzten Send: hält den Abstand
+      // zwischen Nachrichten (Spam-Schutz), lässt aber eine einzelne Antwort
+      // nach Leerlauf sofort raus — vorher hing hinter JEDEM Send ein Sleep.
+      const wait = lastSentAt + jitter() - Date.now();
+      if (wait > 0) await sleep(wait);
       let sent = false;
       for (let attempt = 0; attempt <= config.send.maxRetries && !sent; attempt++) {
         try {
@@ -42,6 +49,7 @@ async function work() {
           const result = await state.sock.sendMessage(job.jid, job.content, job.options);
           rolloverDay();
           state.sentToday++;
+          lastSentAt = Date.now();
           job.resolve?.(result);
           sent = true;
         } catch (err) {
@@ -54,7 +62,6 @@ async function work() {
           }
         }
       }
-      await sleep(jitter());
     }
   } finally {
     running = false;

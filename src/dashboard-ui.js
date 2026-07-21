@@ -85,6 +85,11 @@ export const THEME_INIT_JS =
   "(function(){try{var d=document.documentElement;" +
   "var t=localStorage.getItem('theme');if(t&&t!=='dark')d.setAttribute('data-theme',t);" +
   "var a=localStorage.getItem('accent');if(a&&a!=='cyan')d.setAttribute('data-accent',a);" +
+  // Schnell-Modus: auf schwachen Geräten (wenige Kerne / wenig RAM) Effekte
+  // automatisch reduzieren — manuell übersteuerbar unter "Extras".
+  "var f=localStorage.getItem('fx');" +
+  "var low=(navigator.hardwareConcurrency||8)<=4||(navigator.deviceMemory||8)<=4;" +
+  "if(f==='lite'||(f!=='full'&&low))d.setAttribute('data-fx','lite');" +
   "}catch(e){}})();";
 
 export const APP_CSS = `
@@ -154,6 +159,19 @@ body:before{
   border-radius:var(--radius-s);
 }
 .list-item.glass:hover,.member-row.glass:hover{border-color:var(--line2)}
+
+/* ── Schnell-Modus (data-fx="lite"): für schwache Geräte — Effekte aus,
+   das Layout bleibt identisch. Größte Gewinne: kein backdrop-filter,
+   keine Aurora-Animation, kein Sternen-Canvas (JS überspringt ihn). ── */
+[data-fx="lite"] .glass{
+  backdrop-filter:none;-webkit-backdrop-filter:none;
+  background:var(--surface);
+}
+[data-fx="lite"] .aurora{filter:blur(38px);opacity:.3}
+[data-fx="lite"] .aurora i{animation:none!important}
+[data-fx="lite"] body:before{display:none}
+[data-fx="lite"] .logo-dot{animation:none;box-shadow:0 0 10px var(--accent)}
+[data-fx="lite"] .login-ring .ring{animation:none}
 
 /* ── Login ── */
 .login-wrap{min-height:100dvh;display:grid;place-items:center;padding:24px;position:relative;z-index:1;perspective:900px}
@@ -466,9 +484,11 @@ applyTheme(currentTheme());
 var fx = document.getElementById('fx');
 var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 var finePointer = window.matchMedia('(pointer: fine)').matches;
+// Schnell-Modus (theme-init.js setzt das Attribut vor dem ersten Paint)
+var liteFx = document.documentElement.getAttribute('data-fx') === 'lite';
 // Sternen-Canvas nur im dunklen Theme sinnvoll (auf Hell unsichtbar → CSS blendet es aus,
 // also gar nicht erst rechnen lassen)
-if (fx && !reduced && currentTheme() !== 'nature' && window.matchMedia('(min-width: 900px)').matches) {
+if (fx && !reduced && !liteFx && currentTheme() !== 'nature' && window.matchMedia('(min-width: 900px)').matches) {
   var g = fx.getContext('2d'); var raf = 0; var t = 0; var lastFrame = 0;
   function size(){ fx.width = innerWidth; fx.height = Math.min(innerHeight, 950); }
   function draw(now){
@@ -497,7 +517,7 @@ if (fx && !reduced && currentTheme() !== 'nature' && window.matchMedia('(min-wid
 }
 
 /* ── 3D-Tilt für Kacheln (nur Maus, respektiert reduced-motion) ── */
-if (finePointer && !reduced) {
+if (finePointer && !reduced && !liteFx) {
   var tiltEl = null;
   function resetTilt(el){
     el.style.setProperty('--rx', '0deg');
@@ -675,11 +695,23 @@ if (logoutBtn) logoutBtn.addEventListener('click', function(){
 });
 
 /* ── Live-Status via SSE ── */
+var lastStatusJson = '';
 function applyStatus(st){
   status = st;
-  if (current === 'home') updateHome();
+  if (document.hidden) return; // Tab im Hintergrund: kein DOM-Update nötig
+  // Nichts geändert (Uptime/Queue ausgenommen — die zählt eh jede Sekunde)?
+  // Dann das teure Neu-Rendern überspringen.
+  var sig = JSON.stringify([st.connection, st.stopped, st.qrAvailable, st.sentToday,
+    st.commandsToday, st.ai, st.groups, st.queue, st.activity]);
+  var changed = sig !== lastStatusJson;
+  lastStatusJson = sig;
+  if (current === 'home') updateHome(changed);
   if (current === 'qr') loadQr();
 }
+// Beim Zurückkehren in den Tab sofort frisch zeichnen
+document.addEventListener('visibilitychange', function(){
+  if (!document.hidden && status) { lastStatusJson = ''; applyStatus(status); }
+});
 try {
   var es = new EventSource('/api/events');
   es.onmessage = function(ev){ try { applyStatus(JSON.parse(ev.data)); } catch(e){} };
@@ -726,7 +758,7 @@ function renderHome(){
 function statCard(title, id){
   return h('div', { class:'glass card hover' }, [ h('h3', {}, [title]), h('div', { class:'stat', id:id }, ['0']) ]);
 }
-function updateHome(){
+function updateHome(changed){
   if (!status) return;
   var dot = document.getElementById('sDot');
   if (!dot) return;
@@ -735,6 +767,7 @@ function updateHome(){
   document.getElementById('sTitle').textContent = cl[1];
   document.getElementById('sSub').textContent =
     'Uptime ' + fmtUptime(status.uptimeMs) + ' · Warteschlange ' + status.queue;
+  if (changed === false) return; // Zähler & Kurve nur anfassen, wenn sich etwas geändert hat
   tween(document.getElementById('stGroups'), status.groups == null ? 0 : status.groups);
   tween(document.getElementById('stSent'), status.sentToday);
   tween(document.getElementById('stCmds'), status.commandsToday);
@@ -745,6 +778,10 @@ function updateHome(){
 function drawSpark(data){
   var box = document.getElementById('sparkBox');
   if (!box) return;
+  // Unveränderte Daten → SVG nicht neu bauen (spart Layout-Arbeit im 3s-Takt)
+  var sig = data.join(',');
+  if (box._sig === sig) return;
+  box._sig = sig;
   var w = 600, hh = 58, max = Math.max.apply(null, data.concat([1]));
   var pts = data.map(function(v, i){
     return (i * (w / (data.length - 1 || 1))).toFixed(1) + ',' + (hh - 4 - (v / max) * (hh - 12)).toFixed(1);
@@ -909,6 +946,11 @@ function loadQr(){
   var pairBox = document.getElementById('pairBox');
   if (!box) return;
   api('/qr').then(function(res){
+    // Das QR-Bild ist eine große Data-URL — nur neu rendern, wenn sich wirklich
+    // etwas geändert hat. Vorher wurde das Bild alle 3 s neu decodiert (Lag!).
+    var sig = res.connection + '|' + (res.updatedAt || 0) + '|' + (res.qr ? 1 : 0) + '|' + (res.pairingCode || '');
+    if (box._sig === sig) return;
+    box._sig = sig;
     box.innerHTML = '';
     if (res.connection === 'open') {
       box.appendChild(h('div', {}, [
@@ -1273,6 +1315,29 @@ function renderSettings(){
     h('h3', {}, ['🎨 Akzentfarbe']),
     h('p', { class:'muted sm', style:'margin-bottom:10px' }, ['Gilt für dieses Gerät (gespeichert im Browser).']),
     accRow
+  ]));
+
+  // Effekte: volle Optik vs. Schnell-Modus für schwache Geräte.
+  // Auf wenig Kernen/RAM wird automatisch "Schnell" gewählt — hier übersteuerbar.
+  var fxRow = h('div', { class:'row wrap' });
+  [
+    { id:'full', label:'✨ Volle Effekte' },
+    { id:'lite', label:'⚡ Schnell (für schwache Geräte)' }
+  ].forEach(function(fm){
+    fxRow.appendChild(h('button', {
+      class: 'small' + ((liteFx ? 'lite' : 'full') === fm.id ? '' : ' ghost'),
+      onclick:function(){
+        try { localStorage.setItem('fx', fm.id); } catch(e){}
+        location.reload(); // Canvas/Tilt sauber neu initialisieren
+      }
+    }, [fm.label]));
+  });
+  content.appendChild(h('div', { class:'glass card', style:'margin-top:12px' }, [
+    h('h3', {}, ['⚡ Leistung']),
+    h('p', { class:'muted sm', style:'margin-bottom:10px' }, [
+      'Wenn das Panel ruckelt: Schnell-Modus wählen — gleiche Funktionen, ohne Glas-/Glüh-Effekte und Animationen. Gilt für dieses Gerät.'
+    ]),
+    fxRow
   ]));
 
   content.appendChild(h('div', { class:'glass card', style:'margin-top:12px' }, [
