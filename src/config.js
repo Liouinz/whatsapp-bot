@@ -19,8 +19,12 @@ export const OWNER_NUMBERS = (process.env.OWNER_NUMBERS || '')
 export const config = {
   // ── Sende-Queue ────────────────────────────────────────────────
   send: {
-    jitterMinMs: 800, // zufällige Pause zwischen Sendungen (min)
-    jitterMaxMs: 2500, // zufällige Pause zwischen Sendungen (max)
+    // Sofort-Antwort: KEINE künstliche Pause vor einer Antwort. Der Jitter
+    // greift dank queue.js nur noch als Mindestabstand zwischen zwei DIREKT
+    // aufeinanderfolgenden Sends (Burst-Schutz gegen WhatsApp-Spam-Flag) —
+    // eine einzelne Befehlsantwort nach Leerlauf geht ohne Verzögerung raus.
+    jitterMinMs: 0, // kein Sockel mehr
+    jitterMaxMs: 250, // nur noch ein winziger Abstand bei Nachrichten-Bursts
     maxRetries: 2, // Wiederholungen pro fehlgeschlagenem Send
     retryBackoffMs: 1500,
   },
