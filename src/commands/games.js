@@ -5,7 +5,7 @@
 import { PREFIX, config } from '../config.js';
 import { dbRun, dbRows, bufferXp } from '../db.js';
 import { resolveLid } from '../permissions.js';
-import { addCoins } from './economy.js';
+import { earnCoins } from './economy.js';
 
 // Laufende Spiele pro Chat: Map chatJid → { quiz?, raten? }
 const active = new Map();
@@ -66,7 +66,7 @@ async function addWin(chatJid, userJid, game, name, { xp = 0, coins = 0 } = {}) 
     [chatJid, user, game, name || '']
   ).catch(() => {});
   if (xp > 0) bufferXp(chatJid, user, xp, name);
-  if (coins > 0) await addCoins(user, coins, name).catch(() => {});
+  if (coins > 0) await earnCoins(user, coins, name).catch(() => {});
 }
 
 // ── Galgenmännchen ─────────────────────────────────────────────────

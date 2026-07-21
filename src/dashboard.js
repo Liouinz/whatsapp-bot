@@ -16,6 +16,7 @@ import { registry, isCommandEnabled, setCommandEnabled, loadToggles, resetXpCach
 import { listCustom, loadCustomCommands } from './commands/custom.js';
 import { loadAfk } from './commands/afk.js';
 import { loadActiveMillionaire } from './commands/millionaer.js';
+import { resetBoostCache } from './boosts.js';
 import { invalidateSettings, invalidateBlockedWords, loadMutes, unmuteUser, unbanUser, clearWarnings, kickUser, banUser, audit } from './moderation.js';
 import { botIsAdminInMeta } from './permissions.js';
 import { queueLength, sendText } from './queue.js';
@@ -597,6 +598,7 @@ export function createDashboard() {
       invalidateSettings();
       invalidateBlockedWords();
       resetXpCache();
+      resetBoostCache();
       groupCache = { at: 0, list: [] };
       statsCache = { at: 0, data: null };
       await Promise.all([loadToggles(), loadCustomCommands(), loadAfk(), loadMutes(), initAiUsage(), loadActiveMillionaire()]);

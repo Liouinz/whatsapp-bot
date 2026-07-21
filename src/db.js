@@ -193,6 +193,16 @@ const TABLES = [
   `CREATE TABLE IF NOT EXISTS millionaire_daily (
      user_jid TEXT PRIMARY KEY, day TEXT
    )`,
+
+  // Shop 2.0: Inventar (Besitz pro Nutzer) + aktive Boost-Effekte
+  `CREATE TABLE IF NOT EXISTS inventory (
+     user_jid TEXT, item_id TEXT, qty INTEGER DEFAULT 0,
+     PRIMARY KEY (user_jid, item_id)
+   )`,
+  `CREATE TABLE IF NOT EXISTS user_boosts (
+     user_jid TEXT, type TEXT, mult REAL DEFAULT 1, expires_at INTEGER DEFAULT 0,
+     PRIMARY KEY (user_jid, type)
+   )`,
 ];
 
 // Spalten, die nach dem ersten Deploy dazukamen — werden per ALTER TABLE nachgezogen,
@@ -267,7 +277,7 @@ const DATA_TABLES = [
   'error_log', 'error_counts', 'ai_usage', 'games', 'game_scores',
   'audit_log', 'owner_alerts', 'daily_stats', 'coins', 'purchases',
   'user_titles', 'polls', 'poll_votes', 'birthdays', 'group_daily',
-  'millionaire_games', 'millionaire_daily',
+  'millionaire_games', 'millionaire_daily', 'inventory', 'user_boosts',
 ];
 
 /**

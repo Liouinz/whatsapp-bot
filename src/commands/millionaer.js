@@ -9,7 +9,7 @@
 import { PREFIX } from '../config.js';
 import { dbRun, dbRows, bufferXp, todayKey } from '../db.js';
 import { resolveLid } from '../permissions.js';
-import { addCoins } from './economy.js';
+import { earnCoins } from './economy.js';
 import { MILLIONAIRE_QUESTIONS, pickQuestion } from '../data/millionaire-questions.js';
 
 // Gewinnstufen (Coins). Sicherheitsstufen: Index 4 (Frage 5) und 9 (Frage 10).
@@ -106,7 +106,7 @@ function board(s, note = '') {
 }
 
 async function payout(s, coins, xp) {
-  if (coins > 0) await addCoins(s.userJid, coins, s.name).catch(() => {});
+  if (coins > 0) await earnCoins(s.userJid, coins, s.name).catch(() => {});
   if (xp > 0) bufferXp(s.chatJid, s.userJid, xp, s.name);
   await dbRun(
     `INSERT INTO game_scores (group_jid, user_jid, game, wins, name) VALUES (?, ?, 'millionaer', 1, ?)

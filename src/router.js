@@ -27,6 +27,8 @@ import { toolCommands } from './commands/tools.js';
 import { gameCommands } from './commands/games.js';
 import { millionaireCommands } from './commands/millionaer.js';
 import { economyCommands } from './commands/economy.js';
+import { itemCommands } from './commands/items.js';
+import { getBoostMult } from './boosts.js';
 import { funCommands } from './commands/fun.js';
 import { pollCommands } from './commands/polls.js';
 import { birthdayCommands } from './commands/birthdays.js';
@@ -51,6 +53,7 @@ export const registry = [
   ...millionaireCommands,
   ...wordleCommands,
   ...funCommands,
+  ...itemCommands,
   ...adminCommands,
 ];
 
@@ -179,9 +182,11 @@ async function grantXp(chatJid, userJid, name, settings) {
     xpTotals.set(key, rows.length ? Number(rows[0].xp) : 0);
     if (xpTotals.size > 5000) xpTotals.delete(xpTotals.keys().next().value); // sonst Speicherleck
   }
-  const amount =
+  const baseAmount =
     config.xp.perMessageMin +
     Math.floor(Math.random() * (config.xp.perMessageMax - config.xp.perMessageMin + 1));
+  // Aktiven XP-Boost anwenden (Item-Effekt); getBoostMult cached im RAM.
+  const amount = Math.round(baseAmount * (await getBoostMult(user, 'xp').catch(() => 1)));
   const before = xpTotals.get(key);
   const after = before + amount;
   xpTotals.set(key, after);

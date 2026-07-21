@@ -5,21 +5,7 @@ import { PREFIX, config } from '../config.js';
 import { dbRun, dbRows, todayKey } from '../db.js';
 import { resolveLid } from '../permissions.js';
 import { audit } from '../moderation.js';
-
-// ── Shop-Katalog (kosmetische Titel — bewusst im Code, kein Admin-Pflegeaufwand) ──
-
-export const SHOP_ITEMS = [
-  { id: 'title_legende', title: '🏆 Legende', price: 5000 },
-  { id: 'title_vip', title: '💎 VIP', price: 3000 },
-  { id: 'title_nachtschwaermer', title: '🌙 Nachtschwärmer', price: 1500 },
-  { id: 'title_plaudertasche', title: '💬 Plaudertasche', price: 1200 },
-  { id: 'title_glueckspilz', title: '🍀 Glückspilz', price: 2000 },
-  { id: 'title_quizmaster', title: '🧠 Quizmaster', price: 2500 },
-  { id: 'title_highroller', title: '🎰 High Roller', price: 4000 },
-  { id: 'title_fruehaufsteher', title: '🌅 Frühaufsteher', price: 1000 },
-  { id: 'title_kaffeejunkie', title: '☕ Kaffee-Junkie', price: 800 },
-  { id: 'title_meme_lord', title: '😂 Meme-Lord', price: 1800 },
-];
+import { getBoostMult } from '../boosts.js';
 
 // ── Kern-Helfer ────────────────────────────────────────────────────
 
@@ -54,8 +40,9 @@ export async function addCoins(userJid, amount, name = '') {
 }
 
 /** Coins abbuchen — false, wenn das Guthaben nicht reicht (atomar via WHERE). */
-async function takeCoins(userJid, amount) {
+export async function takeCoins(userJid, amount) {
   const user = resolveLid(userJid);
+  await getWallet(user); // sicherstellen, dass ein Konto existiert
   const res = await dbRun(
     'UPDATE coins SET balance = balance - ? WHERE user_jid = ? AND balance >= ?',
     [amount, user, amount]
@@ -63,7 +50,20 @@ async function takeCoins(userJid, amount) {
   return Number(res.rowsAffected) > 0;
 }
 
-function fmtCoins(n) {
+/**
+ * VERDIENTE Coins gutschreiben — wendet den aktiven Coin-Boost des Nutzers an.
+ * Nur für echtes Einkommen (Daily, Skill-Spiele) verwenden, NICHT für
+ * Überweisungen, Geschenke oder Glücksspiel-Auszahlungen.
+ * Rückgabe: tatsächlich gutgeschriebener Betrag (inkl. Boost).
+ */
+export async function earnCoins(userJid, amount, name = '') {
+  const mult = await getBoostMult(resolveLid(userJid), 'coins').catch(() => 1);
+  const total = Math.round(amount * mult);
+  await addCoins(userJid, total, name);
+  return total;
+}
+
+export function fmtCoins(n) {
   return `${Number(n).toLocaleString('de-DE')} 🪙`;
 }
 
@@ -73,14 +73,7 @@ function parseAmount(arg, balance) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-/** Gekaufte Titel eines Nutzers (fürs Profil und !titel). */
-export async function ownedTitles(userJid) {
-  const rows = await dbRows('SELECT item_id FROM purchases WHERE user_jid = ?', [resolveLid(userJid)]);
-  const owned = new Set(rows.map((r) => r.item_id));
-  return SHOP_ITEMS.filter((i) => owned.has(i.id));
-}
-
-/** Aktiver Titel (oder null). */
+/** Aktiver Titel (oder null). Bleibt hier, weil Router & Profil ihn nutzen. */
 export async function activeTitle(userJid) {
   const rows = await dbRows('SELECT title FROM user_titles WHERE user_jid = ?', [resolveLid(userJid)]);
   return rows.length ? rows[0].title : null;
@@ -124,7 +117,10 @@ export const economyCommands = [
         config.economy.dailyMin +
         Math.floor(Math.random() * (config.economy.dailyMax - config.economy.dailyMin + 1));
       const bonus = Math.min((streak - 1) * config.economy.streakBonus, config.economy.streakBonusMax);
-      const total = base + bonus;
+      const base_total = base + bonus;
+      // Aktiven Coin-Boost anwenden (Item-Effekt)
+      const mult = await getBoostMult(resolveLid(ctx.sender), 'coins').catch(() => 1);
+      const total = Math.round(base_total * mult);
       await dbRun(
         `UPDATE coins SET balance = balance + ?, total_earned = total_earned + ?,
          last_daily = ?, streak = ?, name = ? WHERE user_jid = ?`,
@@ -133,6 +129,7 @@ export const economyCommands = [
       let text = `💰 *Tagesgeld abgeholt!* +${fmtCoins(total)}`;
       if (bonus > 0) text += `\n🔥 Streak-Bonus: Tag *${streak}* in Folge (+${bonus})`;
       else text += `\n🔥 Streak gestartet — hol es morgen wieder ab für Bonus-Coins!`;
+      if (mult > 1) text += `\n⚡ Coin-Boost aktiv: ×${mult.toFixed(2)}`;
       text += `\n💳 Kontostand: *${fmtCoins(Number(wallet.balance) + total)}*`;
       return ctx.reply(text);
     },
@@ -286,77 +283,6 @@ export const economyCommands = [
         text += `😬 Daneben — ${fmtCoins(amount)} verloren.`;
       }
       return ctx.reply(text);
-    },
-  },
-  {
-    name: 'shop',
-    group: 'economy',
-    desc: 'Titel-Shop — Coins gegen Style',
-    usage: '!shop',
-    async run(ctx) {
-      const owned = new Set((await ownedTitles(ctx.sender)).map((i) => i.id));
-      const lines = SHOP_ITEMS.map((item, i) => {
-        const tag = owned.has(item.id) ? ' ✅' : '';
-        return `${i + 1}. ${item.title} — ${fmtCoins(item.price)}${tag}`;
-      });
-      return ctx.reply(
-        `🛍️ *Titel-Shop*\n${lines.join('\n')}\n\n` +
-          `Kaufen: \`${PREFIX}kaufen <nr>\` · Anlegen: \`${PREFIX}titel <nr>\`\n` +
-          `Dein Titel erscheint in \`${PREFIX}profil\` und bei Level-Ups.`
-      );
-    },
-  },
-  {
-    name: 'kaufen',
-    aliases: ['buy'],
-    group: 'economy',
-    desc: 'Kauft einen Titel aus dem Shop',
-    usage: '!kaufen <nr>',
-    async run(ctx) {
-      const idx = parseInt(ctx.args[0] || '', 10) - 1;
-      const item = SHOP_ITEMS[idx];
-      if (!item) return ctx.reply(`ℹ️ Nutzung: \`${PREFIX}kaufen <nr>\` — Nummern zeigt \`${PREFIX}shop\``);
-      const user = resolveLid(ctx.sender);
-      const already = await dbRows('SELECT 1 FROM purchases WHERE user_jid = ? AND item_id = ?', [user, item.id]);
-      if (already.length) return ctx.reply(`ℹ️ ${item.title} gehört dir schon! Anlegen: \`${PREFIX}titel ${idx + 1}\``);
-      if (!(await takeCoins(ctx.sender, item.price))) {
-        const wallet = await getWallet(ctx.sender, ctx.senderName);
-        return ctx.reply(`⚠️ ${item.title} kostet ${fmtCoins(item.price)} — du hast nur ${fmtCoins(wallet.balance)}.`);
-      }
-      await dbRun('INSERT OR IGNORE INTO purchases (user_jid, item_id, created_at) VALUES (?, ?, ?)', [user, item.id, Date.now()]);
-      await dbRun(
-        `INSERT INTO user_titles (user_jid, title) VALUES (?, ?)
-         ON CONFLICT(user_jid) DO UPDATE SET title = excluded.title`,
-        [user, item.title]
-      );
-      return ctx.reply(`🎉 Gekauft und direkt angelegt: *${item.title}*\nZeig ihn her mit \`${PREFIX}profil\`!`);
-    },
-  },
-  {
-    name: 'titel',
-    group: 'economy',
-    desc: 'Wechselt deinen aktiven Titel',
-    usage: '!titel <nr> | aus',
-    async run(ctx) {
-      const user = resolveLid(ctx.sender);
-      if (/^(aus|off|keiner)$/i.test(ctx.args[0] || '')) {
-        await dbRun('DELETE FROM user_titles WHERE user_jid = ?', [user]);
-        return ctx.reply('✅ Titel abgelegt — schlicht steht dir auch.');
-      }
-      const owned = await ownedTitles(ctx.sender);
-      if (!owned.length) return ctx.reply(`ℹ️ Du besitzt noch keinen Titel — schau in den \`${PREFIX}shop\`!`);
-      const idx = parseInt(ctx.args[0] || '', 10) - 1;
-      const item = SHOP_ITEMS[idx];
-      if (!item || !owned.some((o) => o.id === item.id)) {
-        const list = owned.map((o) => `${SHOP_ITEMS.indexOf(o) + 1}. ${o.title}`).join('\n');
-        return ctx.reply(`ℹ️ *Deine Titel:*\n${list}\n\nAnlegen: \`${PREFIX}titel <nr>\` · Ablegen: \`${PREFIX}titel aus\``);
-      }
-      await dbRun(
-        `INSERT INTO user_titles (user_jid, title) VALUES (?, ?)
-         ON CONFLICT(user_jid) DO UPDATE SET title = excluded.title`,
-        [user, item.title]
-      );
-      return ctx.reply(`✅ Titel angelegt: *${item.title}*`);
     },
   },
   {
