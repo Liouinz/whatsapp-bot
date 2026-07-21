@@ -36,6 +36,25 @@ export function invalidateSettings(groupJid) {
   else settingsCache.clear();
 }
 
+// ── Wort-Blacklist (RAM-Cache — lief vorher als DB-Query bei JEDER Nachricht) ──
+
+const wordsCache = new Map(); // groupJid → { words: [lowercase], at }
+const WORDS_CACHE_MS = 5 * 60_000;
+
+async function getBlockedWords(groupJid) {
+  const cached = wordsCache.get(groupJid);
+  if (cached && Date.now() - cached.at < WORDS_CACHE_MS) return cached.words;
+  const rows = await dbRows('SELECT word FROM blocked_words WHERE group_jid = ?', [groupJid]);
+  const words = rows.map((r) => String(r.word).toLowerCase());
+  wordsCache.set(groupJid, { words, at: Date.now() });
+  return words;
+}
+
+export function invalidateBlockedWords(groupJid) {
+  if (groupJid) wordsCache.delete(groupJid);
+  else wordsCache.clear();
+}
+
 // ── Warnungen + Eskalation ─────────────────────────────────────────
 
 /** Aktive (nicht abgelaufene) Warnungen eines Nutzers zählen. */
@@ -192,9 +211,6 @@ export async function checkAutoMod(msg, groupJid, senderIds, text) {
       return { kind: 'muted', deleted: true, untilText: fmtUntil(mutedUntil) };
     }
 
-    // Admins & Owner sind von Auto-Mod ausgenommen
-    if (await isUserAdmin(groupJid, senderIds)) return null;
-
     let violation = null;
 
     // 2) Anti-Link
@@ -202,17 +218,19 @@ export async function checkAutoMod(msg, groupJid, senderIds, text) {
       violation = { kind: 'link', reason: 'Link gepostet (Anti-Link aktiv)' };
     }
 
-    // 3) Wort-Blacklist
+    // 3) Wort-Blacklist (RAM-Cache — kein DB-Roundtrip pro Nachricht mehr)
     if (!violation && Number(settings.blacklist_on) && text) {
-      const words = await dbRows('SELECT word FROM blocked_words WHERE group_jid = ?', [groupJid]);
-      const lower = text.toLowerCase();
-      const hit = words.find((w) => lower.includes(String(w.word).toLowerCase()));
-      if (hit) violation = { kind: 'word', reason: `verbotenes Wort ("${hit.word}")` };
+      const words = await getBlockedWords(groupJid);
+      if (words.length) {
+        const lower = text.toLowerCase();
+        const hit = words.find((w) => lower.includes(w));
+        if (hit) violation = { kind: 'word', reason: `verbotenes Wort ("${hit}")` };
+      }
     }
 
     // 4) Anti-Spam (viele Nachrichten in kurzer Zeit)
     if (!violation && Number(settings.antispam)) {
-      const key = `${groupJid}|${senderIds[0]}`;
+      const key = `${groupJid}|${resolveLid(senderIds[0])}`; // stabile Form — LID & PN zählen zusammen
       const now = Date.now();
       const arr = (spamTracker.get(key) || []).filter((t) => now - t < 10_000);
       arr.push(now);
@@ -225,6 +243,10 @@ export async function checkAutoMod(msg, groupJid, senderIds, text) {
     }
 
     if (!violation) return null;
+
+    // Admins & Owner sind von Auto-Mod ausgenommen — der (teure) Metadata-Check
+    // läuft bewusst erst NACH der Verstoß-Erkennung, also nur im seltenen Fall.
+    if (await isUserAdmin(groupJid, senderIds)) return null;
 
     const deleted = await deleteMessage(msg, groupJid);
     const warned = await addWarning(groupJid, senderIds[0], violation.reason, 'auto');

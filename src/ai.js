@@ -44,13 +44,14 @@ function countCall() {
 
 async function callGemini(prompt) {
   const key = (process.env.GEMINI_API_KEY || '').trim();
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.ai.model}:generateContent?key=${key}`;
+  // Key im Header statt in der URL — URLs landen in Fehlermeldungen und Logs
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.ai.model}:generateContent`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.ai.timeoutMs);
   try {
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: { maxOutputTokens: 400, temperature: 0.6 },

@@ -153,6 +153,7 @@ async function grantXp(chatJid, userJid, name, settings) {
   if (!xpTotals.has(key)) {
     const rows = await dbRows('SELECT xp FROM xp WHERE group_jid = ? AND user_jid = ?', [chatJid, user]);
     xpTotals.set(key, rows.length ? Number(rows[0].xp) : 0);
+    if (xpTotals.size > 5000) xpTotals.delete(xpTotals.keys().next().value); // sonst Speicherleck
   }
   const amount =
     config.xp.perMessageMin +
@@ -199,6 +200,7 @@ async function checkSlowmode(msg, chatJid, senderIds, settings, senderName) {
   } catch { /* ohne Admin-Rechte bleibt sie eben stehen */ }
   if (now - (slowmodeHinted.get(key) || 0) > 60_000) {
     slowmodeHinted.set(key, now);
+    if (slowmodeHinted.size > 3000) slowmodeHinted.delete(slowmodeHinted.keys().next().value);
     const wait = Math.ceil((secs * 1000 - (now - last)) / 1000);
     await sendText(chatJid, `🐢 *${senderName}*, hier ist Slowmode aktiv — bitte noch ${wait} s warten.`);
   }
@@ -223,6 +225,7 @@ async function notifyAfkMentions(msg, chatJid) {
     const key = `${chatJid}|${afk.user}`;
     if (Date.now() - (afkNoticeCooldown.get(key) || 0) < 2 * 60_000) continue;
     afkNoticeCooldown.set(key, Date.now());
+    if (afkNoticeCooldown.size > 3000) afkNoticeCooldown.delete(afkNoticeCooldown.keys().next().value);
     await replyTo(msg, `💤 Diese Person ist gerade *AFK* (seit ${fmtSince(afk.since)}): _${afk.reason}_`);
   }
 }

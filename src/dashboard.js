@@ -14,7 +14,7 @@ import { getRing, logError, logInfo } from './logger.js';
 import { getAiQuota } from './ai.js';
 import { registry, isCommandEnabled, setCommandEnabled } from './router.js';
 import { listCustom, loadCustomCommands } from './commands/custom.js';
-import { invalidateSettings, unmuteUser, unbanUser, clearWarnings, kickUser, banUser, audit } from './moderation.js';
+import { invalidateSettings, invalidateBlockedWords, unmuteUser, unbanUser, clearWarnings, kickUser, banUser, audit } from './moderation.js';
 import { botIsAdminInMeta } from './permissions.js';
 import { queueLength, sendText } from './queue.js';
 import { LOGIN_HTML, APP_HTML, APP_CSS, APP_JS, THEME_INIT_JS } from './dashboard-ui.js';
@@ -610,6 +610,7 @@ export function createDashboard() {
         }
       }
       invalidateSettings();
+      invalidateBlockedWords();
       await loadCustomCommands();
       await audit('config-import', '', '', 'panel', `${imported} Zeilen`);
       res.json({ ok: true, imported });

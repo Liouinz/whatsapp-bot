@@ -6,7 +6,7 @@ import { dbRun, dbRows, flushBuffers } from '../db.js';
 import { state } from '../state.js';
 import {
   addWarning, activeWarnings, clearWarnings, muteUser, unmuteUser,
-  kickUser, banUser, unbanUser, invalidateSettings, audit,
+  kickUser, banUser, unbanUser, invalidateSettings, invalidateBlockedWords, audit,
 } from '../moderation.js';
 import { botIsAdmin, adminDebugInfo, resolveLid, isProtectedTarget, getGroupMeta } from '../permissions.js';
 import { buildWeeklyReport } from '../scheduler.js';
@@ -366,6 +366,7 @@ export const adminCommands = [
       const word = ctx.argText.trim().toLowerCase();
       if (!word) return ctx.reply('ℹ️ Nutzung: `!addword <wort>`');
       await dbRun('INSERT OR IGNORE INTO blocked_words (group_jid, word) VALUES (?, ?)', [ctx.chatJid, word]);
+      invalidateBlockedWords(ctx.chatJid);
       return ctx.reply(`✅ „${word}" steht jetzt auf der Blacklist dieser Gruppe.`);
     },
   },
@@ -380,6 +381,7 @@ export const adminCommands = [
       const word = ctx.argText.trim().toLowerCase();
       if (!word) return ctx.reply('ℹ️ Nutzung: `!delword <wort>`');
       await dbRun('DELETE FROM blocked_words WHERE group_jid = ? AND word = ?', [ctx.chatJid, word]);
+      invalidateBlockedWords(ctx.chatJid);
       return ctx.reply(`✅ „${word}" wurde von der Blacklist entfernt.`);
     },
   },
