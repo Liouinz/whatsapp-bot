@@ -5,7 +5,7 @@
 import { PREFIX, config } from './config.js';
 import { state, rolloverDay, bumpActivity } from './state.js';
 import { dbRows, dbRun, bufferXp, bufferStat, bufferGroupMessage, xpToLevel } from './db.js';
-import { replyTo, sendText } from './queue.js';
+import { replyTo, sendText, wasSentByBot } from './queue.js';
 import { logError } from './logger.js';
 import {
   senderCandidates, senderJid, isOwner, isUserAdmin, getGroupMeta, resolveLid,
@@ -326,7 +326,15 @@ export async function handleUpsert({ messages, type }) {
 }
 
 async function handleMessage(msg) {
-  if (!msg?.message || msg.key?.fromMe) return;
+  if (!msg?.message) return;
+
+  // Der Bot läuft auf der eigenen Nummer des Owners — dessen Nachrichten kommen
+  // deshalb als fromMe an. BEFEHLE des Owners werden verarbeitet; alles andere
+  // (normale eigene Nachrichten und vor allem die Echos der Bot-Antworten
+  // selbst) wird verworfen, sonst antwortet der Bot auf sich selbst.
+  const fromSelf = !!msg.key?.fromMe;
+  if (fromSelf && (wasSentByBot(msg.key?.id) || !extractText(msg).startsWith(PREFIX))) return;
+
   if (isDuplicate(msg.key?.id)) return;
 
   const chatJid = msg.key.remoteJid;
@@ -348,14 +356,16 @@ async function handleMessage(msg) {
     };
   }
 
-  const senderIds = senderCandidates(msg);
-  const sender = senderJid(msg);
+  // Bei fromMe ist der Absender IMMER die eigene Nummer — remoteJid wäre in
+  // DMs der Chat-Partner und damit die falsche Person.
+  const senderIds = fromSelf ? [state.botJidPn, state.botJidLid].filter(Boolean) : senderCandidates(msg);
+  const sender = fromSelf ? state.botJidPn : senderJid(msg);
   if (!sender) return;
   const senderName = msg.pushName || `+${String(resolveLid(sender)).split('@')[0]}`;
   const text = extractText(msg);
 
   rolloverDay();
-  if (!isEdit) {
+  if (!isEdit && !fromSelf) {
     bumpActivity();
     bufferStat('messages'); // Edits sind keine neuen Nachrichten — nicht doppelt zählen
     if (isGroup) bufferGroupMessage(chatJid);
@@ -368,7 +378,7 @@ async function handleMessage(msg) {
   if (isGroup && !Number(settings.enabled)) return; // Gruppe im Panel deaktiviert
 
   // Slowmode greift vor allem anderen (Nachricht wird ggf. gelöscht)
-  if (isGroup && !isEdit && (await checkSlowmode(msg, chatJid, senderIds, settings, senderName))) return;
+  if (isGroup && !isEdit && !fromSelf && (await checkSlowmode(msg, chatJid, senderIds, settings, senderName))) return;
 
   // 1) AFK: eigener Beitrag hebt AFK auf (Edits zählen nicht als "wieder da")
   const wasAfk = isEdit ? null : await clearAfk(senderIds);
@@ -376,8 +386,8 @@ async function handleMessage(msg) {
     await replyTo(msg, `👋 Willkommen zurück, *${senderName}*! Dein AFK-Status (seit ${fmtSince(wasAfk.since)}) ist aufgehoben.`);
   }
 
-  // 2) Auto-Moderation (nur Gruppen)
-  if (isGroup) {
+  // 2) Auto-Moderation (nur Gruppen; nie gegen den Owner selbst)
+  if (isGroup && !fromSelf) {
     const mod = await checkAutoMod(msg, chatJid, senderIds, text);
     if (mod) {
       if (mod.kind === 'muted') return; // Nachricht gelöscht, still bleiben
@@ -419,7 +429,7 @@ async function handleMessage(msg) {
   if (!name) return;
   const args = parts.slice(1);
 
-  if (!commandRateOk(resolveLid(sender))) return; // Flut still drosseln
+  if (!isOwner(senderIds) && !commandRateOk(resolveLid(sender))) return; // Flut still drosseln (Owner nie)
 
   const ctx = makeCtx(msg, chatJid, isGroup, senderIds, sender, senderName, text, args);
   const command = byName.get(name);

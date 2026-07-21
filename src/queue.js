@@ -8,6 +8,20 @@ import { logError } from './logger.js';
 const queue = [];
 let running = false;
 
+// IDs aller Nachrichten, die der BOT selbst gesendet hat. Nötig, weil der Bot
+// auf der eigenen Nummer des Owners läuft: dessen Befehle kommen als fromMe an
+// und werden verarbeitet — die Echos der Bot-Antworten (ebenfalls fromMe)
+// dürfen aber NIE verarbeitet werden (Antwort-Schleifen!).
+const sentIds = new Set();
+export function wasSentByBot(id) {
+  return id ? sentIds.has(id) : false;
+}
+function recordSent(id) {
+  if (!id) return;
+  sentIds.add(id);
+  if (sentIds.size > 2000) sentIds.delete(sentIds.values().next().value);
+}
+
 const WAIT_FOR_CONNECTION_MS = 45_000; // bei kurzem Reconnect nicht sofort verwerfen
 
 const jitter = () =>
@@ -50,6 +64,7 @@ async function work() {
           rolloverDay();
           state.sentToday++;
           lastSentAt = Date.now();
+          recordSent(result?.key?.id);
           job.resolve?.(result);
           sent = true;
         } catch (err) {
