@@ -72,7 +72,11 @@ export const config = {
     // REST-API verlangt den vollen Preview-Namen, sonst HTTP 404 bei JEDEM
     // Aufruf. Bestätigt gegen die offizielle Doku (ai.google.dev/gemini-api/
     // docs/generate-content/gemini-3). KEINE alten 1.5/2.0-Modelle (abgeschaltet).
-    model: 'gemini-3-flash-preview',
+    model: 'gemini-3-flash-preview', // Standard-Modell (frei)
+    // Leichtes Modell für kurze/einfache Fragen — schneller & schont das
+    // Kontingent. Ebenfalls FREI. Ein Pro-Modell wird bewusst NICHT genutzt:
+    // gemini-3.1-pro-preview hat KEINE Free-Tier und würde echtes Geld kosten.
+    modelLite: 'gemini-3.1-flash-lite',
     userCooldownMs: 30_000, // pro Nutzer höchstens 1 KI-Aufruf alle 30 s
     dailyLimit: 1400, // hartes Tages-Kontingent (Free-Tier ≈ 1500/Tag)
     timeoutMs: 15_000,

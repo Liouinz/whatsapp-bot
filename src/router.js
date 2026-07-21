@@ -14,7 +14,7 @@ import { checkAutoMod, getGroupSettings } from './moderation.js';
 import { getAfk, clearAfk, fmtSince } from './commands/afk.js';
 import { resolveCustom, listCustom } from './commands/custom.js';
 import { checkGameAnswer } from './commands/games.js';
-import { unknownCommandReply } from './ai.js';
+import { unknownCommandReply, askAi } from './ai.js';
 
 import { adminCommands } from './commands/admin.js';
 import { communityCommands } from './commands/community.js';
@@ -477,14 +477,27 @@ async function handleMessage(msg) {
     return ctx.reply(custom);
   }
 
-  // 5c) Tippfehler? Ähnlichsten Befehl vorschlagen — schneller als die KI
+  // 5c) Direkte KI-Frage über das explizite Muster !frage! — z. B.
+  // "!Erkläre Linux!". Feste Befehle (5a) und Custom (5b) haben Vorrang, hier
+  // landet also nur, was KEIN Befehl ist. Das äußere !…! wird entfernt, nur
+  // der Inhalt geht an die KI.
+  const ask = /^!\s*(.+?)\s*!$/.exec(text);
+  if (ask && ask[1].trim().length >= 2) {
+    const res = await askAi(resolveLid(sender), ask[1]);
+    if (res?.text) return ctx.reply(`🤖 ${res.text}`);
+    if (res?.blocked === 'cooldown') return ctx.reply('ℹ️ Kurz durchatmen — gleich kannst du mich wieder etwas fragen.');
+    if (res?.blocked === 'quota') return ctx.reply('ℹ️ Mein KI-Kontingent für heute ist aufgebraucht — morgen geht es weiter.');
+    return ctx.reply('⚠️ Ich konnte die KI gerade nicht erreichen — bitte gleich nochmal.');
+  }
+
+  // 5d) Tippfehler? Ähnlichsten Befehl vorschlagen — schneller als die KI
   // und verbraucht kein Tages-Kontingent.
   const suggestion = suggestCommand(name);
   if (suggestion) {
     return ctx.reply(`🤔 \`${PREFIX}${name}\` kenne ich nicht — meintest du \`${PREFIX}${suggestion}\`?`);
   }
 
-  // 5d) KI-Fallback — NUR hier
+  // 5e) KI-Fallback — NUR hier
   const known = registry.filter((c) => !c.hidden).map((c) => c.name);
   const ai = await unknownCommandReply(resolveLid(sender), text, known);
   if (ai?.text) {

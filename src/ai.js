@@ -42,10 +42,24 @@ function countCall() {
   ).catch(() => {});
 }
 
-async function callGemini(prompt) {
+/**
+ * Modell-Routing (nur innerhalb der FREIEN Stufe): kurze, einfache Fragen
+ * bekommen das schnellere Lite-Modell, alles mit Code-/Analyse-/Erklär-
+ * Charakter das Standard-Flash. Ein kostenpflichtiges Pro-Modell wird bewusst
+ * nie gewählt, damit keine ungewollten Kosten entstehen.
+ */
+function pickModel(question) {
+  const t = String(question || '').trim();
+  const complex =
+    t.length > 80 ||
+    /\b(code|program|script|analy|debug|fehler|erklär|warum|wieso|schreib|rechne|berechne|übersetz)/i.test(t);
+  return complex ? config.ai.model : config.ai.modelLite;
+}
+
+async function callGemini(prompt, model = config.ai.model) {
   const key = (process.env.GEMINI_API_KEY || '').trim();
   // Key im Header statt in der URL — URLs landen in Fehlermeldungen und Logs
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.ai.model}:generateContent`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.ai.timeoutMs);
   try {
@@ -102,6 +116,30 @@ export async function unknownCommandReply(userJid, commandText, knownCommands) {
     `Antworte kurz (max. 3 Sätze, Deutsch, per Du): Wenn ein bekannter Befehl gemeint sein könnte, schlag ihn vor. ` +
     `Sonst beantworte die Frage hinter dem Befehl knapp und hilfreich. Keine Markdown-Überschriften.`;
   const text = await callGemini(prompt);
+  if (!text) return null;
+  return { text: text.slice(0, config.ai.maxReplyChars) };
+}
+
+/**
+ * Direkte KI-Frage über das explizite `!frage!`-Muster. Anders als
+ * unknownCommandReply beantwortet dies eine echte Frage/Aufgabe direkt
+ * (kein "unbekannter Befehl"-Rahmen). Cooldown + Tages-Kontingent gelten.
+ */
+export async function askAi(userJid, question) {
+  const now = Date.now();
+  const last = userCooldown.get(userJid) || 0;
+  if (now - last < config.ai.userCooldownMs) return { blocked: 'cooldown' };
+  if (!quotaOk()) return { blocked: 'quota' };
+  userCooldown.set(userJid, now);
+  if (userCooldown.size > 2000) userCooldown.delete(userCooldown.keys().next().value);
+
+  countCall();
+  const q = String(question || '').trim().slice(0, 500);
+  const prompt =
+    `Du bist "${BOT_NAME}", ein hilfsbereiter, freundlicher deutscher WhatsApp-Assistent. ` +
+    `Beantworte die folgende Frage oder Aufgabe knapp, klar und korrekt auf Deutsch (per Du). ` +
+    `Keine Markdown-Überschriften; Codeblöcke nur, wenn ausdrücklich Code verlangt wird.\n\nFrage: ${q}`;
+  const text = await callGemini(prompt, pickModel(q));
   if (!text) return null;
   return { text: text.slice(0, config.ai.maxReplyChars) };
 }
