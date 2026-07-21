@@ -15,6 +15,7 @@ import { getAiQuota, initAiUsage } from './ai.js';
 import { registry, isCommandEnabled, setCommandEnabled, loadToggles, resetXpCache } from './router.js';
 import { listCustom, loadCustomCommands } from './commands/custom.js';
 import { loadAfk } from './commands/afk.js';
+import { loadActiveMillionaire } from './commands/millionaer.js';
 import { invalidateSettings, invalidateBlockedWords, loadMutes, unmuteUser, unbanUser, clearWarnings, kickUser, banUser, audit } from './moderation.js';
 import { botIsAdminInMeta } from './permissions.js';
 import { queueLength, sendText } from './queue.js';
@@ -598,7 +599,7 @@ export function createDashboard() {
       resetXpCache();
       groupCache = { at: 0, list: [] };
       statsCache = { at: 0, data: null };
-      await Promise.all([loadToggles(), loadCustomCommands(), loadAfk(), loadMutes(), initAiUsage()]);
+      await Promise.all([loadToggles(), loadCustomCommands(), loadAfk(), loadMutes(), initAiUsage(), loadActiveMillionaire()]);
       await audit('db-wipe', '', '', 'panel', `${tables} Tabellen geleert`);
       logWarn(`🗑️ Datenbank über das Panel komplett geleert (${tables} Tabellen).`);
 

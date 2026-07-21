@@ -183,6 +183,16 @@ const TABLES = [
      group_jid TEXT, day TEXT, messages INTEGER DEFAULT 0,
      PRIMARY KEY (group_jid, day)
    )`,
+
+  // "Wer wird Millionär?" — laufender Spielzustand (restart-fest) + Tageslimit
+  `CREATE TABLE IF NOT EXISTS millionaire_games (
+     chat_jid TEXT PRIMARY KEY, user_jid TEXT, name TEXT, level INTEGER DEFAULT 0,
+     used TEXT DEFAULT '[]', q TEXT, used5050 INTEGER DEFAULT 0, usedhint INTEGER DEFAULT 0,
+     started_at INTEGER
+   )`,
+  `CREATE TABLE IF NOT EXISTS millionaire_daily (
+     user_jid TEXT PRIMARY KEY, day TEXT
+   )`,
 ];
 
 // Spalten, die nach dem ersten Deploy dazukamen — werden per ALTER TABLE nachgezogen,
@@ -257,6 +267,7 @@ const DATA_TABLES = [
   'error_log', 'error_counts', 'ai_usage', 'games', 'game_scores',
   'audit_log', 'owner_alerts', 'daily_stats', 'coins', 'purchases',
   'user_titles', 'polls', 'poll_votes', 'birthdays', 'group_daily',
+  'millionaire_games', 'millionaire_daily',
 ];
 
 /**

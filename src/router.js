@@ -14,6 +14,7 @@ import { checkAutoMod, getGroupSettings } from './moderation.js';
 import { getAfk, clearAfk, fmtSince } from './commands/afk.js';
 import { resolveCustom, listCustom } from './commands/custom.js';
 import { checkGameAnswer } from './commands/games.js';
+import { checkMillionaireAnswer } from './commands/millionaer.js';
 import { unknownCommandReply, askAi } from './ai.js';
 
 import { adminCommands } from './commands/admin.js';
@@ -24,6 +25,7 @@ import { customCommands } from './commands/custom.js';
 import { scheduleCommands } from './commands/schedule.js';
 import { toolCommands } from './commands/tools.js';
 import { gameCommands } from './commands/games.js';
+import { millionaireCommands } from './commands/millionaer.js';
 import { economyCommands } from './commands/economy.js';
 import { funCommands } from './commands/fun.js';
 import { pollCommands } from './commands/polls.js';
@@ -46,6 +48,7 @@ export const registry = [
   ...scheduleCommands,
   ...toolCommands,
   ...gameCommands,
+  ...millionaireCommands,
   ...wordleCommands,
   ...funCommands,
   ...adminCommands,
@@ -423,7 +426,8 @@ async function handleMessage(msg) {
   if (!text.startsWith(PREFIX)) {
     if (isGroup) {
       const ctxLite = makeCtx(msg, chatJid, isGroup, senderIds, sender, senderName, text, []);
-      const consumed = await checkGameAnswer(ctxLite);
+      // Millionär-Antwort (A/B/C/D) zuerst — greift nur bei laufendem Spiel (RAM-Check)
+      const consumed = (await checkMillionaireAnswer(ctxLite)) || (await checkGameAnswer(ctxLite));
       if (!consumed && text.length >= config.xp.minMessageLength) {
         await grantXp(chatJid, sender, senderName, settings);
       }
