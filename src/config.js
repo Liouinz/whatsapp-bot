@@ -68,7 +68,11 @@ export const config = {
 
   // ── KI (Gemini) ────────────────────────────────────────────────
   ai: {
-    model: 'gemini-3-flash', // kostenlose Stufe (Stand 2026); KEINE alten 1.5/2.0-Modelle
+    // Freie Stufe (Stand 2026): "gemini-3-flash" allein gibt es nicht — die
+    // REST-API verlangt den vollen Preview-Namen, sonst HTTP 404 bei JEDEM
+    // Aufruf. Bestätigt gegen die offizielle Doku (ai.google.dev/gemini-api/
+    // docs/generate-content/gemini-3). KEINE alten 1.5/2.0-Modelle (abgeschaltet).
+    model: 'gemini-3-flash-preview',
     userCooldownMs: 30_000, // pro Nutzer höchstens 1 KI-Aufruf alle 30 s
     dailyLimit: 1400, // hartes Tages-Kontingent (Free-Tier ≈ 1500/Tag)
     timeoutMs: 15_000,
