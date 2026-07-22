@@ -4,9 +4,9 @@
 
 import { BOT_NAME, config } from './config.js';
 import { state } from './state.js';
-import { dbRun, dbRows, todayKey, flushBuffers } from './db.js';
+import { dbRun, dbRows, todayKey, flushBuffers, PROTECTED_TABLES, deleteTargetTable } from './db.js';
 import { sendText } from './queue.js';
-import { logError, logInfo } from './logger.js';
+import { logError, logInfo, logWarn } from './logger.js';
 import { botIsAdmin } from './permissions.js';
 import { releaseExpiredRaidLocks } from './moderation.js';
 import { congratulateBirthdays } from './commands/birthdays.js';
@@ -196,6 +196,15 @@ async function processWeeklyReports() {
 
 // ── Auto-Cleanup (Phase 21) ────────────────────────────────────────
 
+// Explizite Whitelist: NUR diese Tabellen darf der Auto-Cleanup anfassen.
+// Alles andere (insbesondere die geschützten Session-Tabellen auth_creds/
+// auth_keys) wird hart blockiert — so kann kein künftiger Code den Bot
+// versehentlich ausloggen (401), egal was in die jobs-Liste gerät.
+const CLEANUP_ALLOWED_TABLES = new Set([
+  'warnings', 'mutes', 'error_log', 'scheduled_messages', 'ai_usage', 'daily_stats',
+  'audit_log', 'owner_alerts', 'rate_limits', 'error_counts', 'group_daily', 'polls', 'poll_votes',
+]);
+
 export async function runCleanup() {
   const now = Date.now();
   const day = 86_400_000;
@@ -214,14 +223,29 @@ export async function runCleanup() {
     ['DELETE FROM polls WHERE open = 0 AND created_at < ?', [now - 30 * day]],
     ['DELETE FROM poll_votes WHERE poll_id NOT IN (SELECT id FROM polls)', []],
   ];
+
+  let cleaned = 0;
+  let blocked = 0;
   for (const [sql, args] of jobs) {
+    const table = deleteTargetTable(sql);
+    // SCHUTZWALL: geschützte Session-Tabelle ODER nicht ausdrücklich erlaubte
+    // Tabelle → sofort blockieren, warnen, NICHT ausführen.
+    if (!table || PROTECTED_TABLES.has(table) || !CLEANUP_ALLOWED_TABLES.has(table)) {
+      blocked++;
+      logWarn(`🛡️ [SECURITY BLOCK] Auto-Cleanup gegen geschützte/nicht freigegebene Tabelle "${table || '?'}" verhindert — Session-Daten bleiben unangetastet.`);
+      continue;
+    }
     try {
       await dbRun(sql, args);
+      cleaned++;
     } catch (err) {
       logError(err, 'scheduler.cleanup');
     }
   }
-  logInfo('🧹 Auto-Cleanup gelaufen — DB bleibt schlank.');
+  logInfo(
+    `🧹 Auto-Cleanup gelaufen — ${cleaned} Tabelle(n) bereinigt${blocked ? `, ${blocked} blockiert` : ''}. ` +
+      `Session-Daten (auth_creds/auth_keys) werden NIE angefasst.`
+  );
 }
 
 // ── Start/Stop ─────────────────────────────────────────────────────
