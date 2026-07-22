@@ -210,6 +210,15 @@ const TABLES = [
      baseline INTEGER DEFAULT 0, accepted_at INTEGER, expires_at INTEGER, chat_jid TEXT,
      done INTEGER DEFAULT 0
    )`,
+
+  // Erfolge (einmalig freigeschaltet) + Prestige-Rang
+  `CREATE TABLE IF NOT EXISTS user_achievements (
+     user_jid TEXT, ach_id TEXT, unlocked_at INTEGER,
+     PRIMARY KEY (user_jid, ach_id)
+   )`,
+  `CREATE TABLE IF NOT EXISTS prestige (
+     user_jid TEXT PRIMARY KEY, level INTEGER DEFAULT 0, updated_at INTEGER
+   )`,
 ];
 
 // Spalten, die nach dem ersten Deploy dazukamen — werden per ALTER TABLE nachgezogen,
@@ -253,6 +262,8 @@ const INDEXES = [
   `CREATE INDEX IF NOT EXISTS idx_game_scores_user ON game_scores (user_jid)`,
   // Quest-Sweep: aktive Verträge nach Ablauf sortiert
   `CREATE INDEX IF NOT EXISTS idx_contracts_active ON player_contracts (done, expires_at)`,
+  // Erfolge-Rangliste: COUNT/GROUP BY pro Nutzer
+  `CREATE INDEX IF NOT EXISTS idx_user_ach_user ON user_achievements (user_jid)`,
 ];
 
 export async function initDb() {
@@ -290,6 +301,7 @@ const DATA_TABLES = [
   'audit_log', 'owner_alerts', 'daily_stats', 'coins', 'purchases',
   'user_titles', 'polls', 'poll_votes', 'birthdays', 'group_daily',
   'millionaire_games', 'millionaire_daily', 'inventory', 'user_boosts', 'player_contracts',
+  'user_achievements', 'prestige',
 ];
 
 /**

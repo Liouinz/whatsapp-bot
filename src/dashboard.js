@@ -18,6 +18,7 @@ import { loadAfk } from './commands/afk.js';
 import { loadActiveMillionaire } from './commands/millionaer.js';
 import { resetBoostCache } from './boosts.js';
 import { resetQuestState } from './commands/quests.js';
+import { resetPrestigeCache } from './prestige.js';
 import { invalidateSettings, invalidateBlockedWords, loadMutes, unmuteUser, unbanUser, clearWarnings, kickUser, banUser, audit } from './moderation.js';
 import { botIsAdminInMeta } from './permissions.js';
 import { queueLength, sendText } from './queue.js';
@@ -601,6 +602,7 @@ export function createDashboard() {
       resetXpCache();
       resetBoostCache();
       resetQuestState();
+      resetPrestigeCache();
       groupCache = { at: 0, list: [] };
       statsCache = { at: 0, data: null };
       await Promise.all([loadToggles(), loadCustomCommands(), loadAfk(), loadMutes(), initAiUsage(), loadActiveMillionaire()]);

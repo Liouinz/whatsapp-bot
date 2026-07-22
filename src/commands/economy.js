@@ -6,6 +6,7 @@ import { dbRun, dbRows, todayKey } from '../db.js';
 import { resolveLid } from '../permissions.js';
 import { audit } from '../moderation.js';
 import { getBoostMult } from '../boosts.js';
+import { getPrestigeMult } from '../prestige.js';
 
 // ── Kern-Helfer ────────────────────────────────────────────────────
 
@@ -57,8 +58,12 @@ export async function takeCoins(userJid, amount) {
  * Rückgabe: tatsächlich gutgeschriebener Betrag (inkl. Boost).
  */
 export async function earnCoins(userJid, amount, name = '') {
-  const mult = await getBoostMult(resolveLid(userJid), 'coins').catch(() => 1);
-  const total = Math.round(amount * mult);
+  const u = resolveLid(userJid);
+  const [boost, prestige] = await Promise.all([
+    getBoostMult(u, 'coins').catch(() => 1),
+    getPrestigeMult(u).catch(() => 1),
+  ]);
+  const total = Math.round(amount * boost * prestige);
   await addCoins(userJid, total, name);
   return total;
 }
@@ -118,8 +123,12 @@ export const economyCommands = [
         Math.floor(Math.random() * (config.economy.dailyMax - config.economy.dailyMin + 1));
       const bonus = Math.min((streak - 1) * config.economy.streakBonus, config.economy.streakBonusMax);
       const base_total = base + bonus;
-      // Aktiven Coin-Boost anwenden (Item-Effekt)
-      const mult = await getBoostMult(resolveLid(ctx.sender), 'coins').catch(() => 1);
+      // Aktiven Coin-Boost (Item) + Prestige-Dauerbonus anwenden
+      const [boost, prestige] = await Promise.all([
+        getBoostMult(resolveLid(ctx.sender), 'coins').catch(() => 1),
+        getPrestigeMult(resolveLid(ctx.sender)).catch(() => 1),
+      ]);
+      const mult = boost * prestige;
       const total = Math.round(base_total * mult);
       await dbRun(
         `UPDATE coins SET balance = balance + ?, total_earned = total_earned + ?,

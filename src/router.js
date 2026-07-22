@@ -29,6 +29,7 @@ import { millionaireCommands } from './commands/millionaer.js';
 import { economyCommands } from './commands/economy.js';
 import { itemCommands } from './commands/items.js';
 import { questCommands } from './commands/quests.js';
+import { progressionCommands } from './commands/progression.js';
 import { getBoostMult } from './boosts.js';
 import { funCommands } from './commands/fun.js';
 import { pollCommands } from './commands/polls.js';
@@ -56,6 +57,7 @@ export const registry = [
   ...funCommands,
   ...itemCommands,
   ...questCommands,
+  ...progressionCommands,
   ...adminCommands,
 ];
 
