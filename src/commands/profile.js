@@ -7,6 +7,8 @@ import { resolveLid } from '../permissions.js';
 import { activeWarnings } from '../moderation.js';
 import { getWallet, activeTitle } from './economy.js';
 import { getAfk, fmtSince } from './afk.js';
+import { getPrestigeLevel } from '../prestige.js';
+import { ACHIEVEMENTS } from '../data/achievements.js';
 
 function progressBar(have, need, width = 10) {
   const filled = Math.min(width, Math.round((have / Math.max(1, need)) * width));
@@ -27,12 +29,14 @@ export const profileCommands = [
       const user = resolveLid(target);
       const isSelf = user === resolveLid(ctx.sender);
 
-      const [xpRows, wins, warns, wallet, title] = await Promise.all([
+      const [xpRows, wins, warns, wallet, title, prestige, achRows] = await Promise.all([
         dbRows('SELECT xp, messages, name FROM xp WHERE group_jid = ? AND user_jid = ?', [ctx.chatJid, user]),
         dbRows('SELECT game, wins FROM game_scores WHERE group_jid = ? AND user_jid = ? ORDER BY wins DESC', [ctx.chatJid, user]),
         activeWarnings(ctx.chatJid, user),
         getWallet(user, isSelf ? ctx.senderName : ''),
         activeTitle(user),
+        getPrestigeLevel(user).catch(() => 0),
+        dbRows('SELECT COUNT(*) AS c FROM user_achievements WHERE user_jid = ?', [user]),
       ]);
 
       const xp = xpRows.length ? Number(xpRows[0].xp) : 0;
@@ -47,8 +51,11 @@ export const profileCommands = [
       const bestGame = wins.length ? ` (am besten: ${wins[0].game})` : '';
       const afk = getAfk([user]);
 
+      const achCount = Number(achRows[0]?.c || 0);
+
       let text = `👤 *Profil — ${name}*\n`;
       if (title) text += `${title}\n`;
+      if (prestige > 0) text += `⭐ Prestige-Rang *${prestige}* ${'✦'.repeat(Math.min(prestige, 10))}\n`;
       text += `\n⭐ Level *${level}* · Platz *#${rankPos}* in dieser Gruppe\n`;
       text += `   ${progressBar(have, need)} ${have}/${need} XP\n`;
       text += `💬 ${xpRows[0]?.messages ?? 0} Nachrichten · ${xp} XP gesamt\n`;
@@ -56,6 +63,7 @@ export const profileCommands = [
       if (Number(wallet.streak) > 1) text += ` · 🔥 ${wallet.streak}-Tage-Streak`;
       text += '\n';
       if (winsTotal > 0) text += `🏆 ${winsTotal} Spiele-Sieg${winsTotal === 1 ? '' : 'e'}${bestGame}\n`;
+      if (achCount > 0) text += `🏅 ${achCount}/${ACHIEVEMENTS.length} Erfolge${isSelf ? ` (\`${PREFIX}erfolge\`)` : ''}\n`;
       if (warns.length > 0) text += `⚠️ ${warns.length}/${config.moderation.warnLimitKick} aktive Verwarnungen\n`;
       if (afk) text += `💤 Gerade AFK (seit ${fmtSince(afk.since)}): _${afk.reason}_\n`;
       if (isSelf && !title) text += `\n_Tipp: Hol dir einen Titel im \`${PREFIX}shop\`!_`;

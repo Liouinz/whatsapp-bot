@@ -5,7 +5,7 @@
 import { PREFIX } from '../config.js';
 import { bufferXp, dbRun } from '../db.js';
 import { resolveLid } from '../permissions.js';
-import { addCoins } from './economy.js';
+import { earnCoins } from './economy.js';
 
 const XP_REWARD = 35;
 const COIN_REWARD = 60;
@@ -107,7 +107,7 @@ export const wordleCommands = [
         active.delete(ctx.chatJid);
         const user = resolveLid(ctx.sender);
         bufferXp(ctx.chatJid, user, XP_REWARD, ctx.senderName);
-        await addCoins(user, COIN_REWARD, ctx.senderName).catch(() => {});
+        await earnCoins(user, COIN_REWARD, ctx.senderName).catch(() => {});
         await dbRun(
           `INSERT INTO game_scores (group_jid, user_jid, game, wins, name) VALUES (?, ?, 'wortle', 1, ?)
            ON CONFLICT(group_jid, user_jid, game) DO UPDATE SET wins = game_scores.wins + 1, name = excluded.name`,

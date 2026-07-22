@@ -14,6 +14,7 @@ import { checkAutoMod, getGroupSettings } from './moderation.js';
 import { getAfk, clearAfk, fmtSince } from './commands/afk.js';
 import { resolveCustom, listCustom } from './commands/custom.js';
 import { checkGameAnswer } from './commands/games.js';
+import { checkMillionaireAnswer } from './commands/millionaer.js';
 import { unknownCommandReply, askAi } from './ai.js';
 
 import { adminCommands } from './commands/admin.js';
@@ -24,7 +25,14 @@ import { customCommands } from './commands/custom.js';
 import { scheduleCommands } from './commands/schedule.js';
 import { toolCommands } from './commands/tools.js';
 import { gameCommands } from './commands/games.js';
+import { millionaireCommands } from './commands/millionaer.js';
 import { economyCommands } from './commands/economy.js';
+import { itemCommands } from './commands/items.js';
+import { questCommands } from './commands/quests.js';
+import { progressionCommands } from './commands/progression.js';
+import { eventCommands } from './commands/events.js';
+import { getBoostMult } from './boosts.js';
+import { getEventXpMult } from './events.js';
 import { funCommands } from './commands/fun.js';
 import { pollCommands } from './commands/polls.js';
 import { birthdayCommands } from './commands/birthdays.js';
@@ -46,8 +54,13 @@ export const registry = [
   ...scheduleCommands,
   ...toolCommands,
   ...gameCommands,
+  ...millionaireCommands,
   ...wordleCommands,
   ...funCommands,
+  ...itemCommands,
+  ...questCommands,
+  ...progressionCommands,
+  ...eventCommands,
   ...adminCommands,
 ];
 
@@ -176,9 +189,12 @@ async function grantXp(chatJid, userJid, name, settings) {
     xpTotals.set(key, rows.length ? Number(rows[0].xp) : 0);
     if (xpTotals.size > 5000) xpTotals.delete(xpTotals.keys().next().value); // sonst Speicherleck
   }
-  const amount =
+  const baseAmount =
     config.xp.perMessageMin +
     Math.floor(Math.random() * (config.xp.perMessageMax - config.xp.perMessageMin + 1));
+  // Aktiven XP-Boost (Item) + globalen Event-Multiplikator anwenden.
+  // getBoostMult cached im RAM, getEventXpMult ist ein reiner RAM-Wert.
+  const amount = Math.round(baseAmount * (await getBoostMult(user, 'xp').catch(() => 1)) * getEventXpMult());
   const before = xpTotals.get(key);
   const after = before + amount;
   xpTotals.set(key, after);
@@ -423,7 +439,8 @@ async function handleMessage(msg) {
   if (!text.startsWith(PREFIX)) {
     if (isGroup) {
       const ctxLite = makeCtx(msg, chatJid, isGroup, senderIds, sender, senderName, text, []);
-      const consumed = await checkGameAnswer(ctxLite);
+      // Millionär-Antwort (A/B/C/D) zuerst — greift nur bei laufendem Spiel (RAM-Check)
+      const consumed = (await checkMillionaireAnswer(ctxLite)) || (await checkGameAnswer(ctxLite));
       if (!consumed && text.length >= config.xp.minMessageLength) {
         await grantXp(chatJid, sender, senderName, settings);
       }

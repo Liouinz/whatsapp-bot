@@ -183,6 +183,48 @@ const TABLES = [
      group_jid TEXT, day TEXT, messages INTEGER DEFAULT 0,
      PRIMARY KEY (group_jid, day)
    )`,
+
+  // "Wer wird Millionär?" — laufender Spielzustand (restart-fest) + Tageslimit
+  `CREATE TABLE IF NOT EXISTS millionaire_games (
+     chat_jid TEXT PRIMARY KEY, user_jid TEXT, name TEXT, level INTEGER DEFAULT 0,
+     used TEXT DEFAULT '[]', q TEXT, used5050 INTEGER DEFAULT 0, usedhint INTEGER DEFAULT 0,
+     started_at INTEGER
+   )`,
+  `CREATE TABLE IF NOT EXISTS millionaire_daily (
+     user_jid TEXT PRIMARY KEY, day TEXT
+   )`,
+
+  // Shop 2.0: Inventar (Besitz pro Nutzer) + aktive Boost-Effekte
+  `CREATE TABLE IF NOT EXISTS inventory (
+     user_jid TEXT, item_id TEXT, qty INTEGER DEFAULT 0,
+     PRIMARY KEY (user_jid, item_id)
+   )`,
+  `CREATE TABLE IF NOT EXISTS user_boosts (
+     user_jid TEXT, type TEXT, mult REAL DEFAULT 1, expires_at INTEGER DEFAULT 0,
+     PRIMARY KEY (user_jid, type)
+   )`,
+
+  // Verträge/Quests: angenommene Verträge pro Spieler (done: 0=aktiv,1=erfüllt,2=abgelaufen)
+  `CREATE TABLE IF NOT EXISTS player_contracts (
+     id INTEGER PRIMARY KEY AUTOINCREMENT, user_jid TEXT, name TEXT, contract_id TEXT,
+     baseline INTEGER DEFAULT 0, accepted_at INTEGER, expires_at INTEGER, chat_jid TEXT,
+     done INTEGER DEFAULT 0
+   )`,
+
+  // Erfolge (einmalig freigeschaltet) + Prestige-Rang
+  `CREATE TABLE IF NOT EXISTS user_achievements (
+     user_jid TEXT, ach_id TEXT, unlocked_at INTEGER,
+     PRIMARY KEY (user_jid, ach_id)
+   )`,
+  `CREATE TABLE IF NOT EXISTS prestige (
+     user_jid TEXT PRIMARY KEY, level INTEGER DEFAULT 0, updated_at INTEGER
+   )`,
+
+  // Globales Event (höchstens eine Zeile, id=1) — zeitlich begrenzte Multiplikatoren
+  `CREATE TABLE IF NOT EXISTS active_event (
+     id INTEGER PRIMARY KEY, event_id TEXT, name TEXT, xp_mult REAL DEFAULT 1,
+     coin_mult REAL DEFAULT 1, started_at INTEGER, expires_at INTEGER
+   )`,
 ];
 
 // Spalten, die nach dem ersten Deploy dazukamen — werden per ALTER TABLE nachgezogen,
@@ -221,6 +263,13 @@ const INDEXES = [
   `CREATE INDEX IF NOT EXISTS idx_group_daily_day ON group_daily (day)`,
   // !rank / !leaderboard: Platzierung + Top-10 pro Gruppe
   `CREATE INDEX IF NOT EXISTS idx_xp_group_xp ON xp (group_jid, xp)`,
+  // Quest-Fortschritt: SUM(messages)/SUM(wins) pro Nutzer über alle Gruppen
+  `CREATE INDEX IF NOT EXISTS idx_xp_user ON xp (user_jid)`,
+  `CREATE INDEX IF NOT EXISTS idx_game_scores_user ON game_scores (user_jid)`,
+  // Quest-Sweep: aktive Verträge nach Ablauf sortiert
+  `CREATE INDEX IF NOT EXISTS idx_contracts_active ON player_contracts (done, expires_at)`,
+  // Erfolge-Rangliste: COUNT/GROUP BY pro Nutzer
+  `CREATE INDEX IF NOT EXISTS idx_user_ach_user ON user_achievements (user_jid)`,
 ];
 
 export async function initDb() {
@@ -257,6 +306,8 @@ const DATA_TABLES = [
   'error_log', 'error_counts', 'ai_usage', 'games', 'game_scores',
   'audit_log', 'owner_alerts', 'daily_stats', 'coins', 'purchases',
   'user_titles', 'polls', 'poll_votes', 'birthdays', 'group_daily',
+  'millionaire_games', 'millionaire_daily', 'inventory', 'user_boosts', 'player_contracts',
+  'user_achievements', 'prestige', 'active_event',
 ];
 
 /**
