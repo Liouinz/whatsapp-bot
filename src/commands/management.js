@@ -23,7 +23,36 @@ const fmtUptime = (ms) => {
 const GROUP_SYSTEMS = { antilink: 'antilink', antispam: 'antispam', welcome: 'welcome', levelup: 'levelup_announce' };
 const GLOBAL_SYSTEMS = { xp: 'system_xp', spiele: 'system_spiele', economy: 'system_economy' };
 
+// Aktivierungs-Befehle für die Erstfreischaltung einer Gruppe. Toleriert die vom
+// Nutzer gewünschten Schreibweisen: „!setup", „/enable", „Bot aktivieren",
+// „/bot enable" usw. Führendes ! oder / wird entfernt, Groß/Klein egal.
+export function isActivationCommand(text) {
+  const t = String(text || '').trim().toLowerCase().replace(/^[!\/]+/, '').replace(/\s+/g, ' ').trim();
+  return /^(setup|enable|aktivieren|activate|freischalten)$/.test(t) ||
+    /^bot (on|an|enable|aktivieren|freischalten)$/.test(t);
+}
+
+/** Gruppe freischalten (idempotent) — legt bei Bedarf die Einstellungszeile an. */
+export async function activateGroup(jid) {
+  await dbRun('INSERT OR IGNORE INTO group_settings (jid, enabled) VALUES (?, 1)', [jid]);
+  await dbRun('UPDATE group_settings SET enabled = 1 WHERE jid = ?', [jid]);
+  invalidateSettings(jid);
+}
+
 export const managementCommands = [
+  {
+    name: 'setup',
+    aliases: ['enable', 'aktivieren', 'activate', 'freischalten'],
+    group: 'admin',
+    desc: 'Bot in dieser Gruppe freischalten (nur Owner)',
+    usage: '!setup',
+    ownerOnly: true,
+    groupOnly: true,
+    async run(ctx) {
+      await activateGroup(ctx.chatJid);
+      return ctx.reply('✅ Bot in dieser Gruppe *freigeschaltet*. Alle Funktionen stehen jetzt bereit — Übersicht: `!hilfe`');
+    },
+  },
   {
     name: 'rolle',
     aliases: ['role', 'whoami', 'meinerolle'],

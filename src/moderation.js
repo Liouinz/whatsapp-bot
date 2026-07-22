@@ -31,9 +31,12 @@ export async function getGroupSettings(groupJid) {
   const rows = await dbRows('SELECT * FROM group_settings WHERE jid = ?', [groupJid]);
   let row = rows[0];
   if (!row) {
-    await dbRun('INSERT OR IGNORE INTO group_settings (jid) VALUES (?)', [groupJid]).catch(() => {});
+    // Neue Gruppe → EINGESCHRÄNKTER Modus (enabled=0). Der Bot bleibt still, bis
+    // ein OWNER die Gruppe per Befehl (!setup/!enable/„Bot aktivieren") freischaltet.
+    // Verhindert, dass der Bot unbeabsichtigt in fremden Gruppen arbeitet.
+    await dbRun('INSERT OR IGNORE INTO group_settings (jid, enabled) VALUES (?, 0)', [groupJid]).catch(() => {});
     row = {
-      jid: groupJid, enabled: 1, antilink: 0, antispam: 0,
+      jid: groupJid, enabled: 0, antilink: 0, antispam: 0,
       blacklist_on: 1, welcome: 0, rules: '', levelup_announce: 1,
     };
   }

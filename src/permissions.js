@@ -72,6 +72,9 @@ function learnLidMappings(meta) {
     const lid = normalizeId(p.lid || (String(p.id).endsWith('@lid') ? p.id : null));
     const pn = normalizeId(p.phoneNumber || p.jid || (String(p.id).endsWith('@s.whatsapp.net') ? p.id : null));
     if (lid && pn) {
+      // Deckel gegen unbegrenztes Wachstum: eine verworfene Zuordnung wird beim
+      // nächsten Lookup aus groupMetadata neu gelernt (selbstheilend, kein Verlust).
+      if (lidToPn.size > 20_000) lidToPn.clear();
       lidToPn.set(lid, pn);
       const key = `${meta.id}|${lid}|${pn}`;
       if (persistedMappings.has(key)) continue;

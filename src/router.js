@@ -32,7 +32,7 @@ import { itemCommands } from './commands/items.js';
 import { questCommands } from './commands/quests.js';
 import { progressionCommands } from './commands/progression.js';
 import { eventCommands } from './commands/events.js';
-import { managementCommands } from './commands/management.js';
+import { managementCommands, isActivationCommand, activateGroup } from './commands/management.js';
 import { getBoostMult } from './boosts.js';
 import { getEventXpMult } from './events.js';
 import { funCommands } from './commands/fun.js';
@@ -403,7 +403,17 @@ async function handleMessage(msg) {
   if (!isGroup && !fromSelf && !isOwner(senderIds)) return;
 
   const settings = isGroup ? await getGroupSettings(chatJid) : { enabled: 1, levelup_announce: 0 };
-  if (isGroup && !Number(settings.enabled)) return; // Gruppe im Panel deaktiviert
+  // Eingeschränkter Modus: In noch nicht freigeschalteten Gruppen bleibt der Bot
+  // STILL. Einzige Ausnahme: ein OWNER darf die Gruppe per Aktivierungs-Befehl
+  // (!setup/!enable/„Bot aktivieren") freischalten — sonst kein Wort (verhindert
+  // ungewolltes Arbeiten in fremden Gruppen).
+  if (isGroup && !Number(settings.enabled)) {
+    if (isOwner(senderIds) && isActivationCommand(text)) {
+      await activateGroup(chatJid);
+      await replyTo(msg, '✅ Bot in dieser Gruppe *freigeschaltet*. Alle Funktionen stehen jetzt bereit — Übersicht: `!hilfe`');
+    }
+    return;
+  }
 
   // Slowmode greift vor allem anderen (Nachricht wird ggf. gelöscht)
   if (isGroup && !isEdit && !fromSelf && (await checkSlowmode(msg, chatJid, senderIds, settings, senderName))) return;

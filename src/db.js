@@ -17,8 +17,24 @@ export function getDb() {
   return client;
 }
 
+// ABSOLUTER SCHUTZ der Baileys-Session: kein Feature-/Wartungs-/Cleanup-Code darf
+// die Session-Tabellen schreibend anfassen (Löschen/Überschreiben → 401/Bad MAC).
+// auth.js schreibt bewusst über den ROHEN Treiber (getDb().execute/.batch), NICHT
+// über diese Helfer — dieser Wächter blockiert also ausschließlich versehentliche
+// Fremdzugriffe und protokolliert sie, wie in der Sicherheitsvorgabe verlangt.
+const AUTH_TABLE_RE = /\bauth_(?:creds|keys)\b/i;
+const WRITE_VERB_RE = /^\s*(?:insert|update|delete|drop|alter|truncate|replace|create)\b/i;
+function assertNotAuthWrite(sql) {
+  const text = String(sql || '');
+  if (WRITE_VERB_RE.test(text) && AUTH_TABLE_RE.test(text)) {
+    console.error(`🛡️ [SECURITY BLOCK] Schreibzugriff auf Baileys-Session-Tabelle verweigert: ${text.slice(0, 90)}`);
+    throw new Error('Schreibzugriff auf geschützte Session-Tabellen (auth_creds/auth_keys) ist nicht erlaubt.');
+  }
+}
+
 /** Direkter Write/Read mit einem stillen Retry (transiente Turso-Aussetzer). */
 export async function dbRun(sql, args = []) {
+  assertNotAuthWrite(sql); // Session-Schutzwall — vor jedem Zugriff
   const db = getDb();
   try {
     return await db.execute({ sql, args });
@@ -52,7 +68,7 @@ const TABLES = [
    )`,
   `CREATE TABLE IF NOT EXISTS group_settings (
      jid TEXT PRIMARY KEY,
-     enabled INTEGER DEFAULT 1,
+     enabled INTEGER DEFAULT 0,
      antilink INTEGER DEFAULT 0,
      antispam INTEGER DEFAULT 0,
      blacklist_on INTEGER DEFAULT 1,

@@ -10,13 +10,17 @@ process.env.OWNER_NUMBERS = '491700000000';
 process.env.DATABASE_URL = 'file:' + join(here, '..', '.test-cleanup.db');
 process.env.DATABASE_KEY = 'unused';
 
-const { initDb, dbRun, dbRows, wipeAllData, PROTECTED_TABLES, deleteTargetTable } = await import('../src/db.js');
+const { initDb, dbRun, dbRows, wipeAllData, PROTECTED_TABLES, deleteTargetTable, getDb } = await import('../src/db.js');
 const { runCleanup } = await import('../src/scheduler.js');
 
+// Session-Seeds laufen über den ROHEN Treiber — genau wie auth.js. Der zentrale
+// Schreib-Wächter in dbRun blockiert Auth-Writes bewusst (Feature-Code-Schutz);
+// die legitime Auth-Persistenz nutzt daher getDb().execute direkt.
 async function seedSession() {
-  await dbRun('INSERT OR REPLACE INTO auth_creds (id, data) VALUES (?, ?)', ['main', '{"registered":true}']);
-  await dbRun('INSERT OR REPLACE INTO auth_keys (id, data) VALUES (?, ?)', ['main:pre-key-1', '{"k":1}']);
-  await dbRun('INSERT OR REPLACE INTO auth_keys (id, data) VALUES (?, ?)', ['main:session-x', '{"k":2}']);
+  const db = getDb();
+  await db.execute({ sql: 'INSERT OR REPLACE INTO auth_creds (id, data) VALUES (?, ?)', args: ['main', '{"registered":true}'] });
+  await db.execute({ sql: 'INSERT OR REPLACE INTO auth_keys (id, data) VALUES (?, ?)', args: ['main:pre-key-1', '{"k":1}'] });
+  await db.execute({ sql: 'INSERT OR REPLACE INTO auth_keys (id, data) VALUES (?, ?)', args: ['main:session-x', '{"k":2}'] });
 }
 async function sessionIntact() {
   const creds = await dbRows('SELECT id FROM auth_creds WHERE id = ?', ['main']);
