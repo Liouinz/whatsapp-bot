@@ -293,6 +293,19 @@ export async function initDb() {
   console.log(`✅ DB initialisiert (${TABLES.length} Tabellen, ${indexesOk}/${INDEXES.length} Indizes).`);
 }
 
+// ── Schutzwall für Baileys-Session-Daten ───────────────────────────
+// Diese Tabellen enthalten die WhatsApp-Session (creds + alle Signal-Keys).
+// Sie dürfen von KEINEM automatischen Aufräumen/Wipe angefasst werden — ein
+// versehentliches Löschen führt zu 401 (Logout) / Bad MAC. Nur der bewusste
+// Relink-Mechanismus (auth.js: clearSession) darf sie leeren.
+export const PROTECTED_TABLES = new Set(['auth_creds', 'auth_keys']);
+
+/** Zieltabelle eines DELETE-Statements herausziehen (für den Cleanup-Guard). */
+export function deleteTargetTable(sql) {
+  const m = /delete\s+from\s+["'`]?([a-zA-Z_][\w]*)/i.exec(String(sql || ''));
+  return m ? m[1] : null;
+}
+
 // ── Komplett-Reset (Danger-Zone im Panel) ──────────────────────────
 
 // Alle Daten-Tabellen — bewusst OHNE auth_creds/auth_keys: die Session wird
@@ -317,14 +330,20 @@ const DATA_TABLES = [
  */
 export async function wipeAllData() {
   const db = getDb();
-  await db.batch(DATA_TABLES.map((t) => ({ sql: `DELETE FROM ${t}`, args: [] })), 'write');
+  // Schutzwall: geschützte Session-Tabellen NIEMALS mitlöschen (Defense-in-Depth,
+  // falls versehentlich eine in DATA_TABLES landet).
+  const tables = DATA_TABLES.filter((t) => !PROTECTED_TABLES.has(t));
+  if (tables.length !== DATA_TABLES.length) {
+    console.warn('🛡️ [SECURITY BLOCK] wipeAllData: geschützte Auth-Tabelle aus der Löschliste entfernt.');
+  }
+  await db.batch(tables.map((t) => ({ sql: `DELETE FROM ${t}`, args: [] })), 'write');
   // RAM-Puffer verwerfen — sonst schreibt der nächste Flush gelöschte Daten zurück
   xpBuffer.clear();
   groupDayBuffer.clear();
   statBuffer.messages = 0;
   statBuffer.commands = 0;
   statBuffer.ai_calls = 0;
-  return DATA_TABLES.length;
+  return tables.length;
 }
 
 // ── Schreib-Batching (XP + Tages-Counter) ──────────────────────────
