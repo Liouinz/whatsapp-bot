@@ -140,7 +140,7 @@ export const managementCommands = [
     group: 'admin',
     desc: 'Gruppen-Verwaltung: on/off/info/liste',
     usage: '!gruppe on|off|info|liste',
-    botOwnerOnly: true,
+    ownerOnly: true,
     async run(ctx) {
       const sub = (ctx.args[0] || '').toLowerCase();
 
