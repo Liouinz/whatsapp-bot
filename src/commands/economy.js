@@ -7,6 +7,7 @@ import { resolveLid } from '../permissions.js';
 import { audit } from '../moderation.js';
 import { getBoostMult } from '../boosts.js';
 import { getPrestigeMult } from '../prestige.js';
+import { getEventCoinMult } from '../events.js';
 
 // ── Kern-Helfer ────────────────────────────────────────────────────
 
@@ -63,7 +64,7 @@ export async function earnCoins(userJid, amount, name = '') {
     getBoostMult(u, 'coins').catch(() => 1),
     getPrestigeMult(u).catch(() => 1),
   ]);
-  const total = Math.round(amount * boost * prestige);
+  const total = Math.round(amount * boost * prestige * getEventCoinMult());
   await addCoins(userJid, total, name);
   return total;
 }
@@ -128,7 +129,7 @@ export const economyCommands = [
         getBoostMult(resolveLid(ctx.sender), 'coins').catch(() => 1),
         getPrestigeMult(resolveLid(ctx.sender)).catch(() => 1),
       ]);
-      const mult = boost * prestige;
+      const mult = boost * prestige * getEventCoinMult();
       const total = Math.round(base_total * mult);
       await dbRun(
         `UPDATE coins SET balance = balance + ?, total_earned = total_earned + ?,

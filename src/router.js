@@ -30,7 +30,9 @@ import { economyCommands } from './commands/economy.js';
 import { itemCommands } from './commands/items.js';
 import { questCommands } from './commands/quests.js';
 import { progressionCommands } from './commands/progression.js';
+import { eventCommands } from './commands/events.js';
 import { getBoostMult } from './boosts.js';
+import { getEventXpMult } from './events.js';
 import { funCommands } from './commands/fun.js';
 import { pollCommands } from './commands/polls.js';
 import { birthdayCommands } from './commands/birthdays.js';
@@ -58,6 +60,7 @@ export const registry = [
   ...itemCommands,
   ...questCommands,
   ...progressionCommands,
+  ...eventCommands,
   ...adminCommands,
 ];
 
@@ -189,8 +192,9 @@ async function grantXp(chatJid, userJid, name, settings) {
   const baseAmount =
     config.xp.perMessageMin +
     Math.floor(Math.random() * (config.xp.perMessageMax - config.xp.perMessageMin + 1));
-  // Aktiven XP-Boost anwenden (Item-Effekt); getBoostMult cached im RAM.
-  const amount = Math.round(baseAmount * (await getBoostMult(user, 'xp').catch(() => 1)));
+  // Aktiven XP-Boost (Item) + globalen Event-Multiplikator anwenden.
+  // getBoostMult cached im RAM, getEventXpMult ist ein reiner RAM-Wert.
+  const amount = Math.round(baseAmount * (await getBoostMult(user, 'xp').catch(() => 1)) * getEventXpMult());
   const before = xpTotals.get(key);
   const after = before + amount;
   xpTotals.set(key, after);

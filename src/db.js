@@ -219,6 +219,12 @@ const TABLES = [
   `CREATE TABLE IF NOT EXISTS prestige (
      user_jid TEXT PRIMARY KEY, level INTEGER DEFAULT 0, updated_at INTEGER
    )`,
+
+  // Globales Event (höchstens eine Zeile, id=1) — zeitlich begrenzte Multiplikatoren
+  `CREATE TABLE IF NOT EXISTS active_event (
+     id INTEGER PRIMARY KEY, event_id TEXT, name TEXT, xp_mult REAL DEFAULT 1,
+     coin_mult REAL DEFAULT 1, started_at INTEGER, expires_at INTEGER
+   )`,
 ];
 
 // Spalten, die nach dem ersten Deploy dazukamen — werden per ALTER TABLE nachgezogen,
@@ -301,7 +307,7 @@ const DATA_TABLES = [
   'audit_log', 'owner_alerts', 'daily_stats', 'coins', 'purchases',
   'user_titles', 'polls', 'poll_votes', 'birthdays', 'group_daily',
   'millionaire_games', 'millionaire_daily', 'inventory', 'user_boosts', 'player_contracts',
-  'user_achievements', 'prestige',
+  'user_achievements', 'prestige', 'active_event',
 ];
 
 /**

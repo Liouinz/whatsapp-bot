@@ -12,6 +12,7 @@ import { releaseExpiredRaidLocks } from './moderation.js';
 import { congratulateBirthdays } from './commands/birthdays.js';
 import { renderPollResult, closePoll } from './commands/polls.js';
 import { sweepContracts } from './commands/quests.js';
+import { maybeAutoEvent } from './events.js';
 
 let tickTimer = null;
 let cleanupTimer = null;
@@ -237,6 +238,7 @@ export function startScheduler() {
       await autoClosePolls();
       await processWeeklyReports();
       await sweepContracts(); // intern auf höchstens alle 2 Min gedrosselt
+      await maybeAutoEvent(); // Wochenend-Event, intern gedrosselt
     } catch (err) {
       logError(err, 'scheduler.tick');
     }
