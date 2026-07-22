@@ -1,12 +1,15 @@
 // Scheduler: geplante Nachrichten, Nachtmodus (auto schließen/öffnen),
-// Anti-Raid-Freigabe, Geburtstage, Umfragen-Auto-Schließung, Wochenreport
-// und stündliches Auto-Cleanup. Alles neustart-fest (DB).
+// Anti-Raid-Freigabe, Geburtstage, Umfragen-Auto-Schließung, Wochenreport.
+// Alles neustart-fest (DB).
+// 
+// HINWEIS: Auto-Cleanup wurde entfernt (siehe Commit-Nachricht).
+// Die Datenbank wird nicht mehr automatisch bereinigt.
 
 import { BOT_NAME, config } from './config.js';
 import { state } from './state.js';
-import { dbRun, dbRows, todayKey, flushBuffers, PROTECTED_TABLES, deleteTargetTable } from './db.js';
+import { dbRun, dbRows, todayKey, flushBuffers } from './db.js';
 import { sendText } from './queue.js';
-import { logError, logInfo, logWarn } from './logger.js';
+import { logError, logInfo } from './logger.js';
 import { botIsAdmin } from './permissions.js';
 import { releaseExpiredRaidLocks } from './moderation.js';
 import { congratulateBirthdays } from './commands/birthdays.js';
@@ -15,7 +18,6 @@ import { sweepContracts } from './commands/quests.js';
 import { maybeAutoEvent } from './events.js';
 
 let tickTimer = null;
-let cleanupTimer = null;
 
 // ── Geplante Nachrichten ───────────────────────────────────────────
 
@@ -194,60 +196,6 @@ async function processWeeklyReports() {
   if (rows.length) logInfo(`📈 Wochenreport an ${rows.length} Gruppe(n) gesendet.`);
 }
 
-// ── Auto-Cleanup (Phase 21) ────────────────────────────────────────
-
-// Explizite Whitelist: NUR diese Tabellen darf der Auto-Cleanup anfassen.
-// Alles andere (insbesondere die geschützten Session-Tabellen auth_creds/
-// auth_keys) wird hart blockiert — so kann kein künftiger Code den Bot
-// versehentlich ausloggen (401), egal was in die jobs-Liste gerät.
-const CLEANUP_ALLOWED_TABLES = new Set([
-  'warnings', 'mutes', 'error_log', 'scheduled_messages', 'ai_usage', 'daily_stats',
-  'audit_log', 'owner_alerts', 'rate_limits', 'error_counts', 'group_daily', 'polls', 'poll_votes',
-]);
-
-export async function runCleanup() {
-  const now = Date.now();
-  const day = 86_400_000;
-  const jobs = [
-    ['DELETE FROM warnings WHERE expires_at <= ?', [now]],
-    ['DELETE FROM mutes WHERE until <= ?', [now]],
-    ['DELETE FROM error_log WHERE created_at < ?', [now - config.log.keepErrorDays * day]],
-    ['DELETE FROM scheduled_messages WHERE done = 1 AND done_at < ?', [now - config.scheduler.keepDoneSchedulesDays * day]],
-    ['DELETE FROM ai_usage WHERE day < ?', [new Date(now - 30 * day).toISOString().slice(0, 10)]],
-    ['DELETE FROM daily_stats WHERE day < ?', [new Date(now - 90 * day).toISOString().slice(0, 10)]],
-    ['DELETE FROM audit_log WHERE created_at < ?', [now - 30 * day]],
-    ['DELETE FROM owner_alerts WHERE created_at < ?', [now - 30 * day]],
-    ['DELETE FROM rate_limits WHERE window_start < ?', [now - day]],
-    ['DELETE FROM error_counts WHERE last_at < ?', [now - 30 * day]],
-    ['DELETE FROM group_daily WHERE day < ?', [new Date(now - 60 * day).toISOString().slice(0, 10)]],
-    ['DELETE FROM polls WHERE open = 0 AND created_at < ?', [now - 30 * day]],
-    ['DELETE FROM poll_votes WHERE poll_id NOT IN (SELECT id FROM polls)', []],
-  ];
-
-  let cleaned = 0;
-  let blocked = 0;
-  for (const [sql, args] of jobs) {
-    const table = deleteTargetTable(sql);
-    // SCHUTZWALL: geschützte Session-Tabelle ODER nicht ausdrücklich erlaubte
-    // Tabelle → sofort blockieren, warnen, NICHT ausführen.
-    if (!table || PROTECTED_TABLES.has(table) || !CLEANUP_ALLOWED_TABLES.has(table)) {
-      blocked++;
-      logWarn(`🛡️ [SECURITY BLOCK] Auto-Cleanup gegen geschützte/nicht freigegebene Tabelle "${table || '?'}" verhindert — Session-Daten bleiben unangetastet.`);
-      continue;
-    }
-    try {
-      await dbRun(sql, args);
-      cleaned++;
-    } catch (err) {
-      logError(err, 'scheduler.cleanup');
-    }
-  }
-  logInfo(
-    `🧹 Auto-Cleanup gelaufen — ${cleaned} Tabelle(n) bereinigt${blocked ? `, ${blocked} blockiert` : ''}. ` +
-      `Session-Daten (auth_creds/auth_keys) werden NIE angefasst.`
-  );
-}
-
 // ── Start/Stop ─────────────────────────────────────────────────────
 
 export function startScheduler() {
@@ -267,13 +215,9 @@ export function startScheduler() {
       logError(err, 'scheduler.tick');
     }
   }, config.scheduler.tickMs);
-
-  cleanupTimer = setInterval(() => runCleanup().catch((e) => logError(e, 'scheduler.cleanup')), config.scheduler.cleanupIntervalMs);
 }
 
 export function stopScheduler() {
   if (tickTimer) clearInterval(tickTimer);
-  if (cleanupTimer) clearInterval(cleanupTimer);
   tickTimer = null;
-  cleanupTimer = null;
 }
