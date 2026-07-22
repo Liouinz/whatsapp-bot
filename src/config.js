@@ -163,7 +163,7 @@ export const config = {
     streakBonusMax: 250, // … gedeckelt
     giveMin: 10, // !geben: Mindestbetrag
     betMin: 20, // !wette / !slots: Mindesteinsatz
-    betMax: 20000, // Maximaleinsatz (Schutz vor Alles-oder-nichts-Frust)
+    betMax: 200000, // Maximaleinsatz (Schutz vor Alles-oder-nichts-Frust)
     startBalance: 100, // Startguthaben beim ersten Kontakt
   },
 
