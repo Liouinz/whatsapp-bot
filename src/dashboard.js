@@ -20,6 +20,7 @@ import { resetBoostCache } from './boosts.js';
 import { resetQuestState } from './commands/quests.js';
 import { resetPrestigeCache } from './prestige.js';
 import { resetEventCache } from './events.js';
+import { resetGlobalCache } from './global.js';
 import { invalidateSettings, invalidateBlockedWords, loadMutes, unmuteUser, unbanUser, clearWarnings, kickUser, banUser, audit } from './moderation.js';
 import { botIsAdminInMeta } from './permissions.js';
 import { queueLength, sendText } from './queue.js';
@@ -605,6 +606,7 @@ export function createDashboard() {
       resetQuestState();
       resetPrestigeCache();
       resetEventCache();
+      resetGlobalCache();
       groupCache = { at: 0, list: [] };
       statsCache = { at: 0, data: null };
       await Promise.all([loadToggles(), loadCustomCommands(), loadAfk(), loadMutes(), initAiUsage(), loadActiveMillionaire()]);

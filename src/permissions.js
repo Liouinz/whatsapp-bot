@@ -4,10 +4,20 @@
 // Fix: IMMER Telefonnummer-JID UND LID normalisieren und BEIDE vergleichen.
 
 import { jidNormalizedUser } from '@whiskeysockets/baileys';
-import { OWNER_NUMBERS } from './config.js';
+import { OWNER_NUMBERS, BOT_OWNER_NUMBERS } from './config.js';
 import { state } from './state.js';
 import { logError } from './logger.js';
 import { dbRun } from './db.js';
+
+// Bot-Owner-Nummern: BOT_OWNER_NUMBERS, sonst Rückfall auf OWNER_NUMBERS.
+const EFFECTIVE_BOT_OWNERS = BOT_OWNER_NUMBERS.length ? BOT_OWNER_NUMBERS : OWNER_NUMBERS;
+
+// Rollen-Stufen (aufsteigend). Höhere Rolle schließt niedrigere Rechte ein.
+// Leicht erweiterbar: neue Stufe hier + Prüf-Funktion ergänzen.
+export const ROLE = { USER: 1, GROUP_ADMIN: 2, COMMUNITY_OWNER: 3, BOT_OWNER: 4 };
+export const ROLE_LABEL = {
+  1: '👤 Nutzer', 2: '👮 Gruppen-Admin', 3: '🌐 Community-Owner', 4: '👑 Bot-Owner',
+};
 
 const META_CACHE_MS = 60_000;
 const metaCache = new Map(); // groupJid → { meta, at }
@@ -111,15 +121,36 @@ export function senderJid(msg) {
   return candidates.find((c) => c.endsWith('@s.whatsapp.net')) || candidates[0] || null;
 }
 
-/** Ist eine der Kandidaten-IDs ein Owner (OWNER_NUMBERS)? */
-export function isOwner(candidates) {
+function digitsOf(id) {
+  const resolved = resolveLid(id);
+  return resolved ? String(resolved).split('@')[0].replace(/\D/g, '') : '';
+}
+
+/** Ist eine der Kandidaten-IDs der BOT-OWNER (höchste Rolle)? */
+export function isBotOwner(candidates) {
   const list = Array.isArray(candidates) ? candidates : [candidates];
   return list.some((id) => {
-    const resolved = resolveLid(id);
-    if (!resolved) return false;
-    const digits = String(resolved).split('@')[0].replace(/\D/g, '');
-    return digits && OWNER_NUMBERS.includes(digits);
+    const d = digitsOf(id);
+    return d && EFFECTIVE_BOT_OWNERS.includes(d);
   });
+}
+
+/** Ist eine der Kandidaten-IDs ein Community-Owner? Bot-Owner zählt immer mit. */
+export function isOwner(candidates) {
+  const list = Array.isArray(candidates) ? candidates : [candidates];
+  if (isBotOwner(list)) return true; // höhere Rolle schließt Community-Owner ein
+  return list.some((id) => {
+    const d = digitsOf(id);
+    return d && OWNER_NUMBERS.includes(d);
+  });
+}
+
+/** Höchste Rolle eines Absenders (BOT_OWNER > COMMUNITY_OWNER > GROUP_ADMIN > USER). */
+export async function getRoleLevel(groupJid, senderIds, isGroup) {
+  if (isBotOwner(senderIds)) return ROLE.BOT_OWNER;
+  if (isOwner(senderIds)) return ROLE.COMMUNITY_OWNER;
+  if (isGroup && (await isUserAdmin(groupJid, senderIds))) return ROLE.GROUP_ADMIN;
+  return ROLE.USER;
 }
 
 /** Admin-Einträge (admin/superadmin) einer Gruppe als normalisierte ID-Liste. */

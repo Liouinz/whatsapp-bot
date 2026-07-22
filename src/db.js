@@ -225,6 +225,11 @@ const TABLES = [
      id INTEGER PRIMARY KEY, event_id TEXT, name TEXT, xp_mult REAL DEFAULT 1,
      coin_mult REAL DEFAULT 1, started_at INTEGER, expires_at INTEGER
    )`,
+
+  // Globale Bot-Einstellungen (System-Schalter, Wartungsmodus)
+  `CREATE TABLE IF NOT EXISTS global_settings (
+     key TEXT PRIMARY KEY, value TEXT, updated_at INTEGER
+   )`,
 ];
 
 // Spalten, die nach dem ersten Deploy dazukamen — werden per ALTER TABLE nachgezogen,
@@ -320,7 +325,7 @@ const DATA_TABLES = [
   'audit_log', 'owner_alerts', 'daily_stats', 'coins', 'purchases',
   'user_titles', 'polls', 'poll_votes', 'birthdays', 'group_daily',
   'millionaire_games', 'millionaire_daily', 'inventory', 'user_boosts', 'player_contracts',
-  'user_achievements', 'prestige', 'active_event',
+  'user_achievements', 'prestige', 'active_event', 'global_settings',
 ];
 
 /**

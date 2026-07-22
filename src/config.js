@@ -10,11 +10,16 @@ export const BOT_NAME = (process.env.BOT_NAME || 'CommunityBot').trim();
 /** Befehls-Präfix. */
 export const PREFIX = '!';
 
-/** Owner-Nummern (nur Ziffern, komma-getrennt in OWNER_NUMBERS). */
-export const OWNER_NUMBERS = (process.env.OWNER_NUMBERS || '')
-  .split(',')
-  .map((n) => n.replace(/\D/g, ''))
-  .filter(Boolean);
+const parseNumbers = (raw) =>
+  (raw || '').split(',').map((n) => n.replace(/\D/g, '')).filter(Boolean);
+
+/** Community-Owner-Nummern (Bedeutung unverändert). */
+export const OWNER_NUMBERS = parseNumbers(process.env.OWNER_NUMBERS);
+
+/** Bot-Besitzer (höchste Rechte, globale Verwaltung). Ist BOT_OWNER_NUMBERS
+ * leer, fällt der Bot auf OWNER_NUMBERS zurück — so bleibt der Bot ohne extra
+ * Konfiguration handlungsfähig (kein Aussperren bei bestehenden Deployments). */
+export const BOT_OWNER_NUMBERS = parseNumbers(process.env.BOT_OWNER_NUMBERS);
 
 export const config = {
   // ── Sende-Queue ────────────────────────────────────────────────

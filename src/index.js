@@ -23,6 +23,7 @@ import { loadAfk } from './commands/afk.js';
 import { loadMutes, handleJoin, getGroupSettings } from './moderation.js';
 import { loadActiveMillionaire } from './commands/millionaer.js';
 import { loadActiveEvent } from './events.js';
+import { loadGlobalSettings } from './global.js';
 import { invalidateGroupMeta } from './permissions.js';
 import { initAiUsage } from './ai.js';
 import { startScheduler, stopScheduler } from './scheduler.js';
@@ -512,7 +513,7 @@ async function main() {
   await initDb();
 
   // Persistente Zustände in den RAM laden
-  await Promise.all([loadToggles(), loadCustomCommands(), loadAfk(), loadMutes(), initAiUsage(), loadActiveMillionaire(), loadActiveEvent()]);
+  await Promise.all([loadToggles(), loadCustomCommands(), loadAfk(), loadMutes(), initAiUsage(), loadActiveMillionaire(), loadActiveEvent(), loadGlobalSettings()]);
 
   startFlushLoop();
   startScheduler();

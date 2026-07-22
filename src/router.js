@@ -8,8 +8,9 @@ import { dbRows, dbRun, bufferXp, bufferStat, bufferGroupMessage, xpToLevel } fr
 import { replyTo, sendText, wasSentByBot } from './queue.js';
 import { logError } from './logger.js';
 import {
-  senderCandidates, senderJid, isOwner, isUserAdmin, getGroupMeta, resolveLid,
+  senderCandidates, senderJid, isOwner, isBotOwner, isUserAdmin, getGroupMeta, resolveLid, getRoleLevel,
 } from './permissions.js';
+import { xpEnabled, gamesEnabled, economyEnabled, maintenanceOn } from './global.js';
 import { checkAutoMod, getGroupSettings } from './moderation.js';
 import { getAfk, clearAfk, fmtSince } from './commands/afk.js';
 import { resolveCustom, listCustom } from './commands/custom.js';
@@ -31,6 +32,7 @@ import { itemCommands } from './commands/items.js';
 import { questCommands } from './commands/quests.js';
 import { progressionCommands } from './commands/progression.js';
 import { eventCommands } from './commands/events.js';
+import { managementCommands } from './commands/management.js';
 import { getBoostMult } from './boosts.js';
 import { getEventXpMult } from './events.js';
 import { funCommands } from './commands/fun.js';
@@ -61,6 +63,7 @@ export const registry = [
   ...questCommands,
   ...progressionCommands,
   ...eventCommands,
+  ...managementCommands,
   ...adminCommands,
 ];
 
@@ -177,6 +180,7 @@ export function resetXpCache() {
 }
 
 async function grantXp(chatJid, userJid, name, settings) {
+  if (!xpEnabled()) return; // XP-System global deaktiviert
   const user = resolveLid(userJid);
   const key = `${chatJid}|${user}`;
   const now = Date.now();
@@ -458,6 +462,12 @@ async function handleMessage(msg) {
   if (!fromSelf && !isOwner(senderIds) && !commandRateOk(resolveLid(sender))) return;
 
   const ctx = makeCtx(msg, chatJid, isGroup, senderIds, sender, senderName, text, args);
+
+  // Wartungsmodus: alle Befehle für Nicht-Bot-Owner sperren
+  if (maintenanceOn() && !ctx.isBotOwner) {
+    return ctx.reply('🔧 Der Bot ist gerade im *Wartungsmodus* — bitte gleich nochmal versuchen.');
+  }
+
   const command = byName.get(name);
 
   // 5a) Fester Befehl
@@ -468,11 +478,23 @@ async function handleMessage(msg) {
     if (command.groupOnly && !isGroup) {
       return ctx.reply('⚠️ Dieser Befehl funktioniert nur in Gruppen.');
     }
+    if (command.botOwnerOnly && !ctx.isBotOwner) {
+      return ctx.reply('⛔ Dieser Befehl ist nur für den *Bot-Owner*.');
+    }
     if (command.ownerOnly && !ctx.isOwner) {
-      return ctx.reply('⛔ Diesen Befehl darf nur der Bot-Owner nutzen.');
+      return ctx.reply('⛔ Diesen Befehl darf nur der Owner nutzen.');
     }
     if (command.adminOnly && !(await ctx.isAdmin())) {
       return ctx.reply('⛔ Dafür brauchst du Admin-Rechte in dieser Gruppe.');
+    }
+    // Global abschaltbare Systeme (Bot-Owner umgeht die Sperre)
+    if (!ctx.isBotOwner) {
+      if (command.group === 'games' && !gamesEnabled()) {
+        return ctx.reply('🎮 Das Spiele-System ist gerade global deaktiviert.');
+      }
+      if (command.group === 'economy' && !economyEnabled()) {
+        return ctx.reply('💰 Das Economy-System ist gerade global deaktiviert.');
+      }
     }
     rolloverDay();
     state.commandsToday++;
@@ -543,6 +565,8 @@ function makeCtx(msg, chatJid, isGroup, senderIds, sender, senderName, text, arg
     argText: args.join(' '),
     registry,
     isOwner: owner,
+    isBotOwner: isBotOwner(senderIds),
+    role: () => getRoleLevel(chatJid, senderIds, isGroup), // Promise<ROLE>
     reply: (t, mentions) => replyTo(msg, t, mentions),
     mentionTag: (jid) => `@${String(resolveLid(jid)).split('@')[0]}`,
     mentions: () => contextInfo(msg)?.mentionedJid || [],
