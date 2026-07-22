@@ -84,6 +84,14 @@ let startChain = Promise.resolve();
 let openStableTimer = null; // nullt reconnectAttempts erst nach stabiler Verbindung
 let permanentAlertSent = false; // Owner-Alarm bei Dauerinstabilität nur einmal
 
+// Watchdog-Zustand: reconnectPending = ein geplanter Reconnect-Timer läuft;
+// lastProgressAt = Zeitpunkt des letzten Verbindungs-Fortschritts (Event/Start).
+// Beides braucht der Watchdog, um "hängt wirklich" von "arbeitet noch" zu trennen.
+let reconnectPending = false;
+let lastProgressAt = Date.now();
+let watchdogTimer = null;
+function markProgress() { lastProgressAt = Date.now(); }
+
 /** Den aktuellen Socket vollständig abbauen (idempotent, wirft nie). */
 function teardownSocket() {
   const s = currentSock;
@@ -103,6 +111,7 @@ function startSocket() {
 
 async function doStartSocket() {
   if (shuttingDown || state.stopped) return;
+  markProgress(); // ein frischer Start zählt als Fortschritt (Watchdog-Uhr)
   teardownSocket(); // alten Socket IMMER erst sauber beenden
 
   const { state: authState, saveCreds, clearSession } = await useTursoAuthState('main');
@@ -126,6 +135,10 @@ async function doStartSocket() {
     markOnlineOnConnect: false, // WICHTIG: Handy bekommt weiter Push-Benachrichtigungen
     syncFullHistory: false,
     browser: [BOT_NAME, 'Chrome', '1.0.0'],
+    // WebSocket-Keep-Alive explizit: Baileys pingt regelmäßig; bleibt der Pong
+    // aus, feuert Baileys ein 'close' → unser Reconnect greift. Ohne aktiven
+    // Ping kann eine tot gegangene Leitung unbemerkt "offen" bleiben.
+    keepAliveIntervalMs: config.keepAlive.wsKeepAliveMs,
     // Socket (und damit QR- bzw. Pairing-Fenster) lange offen halten — sonst
     // rotiert Baileys nach 60s und ein noch offener Pairing-Code wird ungültig.
     qrTimeout: config.pairing.qrTimeoutMs,
@@ -193,6 +206,7 @@ async function doStartSocket() {
 }
 
 async function handleConnectionUpdate({ connection, lastDisconnect, qr }, sock) {
+  markProgress(); // jedes Verbindungs-Event ist Fortschritt (Watchdog-Uhr)
   if (qr) {
     // QR-Schleife ist normal, solange nicht gescannt (~60 s neuer Code)
     state.currentQr = await QRCode.toDataURL(qr, { width: 512, margin: 2 }).catch(() => null);
@@ -208,6 +222,7 @@ async function handleConnectionUpdate({ connection, lastDisconnect, qr }, sock) 
     state.pairingCode = null; // gekoppelt — Code hat ausgedient
     activePairingNumber = null; // Pairing-Fenster geschlossen
     pairingReissues = 0;
+    reconnectPending = false; // verbunden — kein Reconnect mehr offen
     state.lastConnectedAt = Date.now();
 
     // Reconnect-Zähler NICHT sofort nullen, sondern erst nach 30 s stabiler
@@ -359,9 +374,54 @@ function scheduleReconnect(code, label = '') {
   const suffix = label ? ` (${label})` : '';
   logInfo(`🔁 Verbindungsabbruch Code ${code || '?'}${suffix} — Reconnect-Versuch ${n} in ${Math.round(delay / 1000)}s.`);
   clearTimeout(reconnectTimer);
+  reconnectPending = true; // ab jetzt läuft ein geplanter Reconnect (Watchdog weiß Bescheid)
+  markProgress();
   reconnectTimer = setTimeout(() => {
+    reconnectPending = false;
     startSocket().catch((e) => logError(e, 'startSocket'));
   }, delay);
+}
+
+/**
+ * Verbindungs-Watchdog — schließt die einzige Lücke, die der Reconnect nicht
+ * sieht: einen halb-offenen "Zombie"-Socket, der als 'open' gilt, dessen echte
+ * WebSocket aber tot ist. Dann feuert KEIN 'close' und ohne Watchdog reconnectet
+ * nichts — der Bot wirkt verbunden, reagiert aber auf nichts. Zusätzlich als
+ * Backstop: falls die Reconnect-Kette je stillsteht, stößt der Watchdog sie neu
+ * an. Läuft im ${config.keepAlive.watchdogMs / 1000}s-Takt, wirft nie.
+ */
+function watchdogTick() {
+  if (shuttingDown || state.stopped) return;
+
+  // 1) Zombie: state sagt 'open', der reale WebSocket ist aber tot → sofort neu.
+  if (state.connection === 'open') {
+    const ws = currentSock?.ws;
+    if (ws && !ws.isOpen) {
+      logWarn('🐕 Watchdog: WhatsApp-Verbindung ist tot, meldet aber "open" — erzwinge Reconnect.');
+      teardownSocket();
+      state.connection = 'close';
+      scheduleReconnect(0, 'Watchdog: toter Socket');
+    }
+    return;
+  }
+
+  // 2) Backstop: nicht verbunden, kein geplanter Reconnect, kein Pairing-Fenster
+  //    und seit Langem kein Fortschritt → Kette angestoßen halten (nie versanden).
+  if (
+    !reconnectPending && !pendingPairing && !activePairingNumber &&
+    Date.now() - lastProgressAt > config.keepAlive.stuckMs
+  ) {
+    logWarn('🐕 Watchdog: keine Verbindung und kein geplanter Reconnect — stoße neu an.');
+    scheduleReconnect(0, 'Watchdog: Kette angestoßen');
+  }
+}
+
+function startWatchdog() {
+  clearInterval(watchdogTimer);
+  watchdogTimer = setInterval(() => {
+    try { watchdogTick(); } catch (e) { logError(e, 'watchdog'); }
+  }, config.keepAlive.watchdogMs);
+  watchdogTimer.unref?.(); // darf einen sauberen Shutdown nicht blockieren
 }
 
 function printQrAscii(qr) {
@@ -494,6 +554,7 @@ async function shutdown(signal) {
     stopFlushLoop();
     clearTimeout(reconnectTimer);
     clearInterval(selfPingTimer);
+    clearInterval(watchdogTimer);
     await flushBuffers().catch(() => {});
     httpServer?.close();
     teardownSocket();
@@ -517,6 +578,7 @@ async function main() {
 
   startFlushLoop();
   startScheduler();
+  startWatchdog(); // Verbindungs-Watchdog (Zombie-Schutz + Reconnect-Backstop)
 
   // Web-Panel sofort starten, damit /qr und /health von Anfang an erreichbar sind
   const app = createDashboard();

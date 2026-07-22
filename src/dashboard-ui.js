@@ -767,8 +767,10 @@ function updateHome(changed){
   var cl = connLabel(status);
   dot.className = 'status-dot ' + (cl[0] === 'open' ? 'open' : cl[0] === 'bad' ? '' : 'connecting');
   document.getElementById('sTitle').textContent = cl[1];
+  var maint = status.global && status.global.maintenance;
   document.getElementById('sSub').textContent =
-    'Uptime ' + fmtUptime(status.uptimeMs) + ' · Warteschlange ' + status.queue;
+    'Uptime ' + fmtUptime(status.uptimeMs) + ' · Warteschlange ' + status.queue +
+    (maint ? ' · 🔧 Wartungsmodus aktiv' : '');
   if (changed === false) return; // Zähler & Kurve nur anfassen, wenn sich etwas geändert hat
   tween(document.getElementById('stGroups'), status.groups == null ? 0 : status.groups);
   tween(document.getElementById('stSent'), status.sentToday);
@@ -1262,7 +1264,41 @@ function renderLogs(){
 function renderSettings(){
   content.appendChild(h('h2', { class:'page-title' }, ['Extras']));
 
+  /* Globale Systeme (XP/Spiele/Economy) + Wartungsmodus — bot-weit */
+  var SYS = [
+    { key:'xp', label:'⭐ XP-System', hint:'Level & XP für Nachrichten' },
+    { key:'spiele', label:'🎮 Spiele', hint:'Quiz, Zahlenraten, Galgenmännchen, Millionär …' },
+    { key:'economy', label:'💰 Economy', hint:'Coins, Shop, Wetten, Verträge' },
+    { key:'maintenance', label:'🔧 Wartungsmodus', hint:'Sperrt alle Befehle — nur Bot-Owner können weiter bedienen', danger:true }
+  ];
+  var sysBox = h('div', {});
+  function drawSys(st){
+    sysBox.innerHTML = '';
+    SYS.forEach(function(s){
+      var on = !!st[s.key];
+      var btn = h('button', { class:'small' + (on ? (s.danger ? ' danger' : '') : ' ghost') },
+        [ on ? 'AN ✅' : 'AUS ⛔' ]);
+      btn.addEventListener('click', function(){
+        btn.disabled = true;
+        api('/global', { method:'POST', body:{ key:s.key, value:!on } })
+          .then(function(r){ drawSys(r); toast((s.danger ? '🔧 ' : '✅ ') + s.label + ': ' + (r[s.key] ? 'AN' : 'AUS')); })
+          .catch(function(e){ toast('⚠️ ' + e.message); btn.disabled = false; });
+      });
+      sysBox.appendChild(h('div', { class:'row', style:'justify-content:space-between;gap:12px;margin-bottom:9px;align-items:center' }, [
+        h('div', {}, [ h('div', {}, [s.label]), h('div', { class:'muted sm' }, [s.hint]) ]),
+        btn
+      ]));
+    });
+  }
+  sysBox.appendChild(skel(52));
   content.appendChild(h('div', { class:'glass card' }, [
+    h('h3', {}, ['🕹️ Globale Systeme']),
+    h('p', { class:'muted sm', style:'margin-bottom:12px' }, ['Schaltet Funktionen bot-weit für ALLE Gruppen. Entspricht den Befehlen !global und !wartung.']),
+    sysBox
+  ]));
+  api('/global').then(drawSys).catch(function(){ sysBox.innerHTML = ''; sysBox.appendChild(h('p', { class:'muted sm' }, ['Konnte Systeme nicht laden.'])); });
+
+  content.appendChild(h('div', { class:'glass card', style:'margin-top:12px' }, [
     h('h3', {}, ['🔄 Neustart']),
     h('p', { class:'muted sm', style:'margin-bottom:10px' }, ['Startet den Bot-Prozess neu (2 Min Cooldown). Die Session bleibt erhalten.']),
     h('button', { onclick:function(){

@@ -20,7 +20,7 @@ import { resetBoostCache } from './boosts.js';
 import { resetQuestState } from './commands/quests.js';
 import { resetPrestigeCache } from './prestige.js';
 import { resetEventCache } from './events.js';
-import { resetGlobalCache } from './global.js';
+import { resetGlobalCache, getGlobalFlag, setGlobalFlag } from './global.js';
 import { invalidateSettings, invalidateBlockedWords, loadMutes, unmuteUser, unbanUser, clearWarnings, kickUser, banUser, audit } from './moderation.js';
 import { botIsAdminInMeta } from './permissions.js';
 import { queueLength, sendText } from './queue.js';
@@ -411,6 +411,25 @@ export function createDashboard() {
     res.json({ ok: true, enabled: isCommandEnabled(name) });
   });
 
+  // Globale System-Schalter (XP/Spiele/Economy/Wartung) — dieselben Flags wie
+  // der !global-/!wartung-Befehl. Panel-Bedienung ohne Chat-Ankündigung.
+  const GLOBAL_KEYS = { xp: 'system_xp', spiele: 'system_spiele', economy: 'system_economy', maintenance: 'maintenance' };
+  const globalPayload = () => ({
+    xp: getGlobalFlag('system_xp'),
+    spiele: getGlobalFlag('system_spiele'),
+    economy: getGlobalFlag('system_economy'),
+    maintenance: getGlobalFlag('maintenance'),
+  });
+  api.get('/global', (req, res) => res.json(globalPayload()));
+  api.post('/global', async (req, res) => {
+    const key = String(req.body?.key || '');
+    if (!GLOBAL_KEYS[key]) return res.status(400).json({ error: 'Unbekanntes System.' });
+    const value = !!req.body?.value;
+    await setGlobalFlag(GLOBAL_KEYS[key], value);
+    await audit('global-toggle', '', key, 'panel', value ? 'an' : 'aus').catch(() => {});
+    res.json({ ok: true, ...globalPayload() });
+  });
+
   api.post('/custom', async (req, res) => {
     const { type, name, reply } = req.body || {};
     const key = String(name || '').toLowerCase().trim();
@@ -765,5 +784,11 @@ async function statusPayload() {
     queue: queueLength(),
     groups: groupCache.list.length || null,
     activity: state.activity,
+    global: {
+      xp: getGlobalFlag('system_xp'),
+      spiele: getGlobalFlag('system_spiele'),
+      economy: getGlobalFlag('system_economy'),
+      maintenance: getGlobalFlag('maintenance'),
+    },
   };
 }
