@@ -72,9 +72,37 @@ function storeMessage(msg) {
 }
 
 // ── Socket-Lifecycle ───────────────────────────────────────────────
+// GARANTIE "genau ein aktiver Socket": currentSock hält den einzigen lebenden
+// Socket. Vor jedem Neuaufbau wird der alte vollständig abgebaut (Listener
+// entfernt + end()), sonst laufen zwei Sockets parallel gegen denselben
+// Signal-Ratchet → Bad MAC / 440. Alle startSocket()-Aufrufe werden über
+// startChain SERIALISIERT, damit nie zwei Handshakes gleichzeitig starten.
 
-async function startSocket() {
+let currentSock = null;
+let startChain = Promise.resolve();
+let openStableTimer = null; // nullt reconnectAttempts erst nach stabiler Verbindung
+let permanentAlertSent = false; // Owner-Alarm bei Dauerinstabilität nur einmal
+
+/** Den aktuellen Socket vollständig abbauen (idempotent, wirft nie). */
+function teardownSocket() {
+  const s = currentSock;
+  currentSock = null;
+  if (state.sock === s) state.sock = null;
+  clearTimeout(openStableTimer);
+  if (!s) return;
+  try { s.ev?.removeAllListeners?.(); } catch { /* egal */ }
+  try { s.end?.(undefined); } catch { /* egal */ }
+}
+
+/** Öffentlicher Einstieg: serialisiert alle Start-Aufrufe (kein Doppel-Socket). */
+function startSocket() {
+  startChain = startChain.then(doStartSocket).catch((e) => logError(e, 'startSocket'));
+  return startChain;
+}
+
+async function doStartSocket() {
   if (shuttingDown || state.stopped) return;
+  teardownSocket(); // alten Socket IMMER erst sauber beenden
 
   const { state: authState, saveCreds, clearSession } = await useTursoAuthState('main');
   clearSessionFn = clearSession;
@@ -103,9 +131,12 @@ async function startSocket() {
     getMessage: async (key) => messageStore.get(`${key.remoteJid}|${key.id}`) || undefined,
   });
 
+  currentSock = sock;
   state.sock = sock;
   state.connection = 'connecting';
 
+  // Creds nach JEDER Änderung sichern (mit Retry in auth.js) — verlorene Creds
+  // oder Keys sind die Hauptursache für Bad-MAC-Fehler nach einem Reconnect.
   sock.ev.on('creds.update', () => saveCreds().catch((e) => logError(e, 'saveCreds')));
 
   sock.ev.on('connection.update', (update) => {
@@ -177,7 +208,15 @@ async function handleConnectionUpdate({ connection, lastDisconnect, qr }, sock) 
     activePairingNumber = null; // Pairing-Fenster geschlossen
     pairingReissues = 0;
     state.lastConnectedAt = Date.now();
-    state.reconnectAttempts = 0;
+
+    // Reconnect-Zähler NICHT sofort nullen, sondern erst nach 30 s stabiler
+    // Verbindung. So wächst der Backoff bei einer flappenden Verbindung
+    // (open → sofort close), statt in einer engen 1-s-Schleife zu hängen.
+    clearTimeout(openStableTimer);
+    openStableTimer = setTimeout(() => {
+      state.reconnectAttempts = 0;
+      permanentAlertSent = false;
+    }, 30_000);
 
     // LID-Basis: PN-JID UND LID des Bots erfassen (Grundlage der Admin-Erkennung)
     state.botJidPn = state.sock?.user?.id ? jidNormalizedUser(state.sock.user.id) : null;
@@ -207,9 +246,7 @@ async function handleConnectionUpdate({ connection, lastDisconnect, qr }, sock) 
         pairingReissues++;
         logWarn(`🔢 Pairing-Abbruch (Code ${code || '?'}) — EIN sanfter neuer Versuch in ${config.pairing.reissueDelayMs / 1000}s.`);
         clearTimeout(reconnectTimer);
-        const oldSock = state.sock;
-        state.sock = null;
-        try { oldSock?.end?.(new Error('Pairing-Neuausgabe')); } catch { /* egal */ }
+        teardownSocket(); // alten Socket samt Listenern sauber beenden
         await safeClearSession(); // wischt creds.me → nächster Socket registriert (kein Login-401)
         // Bewusst mit Pause: rapides Neuanfordern lässt WhatsApp die Nummer als
         // verdächtig einstufen (Registrierung wird dann dauerhaft abgelehnt).
@@ -288,30 +325,38 @@ async function handleConnectionUpdate({ connection, lastDisconnect, qr }, sock) 
 }
 
 /**
- * Reconnect mit exponentiellem Backoff (1 s → max 60 s) + Jitter — nie in
- * enger Schleife gegen WhatsApp rennen. Deckt ALLE nicht gesondert
- * behandelten Trennungsgründe ab (428/408 explizit, alles Unbekannte über
- * den default-Zweig) und stoppt nach zu vielen Fehlversuchen kontrolliert,
- * statt den Node-Prozess crashen zu lassen.
+ * Auto-Reconnect mit exponentiellem Backoff (1 s → max 60 s) + Jitter — nie in
+ * enger Schleife gegen WhatsApp rennen. Deckt ALLE nicht gesondert behandelten
+ * Trennungsgründe ab (428/408 explizit, alles Unbekannte über den default-Zweig).
+ *
+ * SELBSTHEILUNG: Der Bot gibt NICHT dauerhaft auf. Nach vielen Fehlversuchen
+ * wird der Takt auf das Maximum gedeckelt und der Owner EINMAL informiert — es
+ * wird aber weiter versucht, damit sich der Bot von selbst erholt, sobald Netz
+ * oder WhatsApp wieder erreichbar sind (24/7-Betrieb auf Render). Ein harter
+ * Stopp erfolgt nur bei 403 (Ban) und 440 (andere Session) — dort ist Weiter-
+ * versuchen schädlich.
  */
 function scheduleReconnect(code, label = '') {
+  if (shuttingDown || state.stopped) return;
   state.reconnectAttempts++;
-  if (state.reconnectAttempts > config.reconnect.maxAttempts) {
-    state.stopped = true;
-    state.stopReason = `Zu viele Reconnect-Versuche (zuletzt Code ${code || '?'})`;
+  const n = state.reconnectAttempts;
+
+  if (n === config.reconnect.maxAttempts + 1 && !permanentAlertSent) {
+    permanentAlertSent = true;
     ownerAlert(
-      `🚨 *Verbindung dauerhaft gescheitert* (${config.reconnect.maxAttempts} Versuche, zuletzt Code ${code || '?'}). Ich stoppe — bitte Logs/Render prüfen.`
+      `⚠️ *Verbindung seit ${config.reconnect.maxAttempts} Versuchen instabil* (zuletzt Code ${code || '?'}). ` +
+        `Ich versuche es weiter im ${Math.round(config.reconnect.maxDelayMs / 1000)}s-Takt — der Bot bleibt am Leben und verbindet sich automatisch, sobald es wieder geht.`
     ).catch(() => {});
-    return;
   }
-  // Exponentieller Backoff (1 s → max 60 s) + Jitter — nie in enger Schleife
+
+  // Exponentieller Backoff, Exponent gedeckelt (kein Overflow), dann Max-Takt.
   const base = Math.min(
-    config.reconnect.baseDelayMs * 2 ** (state.reconnectAttempts - 1),
+    config.reconnect.baseDelayMs * 2 ** Math.min(n - 1, 16),
     config.reconnect.maxDelayMs
   );
   const delay = base + Math.floor(Math.random() * 1000);
   const suffix = label ? ` (${label})` : '';
-  logInfo(`🔁 Verbindungsabbruch Code ${code || '?'}${suffix} — Reconnect-Versuch ${state.reconnectAttempts} in ${Math.round(delay / 1000)}s.`);
+  logInfo(`🔁 Verbindungsabbruch Code ${code || '?'}${suffix} — Reconnect-Versuch ${n} in ${Math.round(delay / 1000)}s.`);
   clearTimeout(reconnectTimer);
   reconnectTimer = setTimeout(() => {
     startSocket().catch((e) => logError(e, 'startSocket'));
@@ -386,14 +431,12 @@ setPairingCodeRequester((phoneNumber) => {
   return new Promise((resolve, reject) => {
     pendingPairing = { phoneNumber, resolve, reject };
     clearTimeout(reconnectTimer);
-    const oldSock = state.sock;
-    state.sock = null; // Events des sterbenden Sockets werden über den state.sock!==sock-Guard verworfen
+    teardownSocket(); // alten Socket samt Listenern sauber beenden
     state.currentQr = null;
     state.pairingCode = null;
     state.stopped = false;
     state.reconnectAttempts = 0;
     state.connection = 'connecting';
-    try { oldSock?.end?.(new Error('Neustart für Pairing-Code-Anfrage')); } catch { /* egal, wird verworfen */ }
     safeClearSession().then(() =>
       startSocket().catch((err) => {
         pendingPairing = null;
@@ -423,9 +466,7 @@ setForceRelinkHandler(async () => {
   clearTimeout(reconnectTimer);
   activePairingNumber = null; // evtl. offenes Pairing-Fenster verwerfen
   pairingReissues = 0;
-  const oldSock = state.sock;
-  state.sock = null; // sofort entkoppeln — Events des sterbenden Sockets werden dank
-                      // der "if (state.sock !== sock) return;"-Guards ignoriert
+  teardownSocket(); // alten Socket samt Listenern sofort sauber beenden
   state.currentQr = null;
   state.pairingCode = null;
   state.stopped = false;
@@ -433,7 +474,6 @@ setForceRelinkHandler(async () => {
   state.reconnectAttempts = 0;
   state.connection = 'connecting';
 
-  try { oldSock?.end?.(new Error('Manueller Reset über das Panel')); } catch { /* egal, wird eh verworfen */ }
   await safeClearSession();
   logWarn('🔁 Sitzung manuell über das Panel zurückgesetzt — starte frisch (neuer QR/Pairing-Code folgt).');
   await startSocket();
@@ -455,7 +495,7 @@ async function shutdown(signal) {
     clearInterval(selfPingTimer);
     await flushBuffers().catch(() => {});
     httpServer?.close();
-    state.sock?.end?.(undefined);
+    teardownSocket();
   } catch (err) {
     logError(err, 'shutdown');
   }
