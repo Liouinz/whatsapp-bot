@@ -1,12 +1,37 @@
 // Turso-Auth-State für Baileys — ersetzt useMultiFileAuthState (TABU auf Render).
 // Creds liegen in auth_creds, Signal-Keys in auth_keys. Serialisiert via BufferJSON.
 // Gotcha: app-state-sync-key muss beim Laden über proto.…fromObject rekonstruiert werden.
+//
+// STABILITÄT (Ursache der "Bad MAC"-Fehler): Signal-Keys MÜSSEN zuverlässig
+// persistiert werden. makeCacheableSignalKeyStore hält Keys im RAM-Cache und
+// glaubt einem geworfenen Write nicht an — geht ein Key-Write bei einem
+// transienten Turso-Aussetzer verloren, fehlt der Key beim nächsten Reconnect
+// → "Bad MAC / Failed to decrypt". Deshalb laufen ALLE Auth-DB-Operationen hier
+// über einen kleinen Retry (execute + batch), damit kein Key-Write still verloren geht.
 
 import { initAuthCreds, BufferJSON, proto } from '@whiskeysockets/baileys';
 import { getDb } from './db.js';
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** DB-Operation mit kurzem Retry (transiente Netz-/Turso-Aussetzer abfangen). */
+async function withRetry(fn, tries = 4) {
+  let lastErr;
+  for (let i = 0; i < tries; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      await sleep(250 * (i + 1)); // 250 → 500 → 750 ms
+    }
+  }
+  throw lastErr;
+}
+
 export async function useTursoAuthState(session = 'main') {
   const db = getDb();
+  const exec = (arg) => withRetry(() => db.execute(arg));
+  const batch = (stmts) => withRetry(() => db.batch(stmts, 'write'));
 
   // Alle angefragten Keys in EINER Query holen — Turso ist eine Netzwerk-DB,
   // pro Key eine eigene Query würde jede Ver-/Entschlüsselung um einen vollen
@@ -15,7 +40,7 @@ export async function useTursoAuthState(session = 'main') {
     const out = new Map();
     for (let i = 0; i < fullIds.length; i += 100) {
       const chunk = fullIds.slice(i, i + 100);
-      const res = await db.execute({
+      const res = await exec({
         sql: `SELECT id, data FROM auth_keys WHERE id IN (${chunk.map(() => '?').join(', ')})`,
         args: chunk.map((id) => `${session}:${id}`),
       });
@@ -27,10 +52,7 @@ export async function useTursoAuthState(session = 'main') {
   };
 
   const readCreds = async () => {
-    const res = await db.execute({
-      sql: 'SELECT data FROM auth_creds WHERE id = ?',
-      args: [session],
-    });
+    const res = await exec({ sql: 'SELECT data FROM auth_creds WHERE id = ?', args: [session] });
     return res.rows.length ? JSON.parse(res.rows[0].data, BufferJSON.reviver) : null;
   };
 
@@ -54,7 +76,8 @@ export async function useTursoAuthState(session = 'main') {
           return data;
         },
         set: async (data) => {
-          // Gebündelt in einem einzigen Batch-Roundtrip statt einer Query pro Key
+          // Gebündelt in einem Batch-Roundtrip — MIT Retry, damit kein
+          // Signal-Key-Write still verloren geht (sonst: "Bad MAC").
           const stmts = [];
           for (const type of Object.keys(data)) {
             for (const id of Object.keys(data[type])) {
@@ -69,25 +92,23 @@ export async function useTursoAuthState(session = 'main') {
               );
             }
           }
-          if (stmts.length) await db.batch(stmts, 'write');
+          if (stmts.length) await batch(stmts);
         },
       },
     },
 
+    // Creds nach JEDER Änderung sichern — mit Retry (verlorene Creds = toter Login).
     saveCreds: async () => {
-      await db.execute({
+      await exec({
         sql: 'INSERT OR REPLACE INTO auth_creds (id, data) VALUES (?, ?)',
         args: [session, JSON.stringify(creds, BufferJSON.replacer)],
       });
     },
 
-    /** Session komplett löschen (411 badSession / 401 loggedOut) → frischer QR. */
+    /** Session komplett löschen (401 loggedOut / 500 badSession / 411) → frischer QR. */
     clearSession: async () => {
-      await db.execute({ sql: 'DELETE FROM auth_creds WHERE id = ?', args: [session] });
-      await db.execute({
-        sql: 'DELETE FROM auth_keys WHERE id LIKE ?',
-        args: [`${session}:%`],
-      });
+      await exec({ sql: 'DELETE FROM auth_creds WHERE id = ?', args: [session] });
+      await exec({ sql: 'DELETE FROM auth_keys WHERE id LIKE ?', args: [`${session}:%`] });
     },
   };
 }
