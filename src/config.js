@@ -158,12 +158,12 @@ export const config = {
   // ── Economy (Coins) ────────────────────────────────────────────
   economy: {
     dailyMin: 150, // !daily: Basis-Bereich …
-    dailyMax: 250,
+    dailyMax: 850,
     streakBonus: 25, // + Bonus pro Streak-Tag …
     streakBonusMax: 250, // … gedeckelt
     giveMin: 10, // !geben: Mindestbetrag
     betMin: 20, // !wette / !slots: Mindesteinsatz
-    betMax: 2000, // Maximaleinsatz (Schutz vor Alles-oder-nichts-Frust)
+    betMax: 20000, // Maximaleinsatz (Schutz vor Alles-oder-nichts-Frust)
     startBalance: 100, // Startguthaben beim ersten Kontakt
   },
 
