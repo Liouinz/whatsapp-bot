@@ -1,13 +1,10 @@
 // Turso-Auth-State für Baileys — ersetzt useMultiFileAuthState (TABU auf Render).
 // Creds liegen in auth_creds, Signal-Keys in auth_keys. Serialisiert via BufferJSON.
-// Gotcha: app-state-sync-key muss beim Laden über proto.…fromObject rekonstruiert werden.
-//
-// STABILITÄT (Ursache der "Bad MAC"-Fehler): Signal-Keys MÜSSEN zuverlässig
-// persistiert werden. makeCacheableSignalKeyStore hält Keys im RAM-Cache und
-// glaubt einem geworfenen Write nicht an — geht ein Key-Write bei einem
-// transienten Turso-Aussetzer verloren, fehlt der Key beim nächsten Reconnect
-// → "Bad MAC / Failed to decrypt". Deshalb laufen ALLE Auth-DB-Operationen hier
-// über einen kleinen Retry (execute + batch), damit kein Key-Write still verloren geht.
+// 
+// UPDATE: Integrierter RAM-Cache! 
+// Keys werden sofort in den RAM (keyCache) geschrieben und blitzschnell gelesen.
+// Datenbank-Schreibvorgänge werden gebündelt (pendingWrites) und zeitverzögert
+// an Turso geschickt, um Rate-Limits und "Bad MAC"-Fehler zu verhindern.
 
 import { initAuthCreds, BufferJSON, proto } from '@whiskeysockets/baileys';
 import { getDb } from './db.js';
@@ -33,9 +30,37 @@ export async function useTursoAuthState(session = 'main') {
   const exec = (arg) => withRetry(() => db.execute(arg));
   const batch = (stmts) => withRetry(() => db.batch(stmts, 'write'));
 
-  // Alle angefragten Keys in EINER Query holen — Turso ist eine Netzwerk-DB,
-  // pro Key eine eigene Query würde jede Ver-/Entschlüsselung um einen vollen
-  // Roundtrip pro Gerät ausbremsen (Gruppen-Sends fragen dutzende Keys ab).
+  // --- RAM CACHE LOGIK ---
+  const keyCache = new Map();      // Speichert alle bekannten Keys blitzschnell im RAM
+  const pendingWrites = new Map(); // Sammelt alle Keys, die noch in Turso gespeichert werden müssen
+  let writeTimeout = null;
+
+  const flushPendingWrites = async () => {
+    if (pendingWrites.size === 0) return;
+    
+    const stmts = [];
+    // pendingWrites leeren und in lokale Variable kopieren (verhindert Race-Conditions)
+    const currentWrites = new Map(pendingWrites);
+    pendingWrites.clear();
+
+    for (const [keyId, value] of currentWrites.entries()) {
+      stmts.push(
+        value
+          ? {
+              sql: 'INSERT OR REPLACE INTO auth_keys (id, data) VALUES (?, ?)',
+              args: [`${session}:${keyId}`, JSON.stringify(value, BufferJSON.replacer)],
+            }
+          : { sql: 'DELETE FROM auth_keys WHERE id = ?', args: [`${session}:${keyId}`] }
+      );
+    }
+
+    if (stmts.length) {
+      // Gebündelt an Turso schicken
+      await batch(stmts).catch(err => console.error("⚠️ Fehler beim Turso-Batch-Write:", err));
+    }
+  };
+  // -----------------------
+
   const readKeys = async (fullIds) => {
     const out = new Map();
     for (let i = 0; i < fullIds.length; i += 100) {
@@ -64,40 +89,69 @@ export async function useTursoAuthState(session = 'main') {
       keys: {
         get: async (type, ids) => {
           const data = {};
-          const found = await readKeys(ids.map((id) => `${type}-${id}`));
+          const missingIds = [];
+
+          // 1. Zuerst schauen, ob der Key schon im RAM (keyCache) liegt
           for (const id of ids) {
-            let value = found.get(`${type}-${id}`) ?? null;
-            if (type === 'app-state-sync-key' && value) {
-              // Pflicht-Gotcha: sonst bricht der App-State-Sync
-              value = proto.Message.AppStateSyncKeyData.fromObject(value);
+            const keyId = `${type}-${id}`;
+            if (keyCache.has(keyId)) {
+              let value = keyCache.get(keyId);
+              if (type === 'app-state-sync-key' && value) {
+                value = proto.Message.AppStateSyncKeyData.fromObject(value);
+              }
+              data[id] = value;
+            } else {
+              missingIds.push(id); // Falls nicht, für Datenbankabfrage vormerken
             }
-            data[id] = value;
+          }
+
+          // 2. Fehlende Keys aus Turso nachladen und im RAM abspeichern
+          if (missingIds.length > 0) {
+            const found = await readKeys(missingIds.map((id) => `${type}-${id}`));
+            for (const id of missingIds) {
+              const keyId = `${type}-${id}`;
+              let value = found.get(keyId) ?? null;
+              
+              if (value) keyCache.set(keyId, value); // Direkt für das nächste Mal cachen
+
+              if (type === 'app-state-sync-key' && value) {
+                value = proto.Message.AppStateSyncKeyData.fromObject(value);
+              }
+              data[id] = value;
+            }
           }
           return data;
         },
         set: async (data) => {
-          // Gebündelt in einem Batch-Roundtrip — MIT Retry, damit kein
-          // Signal-Key-Write still verloren geht (sonst: "Bad MAC").
-          const stmts = [];
           for (const type of Object.keys(data)) {
             for (const id of Object.keys(data[type])) {
+              const keyId = `${type}-${id}`;
               const value = data[type][id];
-              stmts.push(
-                value
-                  ? {
-                      sql: 'INSERT OR REPLACE INTO auth_keys (id, data) VALUES (?, ?)',
-                      args: [`${session}:${type}-${id}`, JSON.stringify(value, BufferJSON.replacer)],
-                    }
-                  : { sql: 'DELETE FROM auth_keys WHERE id = ?', args: [`${session}:${type}-${id}`] }
-              );
+
+              // 1. Sofort in den RAM-Cache schreiben oder daraus löschen
+              if (value) {
+                keyCache.set(keyId, value);
+              } else {
+                keyCache.delete(keyId);
+              }
+
+              // 2. Für den Turso-Batch-Upload vormerken
+              pendingWrites.set(keyId, value);
             }
           }
-          if (stmts.length) await batch(stmts);
+
+          // 3. Datenbank-Schreibvorgang um 3 Sekunden verzögern (Debounce)
+          if (!writeTimeout) {
+            writeTimeout = setTimeout(async () => {
+              writeTimeout = null;
+              await flushPendingWrites();
+            }, 3000); // Wartet 3 Sekunden, sammelt alle Updates und feuert sie auf einmal ab
+          }
         },
       },
     },
 
-    // Creds nach JEDER Änderung sichern — mit Retry (verlorene Creds = toter Login).
+    // Creds nach JEDER Änderung sichern (wird seltener aufgerufen, daher direkt)
     saveCreds: async () => {
       await exec({
         sql: 'INSERT OR REPLACE INTO auth_creds (id, data) VALUES (?, ?)',
@@ -107,6 +161,10 @@ export async function useTursoAuthState(session = 'main') {
 
     /** Session komplett löschen (401 loggedOut / 500 badSession / 411) → frischer QR. */
     clearSession: async () => {
+      keyCache.clear();
+      pendingWrites.clear();
+      if (writeTimeout) clearTimeout(writeTimeout);
+      
       await exec({ sql: 'DELETE FROM auth_creds WHERE id = ?', args: [session] });
       await exec({ sql: 'DELETE FROM auth_keys WHERE id LIKE ?', args: [`${session}:%`] });
     },
