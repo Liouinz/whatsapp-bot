@@ -2,9 +2,9 @@
 // Creds liegen in auth_creds, Signal-Keys in auth_keys. Serialisiert via BufferJSON.
 // 
 // UPDATE: Integrierter RAM-Cache! 
-// Keys werden sofort in den RAM (keyCache) geschrieben und blitzschnell gelesen.
-// Datenbank-Schreibvorgänge werden gebündelt (pendingWrites) und zeitverzögert
-// an Turso geschickt, um Rate-Limits und "Bad MAC"-Fehler zu verhindern.
+// Keys werden sofort in den RAM (keyCache) geschrieben und gelesen.
+// Datenbank-Schreibvorgänge werden gebündelt (pendingWrites) und um 3 Sekunden 
+// zeitverzögert an Turso geschickt, um Rate-Limits und "Bad MAC"-Fehler zu verhindern.
 
 import { initAuthCreds, BufferJSON, proto } from '@whiskeysockets/baileys';
 import { getDb } from './db.js';
@@ -30,18 +30,18 @@ export async function useTursoAuthState(session = 'main') {
   const exec = (arg) => withRetry(() => db.execute(arg));
   const batch = (stmts) => withRetry(() => db.batch(stmts, 'write'));
 
-  // --- RAM CACHE LOGIK ---
-  const keyCache = new Map();      // Speichert alle bekannten Keys blitzschnell im RAM
-  const pendingWrites = new Map(); // Sammelt alle Keys, die noch in Turso gespeichert werden müssen
+  // --- 🚀 NEU: RAM CACHE LOGIK ---
+  const keyCache = new Map();      
+  const pendingWrites = new Map(); 
   let writeTimeout = null;
 
   const flushPendingWrites = async () => {
     if (pendingWrites.size === 0) return;
     
-    const stmts = [];
-    // pendingWrites leeren und in lokale Variable kopieren (verhindert Race-Conditions)
+    // Kopie erstellen, damit während des Speicherns neue Keys nicht blockiert werden
     const currentWrites = new Map(pendingWrites);
     pendingWrites.clear();
+    const stmts = [];
 
     for (const [keyId, value] of currentWrites.entries()) {
       stmts.push(
@@ -55,11 +55,10 @@ export async function useTursoAuthState(session = 'main') {
     }
 
     if (stmts.length) {
-      // Gebündelt an Turso schicken
       await batch(stmts).catch(err => console.error("⚠️ Fehler beim Turso-Batch-Write:", err));
     }
   };
-  // -----------------------
+  // ---------------------------------
 
   const readKeys = async (fullIds) => {
     const out = new Map();
@@ -91,7 +90,7 @@ export async function useTursoAuthState(session = 'main') {
           const data = {};
           const missingIds = [];
 
-          // 1. Zuerst schauen, ob der Key schon im RAM (keyCache) liegt
+          // 1. Keys blitzschnell aus dem RAM holen
           for (const id of ids) {
             const keyId = `${type}-${id}`;
             if (keyCache.has(keyId)) {
@@ -101,18 +100,18 @@ export async function useTursoAuthState(session = 'main') {
               }
               data[id] = value;
             } else {
-              missingIds.push(id); // Falls nicht, für Datenbankabfrage vormerken
+              missingIds.push(id); 
             }
           }
 
-          // 2. Fehlende Keys aus Turso nachladen und im RAM abspeichern
+          // 2. Nur fehlende Keys aus Turso nachladen und im RAM abspeichern
           if (missingIds.length > 0) {
             const found = await readKeys(missingIds.map((id) => `${type}-${id}`));
             for (const id of missingIds) {
               const keyId = `${type}-${id}`;
               let value = found.get(keyId) ?? null;
               
-              if (value) keyCache.set(keyId, value); // Direkt für das nächste Mal cachen
+              if (value) keyCache.set(keyId, value); 
 
               if (type === 'app-state-sync-key' && value) {
                 value = proto.Message.AppStateSyncKeyData.fromObject(value);
@@ -128,30 +127,29 @@ export async function useTursoAuthState(session = 'main') {
               const keyId = `${type}-${id}`;
               const value = data[type][id];
 
-              // 1. Sofort in den RAM-Cache schreiben oder daraus löschen
+              // Sofort im RAM aktualisieren
               if (value) {
                 keyCache.set(keyId, value);
               } else {
                 keyCache.delete(keyId);
               }
 
-              // 2. Für den Turso-Batch-Upload vormerken
+              // Für Turso vormerken
               pendingWrites.set(keyId, value);
             }
           }
 
-          // 3. Datenbank-Schreibvorgang um 3 Sekunden verzögern (Debounce)
+          // 3 Sekunden Timer setzen, um alles gebündelt hochzuladen
           if (!writeTimeout) {
             writeTimeout = setTimeout(async () => {
               writeTimeout = null;
               await flushPendingWrites();
-            }, 3000); // Wartet 3 Sekunden, sammelt alle Updates und feuert sie auf einmal ab
+            }, 3000); 
           }
         },
       },
     },
 
-    // Creds nach JEDER Änderung sichern (wird seltener aufgerufen, daher direkt)
     saveCreds: async () => {
       await exec({
         sql: 'INSERT OR REPLACE INTO auth_creds (id, data) VALUES (?, ?)',
@@ -159,7 +157,6 @@ export async function useTursoAuthState(session = 'main') {
       });
     },
 
-    /** Session komplett löschen (401 loggedOut / 500 badSession / 411) → frischer QR. */
     clearSession: async () => {
       keyCache.clear();
       pendingWrites.clear();
