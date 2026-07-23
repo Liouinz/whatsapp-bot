@@ -29,16 +29,16 @@ export const config = {
     // aufeinanderfolgenden Sends (Burst-Schutz gegen WhatsApp-Spam-Flag) —
     // eine einzelne Befehlsantwort nach Leerlauf geht ohne Verzögerung raus.
     jitterMinMs: 0, // kein Sockel mehr
-    jitterMaxMs: 250, // nur noch ein winziger Abstand bei Nachrichten-Bursts
+    jitterMaxMs: 150, // nur noch ein winziger Abstand bei Nachrichten-Bursts
     maxRetries: 2, // Wiederholungen pro fehlgeschlagenem Send
     retryBackoffMs: 1500,
   },
 
   // ── Reconnect-Verhalten ────────────────────────────────────────
   reconnect: {
-    baseDelayMs: 1000,
-    maxDelayMs: 60_000,
-    maxAttempts: 25, // danach: stoppen + Owner-Alarm
+    baseDelayMs: 500,
+    maxDelayMs: 30_000,
+    maxAttempts: 5, // danach: stoppen + Owner-Alarm
   },
 
   // ── Nachrichten-Verarbeitung ───────────────────────────────────
@@ -51,9 +51,9 @@ export const config = {
   // ── Moderation ─────────────────────────────────────────────────
   moderation: {
     warnLimitMute: 3, // ab so vielen aktiven Warnungen: Mute
-    warnLimitKick: 5, // ab so vielen aktiven Warnungen: Kick
-    warnExpiryDays: 7, // Warnungen verfallen automatisch
-    muteMinutesDefault: 10, // Standard-Mute-Dauer
+    warnLimitKick: 4, // ab so vielen aktiven Warnungen: Kick
+    warnExpiryDays: 14, // Warnungen verfallen automatisch
+    muteMinutesDefault: 30, // Standard-Mute-Dauer
     muteMinutesMax: 24 * 60, // Obergrenze für !mute
     antiRaid: {
       joinWindowMs: 60_000, // Zeitfenster für Join-Flut
@@ -90,8 +90,8 @@ export const config = {
 
   // ── Fehlerlog ──────────────────────────────────────────────────
   log: {
-    dedupeWindowMs: 5 * 60_000, // identische Fehler: max. 1 Logeintrag pro 5 Min
-    ringSize: 300, // Einträge im Live-Log fürs Panel
+    dedupeWindowMs: 10 * 60_000, // identische Fehler: max. 1 Logeintrag pro 5 Min
+    ringSize: 1000, // Einträge im Live-Log fürs Panel
     keepErrorDays: 14, // ältere error_log-Zeilen werden aufgeräumt
   },
 
@@ -140,7 +140,7 @@ export const config = {
 
   // ── Spiele ─────────────────────────────────────────────────────
   games: {
-    ratenMax: 100, // Zahlenraten: 1..100
+    ratenMax: 1000, // Zahlenraten: 1..100
     ratenMaxTries: 15,
     quizTimeoutMs: 60_000, // Quizfrage verfällt nach 60 s
     xpRewardQuiz: 25,
@@ -159,12 +159,12 @@ export const config = {
   economy: {
     dailyMin: 150, // !daily: Basis-Bereich …
     dailyMax: 850,
-    streakBonus: 25, // + Bonus pro Streak-Tag …
+    streakBonus: 50, // + Bonus pro Streak-Tag …
     streakBonusMax: 250, // … gedeckelt
     giveMin: 10, // !geben: Mindestbetrag
     betMin: 20, // !wette / !slots: Mindesteinsatz
-    betMax: 200000000000, // Maximaleinsatz (Schutz vor Alles-oder-nichts-Frust)
-    startBalance: 100, // Startguthaben beim ersten Kontakt
+    betMax: 200000, // Maximaleinsatz (Schutz vor Alles-oder-nichts-Frust)
+    startBalance: 10000, // Startguthaben beim ersten Kontakt
   },
 
   // ── Umfragen ───────────────────────────────────────────────────
@@ -187,7 +187,7 @@ export const config = {
   // ── Geburtstage ────────────────────────────────────────────────
   birthdays: {
     hour: 9, // Gratulation täglich um 9:00 lokale Zeit
-    coinsGift: 200, // Geburtstags-Geschenk
+    coinsGift: 200000, // Geburtstags-Geschenk
   },
 };
 
