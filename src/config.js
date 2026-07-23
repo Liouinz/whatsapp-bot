@@ -132,7 +132,7 @@ export const config = {
 
   // ── Keep-Alive & Verbindungs-Watchdog ──────────────────────────
   keepAlive: {
-    selfPingMs: 4 * 60_000, // interner Zusatz-Ping (externer UptimeRobot bleibt Pflicht)
+    selfPingMs: 1 * 60_000, // interner Zusatz-Ping (externer UptimeRobot bleibt Pflicht)
     wsKeepAliveMs: 25_000, // Baileys-eigener WebSocket-Ping: tote Verbindung → close → Reconnect
     watchdogMs: 30_000, // Takt des Verbindungs-Watchdogs (Zombie-Schutz + Reconnect-Backstop)
     stuckMs: 90_000, // "nicht verbunden & kein Fortschritt" so lange = hängt → neu anstoßen
