@@ -1,28 +1,6 @@
 // Economy-System: Coins (global pro Nutzer), Daily mit Streak, Überweisungen,
 // Glücksspiel (!wette, !slots) und ein Shop mit kosmetischen Titeln (für !profil).
 
-// ── Slot-Symbole ───────────────────────────────────────────────────
-
-const SLOT_SYMBOLS = [
-  '🍒', '🍋', '🍇', '🍉', '🍀', '🔔', '⭐', '💰', '👑', '💎'
-];
-
-const SLOT_WEIGHTS = [
-  30, 25, 20, 18, 15, 10, 8, 5, 3, 1
-];
-
-function spinReel() {
-  const total = SLOT_WEIGHTS.reduce((a, b) => a + b, 0);
-  let roll = Math.random() * total;
-
-  for (let i = 0; i < SLOT_SYMBOLS.length; i++) {
-    roll -= SLOT_WEIGHTS[i];
-    if (roll <= 0) return i;
-  }
-
-  return 0;
-}
-
 import { PREFIX, config } from '../config.js';
 import { dbRun, dbRows, todayKey } from '../db.js';
 import { resolveLid } from '../permissions.js';
@@ -48,8 +26,13 @@ export async function getWallet(userJid, name = '') {
     [user, config.economy.startBalance, name || '', config.economy.startBalance]
   );
   return {
-    user_jid: user, balance: config.economy.startBalance, name: name || '',
-    last_daily: '', streak: 0, total_earned: config.economy.startBalance, total_gambled: 0,
+    user_jid: user,
+    balance: config.economy.startBalance,
+    name: name || '',
+    last_daily: '',
+    streak: 0,
+    total_earned: config.economy.startBalance,
+    total_gambled: 0,
   };
 }
 
@@ -107,19 +90,25 @@ export async function activeTitle(userJid) {
   return rows.length ? rows[0].title : null;
 }
 
-// ── Slot-Symbole ───────────────────────────────────────────────────
+// ── Slot-Symbole (Erweitert für 5 Walzen) ──────────────────────────
 
-const SLOT_SYMBOLS = ['🍒', '🍋', '🍇', '🔔', '⭐', '💎'];
-// Gewichte: häufige Früchte, seltene Diamanten
-const SLOT_WEIGHTS = [30, 25, 20, 12, 8, 5];
+const SLOT_SYMBOLS = [
+  '🍒', '🍋', '🍇', '🍉', '🍀', '🔔', '⭐', '💰', '👑', '💎'
+];
+
+const SLOT_WEIGHTS = [
+  30, 25, 20, 18, 15, 10, 8, 5, 3, 1
+];
 
 function spinReel() {
   const total = SLOT_WEIGHTS.reduce((a, b) => a + b, 0);
   let roll = Math.random() * total;
+
   for (let i = 0; i < SLOT_SYMBOLS.length; i++) {
     roll -= SLOT_WEIGHTS[i];
     if (roll <= 0) return i;
   }
+
   return 0;
 }
 
@@ -244,7 +233,7 @@ export const economyCommands = [
       return ctx.reply(`${icon} Es ist … *${result.toUpperCase()}*!\n😬 Verloren — ${fmtCoins(amount)} sind weg. Vielleicht beim nächsten Mal!`);
     },
   },
-{
+  {
     name: 'slots',
     aliases: ['slot'],
     group: 'economy',
