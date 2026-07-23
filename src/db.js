@@ -177,6 +177,11 @@ const TABLES = [
   `CREATE TABLE IF NOT EXISTS user_titles (
      user_jid TEXT PRIMARY KEY, title TEXT
    )`,
+  // Cooldown für !rauben — pro Gruppe, damit man nicht die ganze Community leerräumt
+  `CREATE TABLE IF NOT EXISTS rob_cooldown (
+     group_jid TEXT, user_jid TEXT, last_rob INTEGER DEFAULT 0,
+     PRIMARY KEY (group_jid, user_jid)
+   )`,
 
   // Umfragen
   `CREATE TABLE IF NOT EXISTS polls (
