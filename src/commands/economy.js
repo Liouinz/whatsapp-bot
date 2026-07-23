@@ -2,7 +2,7 @@
 // Glücksspiel (!wette, manipulierte !slots mit Einsatz-Skalierung, verbessertes !roulette) und Bestenliste (!reichste).
 
 import { PREFIX, config } from '../config.js';
-import { dbRun, dbRows, todayKey } from '../db.js';
+import { dbRun, dbRows, todayKey, flushBuffers, levelProgress } from '../db.js';
 import { resolveLid } from '../permissions.js';
 import { audit } from '../moderation.js';
 import { getBoostMult } from '../boosts.js';
@@ -425,6 +425,120 @@ export const economyCommands = [
       }
 
       return ctx.reply(text);
+    },
+  },
+
+  {
+    name: 'rauben',
+    aliases: ['rob', 'ausrauben'],
+    group: 'economy',
+    desc: 'Klaut Coins von jemandem — Betrag & Erfolgschance hängen von deinem Level ab',
+    usage: '!rauben @person <betrag>',
+    groupOnly: true,
+    async run(ctx) {
+      const target = ctx.targetUser();
+      if (!target) return ctx.reply('⚠️ Wen denn ausrauben? Erwähne die Person: `!rauben @person 200`');
+
+      const robberLid = resolveLid(ctx.sender);
+      const targetLid = resolveLid(target);
+      if (targetLid === robberLid) {
+        return ctx.reply('😄 Dich selbst ausrauben bringt nichts.');
+      }
+
+      // XP erst flushen, damit Level-Zahlen stimmen (wie bei !rank)
+      await flushBuffers();
+
+      const [robberXpRows, targetXpRows] = await Promise.all([
+        dbRows('SELECT xp FROM xp WHERE group_jid = ? AND user_jid = ?', [ctx.chatJid, robberLid]),
+        dbRows('SELECT xp FROM xp WHERE group_jid = ? AND user_jid = ?', [ctx.chatJid, targetLid]),
+      ]);
+      const robberLevel = levelProgress(Number(robberXpRows[0]?.xp || 0)).level;
+      const targetLevel = levelProgress(Number(targetXpRows[0]?.xp || 0)).level;
+
+      if (robberLevel < config.rob.minLevel) {
+        return ctx.reply(
+          `🔒 *Rauben ist erst ab Level ${config.rob.minLevel} freigeschaltet.*\n` +
+          `Du bist Level ${robberLevel} — schreib fleißig mit, dann geht's bald! (\`!rank\` zeigt deinen Fortschritt)`
+        );
+      }
+
+      // Cooldown pro Gruppe prüfen
+      const cdRows = await dbRows(
+        'SELECT last_rob FROM rob_cooldown WHERE group_jid = ? AND user_jid = ?',
+        [ctx.chatJid, robberLid]
+      );
+      const lastRob = Number(cdRows[0]?.last_rob || 0);
+      const remaining = config.rob.cooldownMs - (Date.now() - lastRob);
+      if (remaining > 0) {
+        const mins = Math.ceil(remaining / 60_000);
+        return ctx.reply(`⏳ Du musst noch *${mins} Min.* warten, bevor du wieder rauben kannst.`);
+      }
+
+      // Maximal raubbarer Betrag skaliert mit dem eigenen Level
+      const maxAmount = Math.min(
+        config.rob.baseAmount + (robberLevel - config.rob.minLevel) * config.rob.perLevelAmount,
+        config.rob.capAmount
+      );
+
+      const rawAmount = parseInt(ctx.args.find((a) => /^\d{1,7}$/.test(a)) || '', 10);
+      if (!rawAmount) {
+        return ctx.reply(
+          `ℹ️ Nutzung: \`!rauben @person <betrag>\`\n` +
+          `🔓 Dein Level ${robberLevel} erlaubt max. *${fmtCoins(maxAmount)}* pro Raub.\n` +
+          `⏳ Cooldown danach: ${config.rob.cooldownMs / 3_600_000}h`
+        );
+      }
+      if (rawAmount > maxAmount) {
+        return ctx.reply(`⚠️ Bei Level ${robberLevel} kannst du maximal *${fmtCoins(maxAmount)}* rauben. Level dich hoch für mehr!`);
+      }
+
+      const targetWallet = await getWallet(target);
+      if (Number(targetWallet.balance) < config.rob.minTargetBalance) {
+        return ctx.reply(`😅 ${ctx.mentionTag(target)} hat zu wenig Coins, um sich das zu lohnen (min. ${fmtCoins(config.rob.minTargetBalance)}).`, [target]);
+      }
+
+      const amount = Math.min(rawAmount, Number(targetWallet.balance));
+
+      // Erfolgschance: Basis + Level-Unterschied (Räuber ggü. Ziel), gedeckelt
+      const levelDiff = robberLevel - targetLevel;
+      const chance = Math.min(
+        config.rob.maxSuccessChance,
+        Math.max(config.rob.minSuccessChance, config.rob.baseSuccessChance + levelDiff * config.rob.levelDiffFactor)
+      );
+
+      // Cooldown IMMER setzen, egal ob Erfolg oder nicht (kein Spam-Retry)
+      await dbRun(
+        'INSERT INTO rob_cooldown (group_jid, user_jid, last_rob) VALUES (?, ?, ?) ' +
+        'ON CONFLICT (group_jid, user_jid) DO UPDATE SET last_rob = excluded.last_rob',
+        [ctx.chatJid, robberLid, Date.now()]
+      );
+
+      if (Math.random() < chance) {
+        const ok = await takeCoins(target, amount);
+        if (!ok) {
+          return ctx.reply(`😅 ${ctx.mentionTag(target)} war schneller und hatte auf einmal nichts mehr da. Raub gescheitert.`, [target]);
+        }
+        await addCoins(ctx.sender, amount, ctx.senderName);
+        await audit('coins-rob-success', ctx.chatJid, target, ctx.sender, `${amount}`);
+        return ctx.reply(
+          `🥷 *Raub erfolgreich!* Du hast ${ctx.mentionTag(target)} *${fmtCoins(amount)}* geklaut.\n` +
+          `🎲 Erfolgschance war ${Math.round(chance * 100)}%.`,
+          [target]
+        );
+      }
+
+      const penalty = Math.round(amount * config.rob.failPenaltyPct);
+      const paid = await takeCoins(ctx.sender, penalty);
+      if (paid) {
+        await addCoins(target, penalty);
+        await audit('coins-rob-fail', ctx.chatJid, ctx.sender, target, `${penalty}`);
+      }
+      return ctx.reply(
+        `🚔 *Erwischt!* Der Raub bei ${ctx.mentionTag(target)} ist schiefgegangen.\n` +
+        (paid ? `💸 Du zahlst *${fmtCoins(penalty)}* Strafe an ${ctx.mentionTag(target)}.` : '') +
+        `\n🎲 Erfolgschance war ${Math.round(chance * 100)}%.`,
+        [target]
+      );
     },
   },
 
