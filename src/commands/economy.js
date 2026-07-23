@@ -1,6 +1,28 @@
 // Economy-System: Coins (global pro Nutzer), Daily mit Streak, Überweisungen,
 // Glücksspiel (!wette, !slots) und ein Shop mit kosmetischen Titeln (für !profil).
 
+// ── Slot-Symbole ───────────────────────────────────────────────────
+
+const SLOT_SYMBOLS = [
+  '🍒', '🍋', '🍇', '🍉', '🍀', '🔔', '⭐', '💰', '👑', '💎'
+];
+
+const SLOT_WEIGHTS = [
+  30, 25, 20, 18, 15, 10, 8, 5, 3, 1
+];
+
+function spinReel() {
+  const total = SLOT_WEIGHTS.reduce((a, b) => a + b, 0);
+  let roll = Math.random() * total;
+
+  for (let i = 0; i < SLOT_SYMBOLS.length; i++) {
+    roll -= SLOT_WEIGHTS[i];
+    if (roll <= 0) return i;
+  }
+
+  return 0;
+}
+
 import { PREFIX, config } from '../config.js';
 import { dbRun, dbRows, todayKey } from '../db.js';
 import { resolveLid } from '../permissions.js';
@@ -222,193 +244,112 @@ export const economyCommands = [
       return ctx.reply(`${icon} Es ist … *${result.toUpperCase()}*!\n😬 Verloren — ${fmtCoins(amount)} sind weg. Vielleicht beim nächsten Mal!`);
     },
   },
-  // ── Erweiterte Slots ───────────────────────────────────────────────
-
-const SLOT_SYMBOLS = [
-  '🍒',
-  '🍋',
-  '🍇',
-  '🍉',
-  '🍀',
-  '🔔',
-  '⭐',
-  '💰',
-  '👑',
-  '💎'
-];
-
-const SLOT_WEIGHTS = [
-  30,
-  25,
-  20,
-  18,
-  15,
-  10,
-  8,
-  5,
-  3,
-  1
-];
-
-function spinReel() {
-  const total = SLOT_WEIGHTS.reduce((a, b) => a + b, 0);
-  let roll = Math.random() * total;
-
-  for (let i = 0; i < SLOT_SYMBOLS.length; i++) {
-    roll -= SLOT_WEIGHTS[i];
-    if (roll <= 0) return i;
-  }
-
-  return 0;
-}
-
-
-// ── Slots Command ─────────────────────────────────────────────────
-
 {
-  name: 'slots',
-  aliases: ['slot'],
-  group: 'economy',
-  desc: '5 Walzen Slotmaschine mit Jackpot',
-  usage: '!slots <betrag>',
-  async run(ctx) {
+    name: 'slots',
+    aliases: ['slot'],
+    group: 'economy',
+    desc: '5 Walzen Slotmaschine mit Jackpot',
+    usage: '!slots <betrag>',
+    async run(ctx) {
+      const wallet = await getWallet(ctx.sender, ctx.senderName);
+      const amount = parseAmount(ctx.args[0], Number(wallet.balance));
 
-    const wallet = await getWallet(ctx.sender, ctx.senderName);
-    const amount = parseAmount(ctx.args[0], Number(wallet.balance));
-
-    if (!amount) {
-      return ctx.reply(
-        'ℹ️ Nutzung: `!slots <betrag>`\n' +
-        '🎰 2 gleiche = ×2\n' +
-        '🔥 3 gleiche = ×5\n' +
-        '👑 4 gleiche = ×10\n' +
-        '💎 5 gleiche = Jackpot'
-      );
-    }
-
-    if (amount < config.economy.betMin)
-      return ctx.reply(`⚠️ Mindesteinsatz: ${fmtCoins(config.economy.betMin)}`);
-
-    if (amount > config.economy.betMax)
-      return ctx.reply(`⚠️ Maximaleinsatz: ${fmtCoins(config.economy.betMax)}`);
-
-
-    if (!(await takeCoins(ctx.sender, amount))) {
-      return ctx.reply(
-        `⚠️ So viel hast du nicht (Kontostand: ${fmtCoins(wallet.balance)}).`
-      );
-    }
-
-
-    await dbRun(
-      'UPDATE coins SET total_gambled = total_gambled + ? WHERE user_jid = ?',
-      [amount, resolveLid(ctx.sender)]
-    );
-
-
-    const reels = [
-      spinReel(),
-      spinReel(),
-      spinReel(),
-      spinReel(),
-      spinReel()
-    ];
-
-
-    const symbols = reels.map(i => SLOT_SYMBOLS[i]);
-    const row = symbols.join(' │ ');
-
-
-    const counts = {};
-
-    for (const symbol of symbols) {
-      counts[symbol] = (counts[symbol] || 0) + 1;
-    }
-
-    const highest = Math.max(...Object.values(counts));
-
-
-    let factor = 0;
-    let jackpot = false;
-
-
-    if (symbols.every(s => s === '💎')) {
-      factor = 100;
-      jackpot = true;
-    }
-
-    else if (symbols.every(s => s === '👑')) {
-      factor = 50;
-      jackpot = true;
-    }
-
-    else if (symbols.every(s => s === '💰')) {
-      factor = 30;
-    }
-
-    else if (highest === 5) {
-      factor = 25;
-    }
-
-    else if (highest === 4) {
-      factor = 10;
-    }
-
-    else if (highest === 3) {
-      factor = 5;
-    }
-
-    else if (highest === 2) {
-      factor = 2;
-    }
-
-
-    let text =
-      `🎰 *SLOTS*\n` +
-      `┌────────────────────┐\n` +
-      `│ ${row} │\n` +
-      `└────────────────────┘\n\n`;
-
-
-    if (factor > 0) {
-
-      const win = amount * factor;
-
-      await addCoins(
-        ctx.sender,
-        win,
-        ctx.senderName
-      );
-
-
-      if (jackpot) {
-        text +=
-          `🔥🔥🔥 *JACKPOT!* 🔥🔥🔥\n` +
-          `×${factor}\n` +
-          `💰 Gewinn: *${fmtCoins(win)}*`;
+      if (!amount) {
+        return ctx.reply(
+          'ℹ️ Nutzung: `!slots <betrag>`\n' +
+          '🎰 2 gleiche = ×2\n' +
+          '🔥 3 gleiche = ×5\n' +
+          '👑 4 gleiche = ×10\n' +
+          '💎 5 gleiche = Jackpot'
+        );
       }
 
-      else {
-        text +=
-          `🎉 *Gewonnen!*\n` +
-          `×${factor}\n` +
-          `💰 Gewinn: *${fmtCoins(win)}*`;
+      if (amount < config.economy.betMin)
+        return ctx.reply(`⚠️ Mindesteinsatz: ${fmtCoins(config.economy.betMin)}`);
+
+      if (amount > config.economy.betMax)
+        return ctx.reply(`⚠️ Maximaleinsatz: ${fmtCoins(config.economy.betMax)}`);
+
+      if (!(await takeCoins(ctx.sender, amount))) {
+        return ctx.reply(
+          `⚠️ So viel hast du nicht (Kontostand: ${fmtCoins(wallet.balance)}).`
+        );
       }
 
-    }
+      await dbRun(
+        'UPDATE coins SET total_gambled = total_gambled + ? WHERE user_jid = ?',
+        [amount, resolveLid(ctx.sender)]
+      );
 
-    else {
+      const reels = [
+        spinReel(),
+        spinReel(),
+        spinReel(),
+        spinReel(),
+        spinReel()
+      ];
 
-      text +=
-        `😬 Leider nichts getroffen.\n` +
-        `Verloren: ${fmtCoins(amount)}`;
+      const symbols = reels.map(i => SLOT_SYMBOLS[i]);
+      const row = symbols.join(' │ ');
 
-    }
+      const counts = {};
+      for (const symbol of symbols) {
+        counts[symbol] = (counts[symbol] || 0) + 1;
+      }
 
+      const highest = Math.max(...Object.values(counts));
 
-    return ctx.reply(text);
+      let factor = 0;
+      let jackpot = false;
+
+      if (symbols.every(s => s === '💎')) {
+        factor = 100;
+        jackpot = true;
+      } else if (symbols.every(s => s === '👑')) {
+        factor = 50;
+        jackpot = true;
+      } else if (symbols.every(s => s === '💰')) {
+        factor = 30;
+      } else if (highest === 5) {
+        factor = 25;
+      } else if (highest === 4) {
+        factor = 10;
+      } else if (highest === 3) {
+        factor = 5;
+      } else if (highest === 2) {
+        factor = 2;
+      }
+
+      let text =
+        `🎰 *SLOTS*\n` +
+        `┌────────────────────┐\n` +
+        `│ ${row} │\n` +
+        `└────────────────────┘\n\n`;
+
+      if (factor > 0) {
+        const win = amount * factor;
+        await addCoins(ctx.sender, win, ctx.senderName);
+
+        if (jackpot) {
+          text +=
+            `🔥🔥🔥 *JACKPOT!* 🔥🔥🔥\n` +
+            `×${factor}\n` +
+            `💰 Gewinn: *${fmtCoins(win)}*`;
+        } else {
+          text +=
+            `🎉 *Gewonnen!*\n` +
+            `×${factor}\n` +
+            `💰 Gewinn: *${fmtCoins(win)}*`;
+        }
+      } else {
+        text +=
+          `😬 Leider nichts getroffen.\n` +
+          `Verloren: ${fmtCoins(amount)}`;
+      }
+
+      return ctx.reply(text);
+    },
   },
-},
   {
     name: 'roulette',
     group: 'economy',
