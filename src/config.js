@@ -135,7 +135,10 @@ export const config = {
     selfPingMs: 1 * 60_000, // interner Zusatz-Ping (externer UptimeRobot bleibt Pflicht)
     wsKeepAliveMs: 25_000, // Baileys-eigener WebSocket-Ping: tote Verbindung → close → Reconnect
     watchdogMs: 30_000, // Takt des Verbindungs-Watchdogs (Zombie-Schutz + Reconnect-Backstop)
-    stuckMs: 90_000, // "nicht verbunden & kein Fortschritt" so lange = hängt → neu anstoßen
+    // WICHTIG: muss länger sein als pairing.qrTimeoutMs (180s), sonst reißt der
+    // Watchdog ein noch gültiges, unbescanntes QR-Fenster vorzeitig ein und
+    // erzeugt einen endlosen "neuer QR alle ~90s"-Loop samt Fehlalarmen.
+    stuckMs: 220_000, // "nicht verbunden & kein Fortschritt" so lange = hängt → neu anstoßen
   },
 
   // ── Spiele ─────────────────────────────────────────────────────
