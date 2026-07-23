@@ -170,6 +170,22 @@ export const config = {
     startBalance: 10000, // Startguthaben beim ersten Kontakt
   },
 
+  // ── !rauben ────────────────────────────────────────────────────
+  // Level = XP-Level in der Gruppe (schreiben schaltet höhere Beträge frei).
+  rob: {
+    minLevel: 5, // unter diesem Level kann man !rauben gar nicht benutzen
+    cooldownMs: 4 * 60 * 60_000, // 4h Pause zwischen zwei Raubversuchen (pro Gruppe)
+    baseAmount: 100, // maximal raubbarer Betrag bei genau minLevel
+    perLevelAmount: 40, // + so viel Maximalbetrag pro Level über minLevel
+    capAmount: 5_000, // absolute Obergrenze, egal wie hoch das Level ist
+    minTargetBalance: 300, // Ziel muss mindestens so viel besitzen, um raubbar zu sein
+    baseSuccessChance: 0.5, // Erfolgschance bei gleichem Level wie das Ziel
+    levelDiffFactor: 0.02, // je Level Unterschied (Räuber ggü. Ziel) +/- 2% Chance
+    minSuccessChance: 0.15,
+    maxSuccessChance: 0.75,
+    failPenaltyPct: 0.5, // bei Fehlschlag: so viel % des Versuchsbetrags gehen ans Ziel
+  },
+
   // ── Umfragen ───────────────────────────────────────────────────
   polls: {
     maxOptions: 6,
